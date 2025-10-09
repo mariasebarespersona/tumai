@@ -1,5 +1,5 @@
 from __future__ import annotations
-import io, mimetypes, os
+import io, mimetypes, os, re
 from typing import Dict, List, Optional, Tuple
 from .supabase_client import sb, BUCKET
 from .utils import docs_schema, utcnow_iso
@@ -7,25 +7,45 @@ from .utils import docs_schema, utcnow_iso
 # -------- classification proposal (simple heuristic + LLM-friendly output) -----
 DOC_GROUPS = {
     "Compra": ["escritura", "registro", "arras", "impuesto", "contrato privado", "itp", "iba"],
-    "Reforma:Docs diseño": ["mapas", "planos", "arquitecto", "aparejador", "licencia"],
+    "Reforma:Docs diseño": ["contrato arquitecto", "mapas", "planos", "arquitecto", "aparejador", "licencia"],
     "Reforma:Docs obra": ["constructor", "contrato constructor"],
     "Reforma:Docs facturas": ["factura", "fontaneria", "electricista", "calefaccion", "carpinteria", "diseño"],
     "Reforma:Docs registro obra nueva": ["registro documento", "documento de impuestos"],
     "Venta": ["certificacion"],
 }
 
+# Mapear keywords a nombres canónicos EXACTOS de las celdas existentes en BD
+KEYWORD_TO_DOCNAME = {
+    "contrato arquitecto": "Contrato arquitecto",
+    "contrato aparejador": "Contrato aparejador",
+    "contrato constructor": "Contrato constructor",
+}
+
+
+def _normalize(text: str) -> str:
+    # Lowercase and collapse non-alnum to spaces for robust keyword matches
+    t = (text or "").lower()
+    return re.sub(r"[^a-z0-9áéíóúüñ]+", " ", t)
+
 
 def propose_slot(filename: str, text_hint: str = "") -> Dict:
-    fn = filename.lower()
+    fn = _normalize(filename)
+    hint = _normalize(text_hint)
     best = "Compra", "", "Contrato privado"
     for key, kws in DOC_GROUPS.items():
-        score = sum(1 for kw in kws if kw in fn or kw in text_hint.lower())
+        # Prefer longer keywords first (e.g., "contrato arquitecto" before "arquitecto")
+        skws = sorted(kws, key=lambda s: -len(s))
+        score = sum(1 for kw in skws if (kw in fn) or (kw in hint))
         if score > 0:
             parts = key.split(":")
             group = parts[0]
             subgroup = parts[1] if len(parts) > 1 else ""
-            # naive doc_name guess
-            doc_name = next((kw.capitalize() for kw in kws if kw in fn), "Documento")
+            # choose the first matching keyword by length
+            matched = next((kw for kw in skws if (kw in fn) or (kw in hint)), None)
+            if matched:
+                doc_name = KEYWORD_TO_DOCNAME.get(matched, matched.title())
+            else:
+                doc_name = "Documento"
             return {"document_group": group, "document_subgroup": subgroup, "document_name": doc_name}
     return {"document_group": best[0], "document_subgroup": best[1], "document_name": best[2]}
 
@@ -58,15 +78,29 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
     }
 
     try:
-        # Preferred path when PostgREST expone el esquema
+        # Preferred path cuando PostgREST expone el esquema
         sb.postgrest.schema = schema
+        # Verifica que la celda objetivo exista; si no, aborta (no se crean nuevas celdas)
+        existing = (sb.table("documents")
+                      .select("id,storage_key,document_name")
+                      .eq("property_id", property_id)
+                      .eq("document_group", document_group)
+                      .eq("document_subgroup", sg)
+                      .eq("document_name", document_name)
+                      .limit(1)
+                      .execute()).data
+        if not existing:
+            raise ValueError(
+                f"La celda no existe: {document_group} / {sg} / {document_name}."
+            )
+
         (sb.table("documents")
-          .update(upd)
-          .eq("property_id", property_id)
-          .eq("document_group", document_group)
-          .eq("document_subgroup", sg)
-          .eq("document_name", document_name)
-          .execute())
+           .update(upd)
+           .eq("property_id", property_id)
+           .eq("document_group", document_group)
+           .eq("document_subgroup", sg)
+           .eq("document_name", document_name)
+           .execute())
     except Exception:
         # Fallback via RPC when per-property schema is not exposed to PostgREST
         payload = {
@@ -82,7 +116,7 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
         }
         sb.rpc("update_property_document_link", payload).execute()
 
-    return {"storage_key": key, "signed_url": signed.get("signedURL")}
+    return {"storage_key": key, "signed_url": signed.get("signedURL"), "document_name": document_name}
 
 
 def list_docs(property_id: str) -> List[Dict]:
@@ -125,3 +159,26 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
         if not key:
             raise ValueError("No file stored for that document cell")
     return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
+
+
+def slot_exists(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
+    """Check whether a (group, subgroup, name) cell exists in the per-property documents table.
+    Returns {exists: bool, candidates: [names available in that group/subgroup]}.
+    """
+    schema = docs_schema(property_id)
+    sg = document_subgroup or ""
+    try:
+        sb.postgrest.schema = schema
+        rows = (sb.table("documents")
+                  .select("document_name")
+                  .eq("property_id", property_id)
+                  .eq("document_group", document_group)
+                  .eq("document_subgroup", sg)
+                  .execute()).data
+        names = [r["document_name"] for r in rows]
+        return {"exists": document_name in names, "candidates": names}
+    except Exception:
+        # Fallback via RPC that lists documents and we filter client-side
+        rows = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data
+        names = [r["document_name"] for r in rows if r.get("document_group") == document_group and (r.get("document_subgroup") or "") == sg]
+        return {"exists": document_name in names, "candidates": names}

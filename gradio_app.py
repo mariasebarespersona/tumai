@@ -6,9 +6,9 @@ import gradio as gr
 from agentic import build_graph
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
 from tools.property_tools import search_properties as db_search_properties
-from tools.docs_tools import propose_slot, upload_and_link, list_docs
+from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists
 from tools.registry import transcribe_audio_tool  # decorator tool (Google STT)
-from tools.rag_tool import summarize_document as rag_summarize
+from tools.rag_tool import summarize_document as rag_summarize, qa_document as rag_qa
 
 agent = build_graph()
 
@@ -22,6 +22,8 @@ STATE = {
     "last_uploaded_doc": None,  # remembers last uploaded doc triple for quick follow-ups
     "session_id": str(uuid.uuid4()),
     "pending_create": False,  # awaiting name+address to create a property
+    "last_listed_docs": [],   # cached list of doc lines for pagination
+    "docs_list_pointer": 0,   # current pagination index
 }
 
 def _extract_final_ai_message(out: dict) -> str:
@@ -80,8 +82,13 @@ def _wants_list_properties(text: str) -> bool:
 
 def _wants_missing_docs(text: str) -> bool:
     t = _normalize(text)
+    patterns = [
+        "falta", "faltan", "pendiente", "pendientes", "por subir",
+        "necesito", "tengo que subir", "debo subir",
+        "no he subido", "aun no he subido", "aún no he subido", "todavia no he subido", "todavía no he subido",
+    ]
     return (
-        ("documentos" in t and any(x in t for x in ("falta", "faltan", "necesito", "tengo que subir", "debo subir", "subir")))
+        ("documentos" in t and any(x in t for x in patterns))
         or re.search(r"\b(what|which)\s+documents\b", t) is not None
         or "documents to upload" in t
     )
@@ -89,10 +96,23 @@ def _wants_missing_docs(text: str) -> bool:
 
 def _wants_uploaded_docs(text: str) -> bool:
     t = _normalize(text)
+    # Avoid matching phrases that imply missing/pending uploads
+    negatives = [
+        "no he subido", "aun no he subido", "aún no he subido",
+        "todavia no he subido", "todavía no he subido",
+        "no subidos", "no subido", "pendiente", "pendientes", "por subir",
+    ]
+    if any(neg in t for neg in negatives):
+        return False
     return (
         ("documentos" in t and any(x in t for x in ("subido", "subidos", "cargado", "cargados", "ya", "he subido", "subi")))
         or ("documents" in t and ("uploaded" in t or "already" in t or "have uploaded" in t))
     )
+
+
+def _wants_more(text: str) -> bool:
+    t = _normalize(text)
+    return any(p in t for p in ("mas", "más", "siguiente", "more", "next", "otro", "otra", "otra cosa"))
 
 
 def _wants_summary_this(text: str) -> bool:
@@ -101,6 +121,43 @@ def _wants_summary_this(text: str) -> bool:
         ("resumen" in t or "resumeme" in t or "resume" in t or "sumariza" in t or "summary" in t)
         and ("este" in t or "ese" in t or "this" in t or "that" in t or "documento" in t or "document" in t)
     )
+
+
+def _match_document_from_text(pid: str, text: str):
+    """Best-effort: find a document mentioned in free text by matching tokens
+    against `document_name`, and weakly against group/subgroup.
+    Returns {group, subgroup, name} or None.
+    """
+    try:
+        rows = list_docs(pid)
+    except Exception:
+        return None
+    t = _normalize(text)
+    best = None
+    best_score = 0
+    for r in rows:
+        if not r.get("storage_key"):
+            continue
+        name = _normalize(r.get("document_name", ""))
+        group = _normalize(r.get("document_group", ""))
+        subgroup = _normalize(r.get("document_subgroup", ""))
+        score = 0
+        if name and all(tok in t for tok in name.split()):
+            score += 3
+        elif name and any(tok in t for tok in name.split()):
+            score += 2
+        if subgroup and any(tok in t for tok in subgroup.split()):
+            score += 1
+        if group and any(tok in t for tok in group.split()):
+            score += 1
+        if score > best_score:
+            best_score = score
+            best = {
+                "document_group": r.get("document_group", ""),
+                "document_subgroup": r.get("document_subgroup", ""),
+                "document_name": r.get("document_name", ""),
+            }
+    return best if best_score >= 2 else None
 
 
 def _wants_property_search(text: str) -> bool:
@@ -304,12 +361,17 @@ def respond(user_text, history, files):
             return messages, gr.update(value=None), gr.update(value="")
         try:
             rows = list_docs(pid)
-            uploaded = [
-                r for r in rows if r.get('storage_key')
-            ]
+            uploaded = [r for r in rows if r.get('storage_key')]
             if uploaded:
-                lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in uploaded]
-                reply = "Documentos ya subidos:\n" + "\n".join(lines)
+                # Pagina de 5 en 5 y habilita "más"
+                STATE["last_listed_docs"] = [
+                    f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in uploaded
+                ]
+                STATE["docs_list_pointer"] = 0
+                chunk = STATE["last_listed_docs"][0:5]
+                STATE["docs_list_pointer"] = len(chunk)
+                more_hint = "\n\nEscribe 'más' para ver más." if len(STATE["last_listed_docs"]) > STATE["docs_list_pointer"] else ""
+                reply = "Documentos ya subidos:\n" + "\n".join(chunk) + more_hint
                 # Si hay exactamente uno, guarda referencia para follow-up (resumen, abrir, etc.)
                 if len(uploaded) == 1:
                     u = uploaded[0]
@@ -329,7 +391,7 @@ def respond(user_text, history, files):
     # Follow-up: summarize the last uploaded document quickly
     if _wants_summary_this(user_text):
         pid = STATE.get("property_id")
-        ref = STATE.get("last_uploaded_doc")
+        ref = STATE.get("last_uploaded_doc") or (_match_document_from_text(pid, user_text) if pid else None)
         if pid and ref:
             try:
                 out = rag_summarize(pid, ref["document_group"], ref.get("document_subgroup", ""), ref["document_name"])
@@ -339,6 +401,33 @@ def respond(user_text, history, files):
                 messages.append({"role": "assistant", "content": f"No he podido resumir el documento: {e}"})
                 return messages, gr.update(value=None), gr.update(value="")
         # si no hay referencia, cae al flujo normal/agent
+
+    # Quick QA on a specific document if the user asks a question mentioning it
+    if any(q in _normalize(user_text) for q in ("lee el", "cuando", "cuándo", "que pone", "qué pone", "dime", "pregunta")):
+        pid = STATE.get("property_id")
+        ref = STATE.get("last_uploaded_doc") or (_match_document_from_text(pid, user_text) if pid else None)
+        if pid and ref:
+            try:
+                out = rag_qa(pid, ref["document_group"], ref.get("document_subgroup", ""), ref["document_name"], question=user_text)
+                messages.append({"role": "assistant", "content": out.get("answer", "(sin respuesta)")})
+                return messages, gr.update(value=None), gr.update(value="")
+            except Exception as e:
+                messages.append({"role": "assistant", "content": f"No he podido leer/responder sobre el documento: {e}"})
+                return messages, gr.update(value=None), gr.update(value="")
+
+    # Pagination: user asked for "más" after listing documents
+    if _wants_more(user_text) and STATE.get("last_listed_docs"):
+        docs = STATE["last_listed_docs"]
+        ptr = STATE.get("docs_list_pointer", 0)
+        if ptr < len(docs):
+            next_chunk = docs[ptr:ptr+5]
+            STATE["docs_list_pointer"] = ptr + len(next_chunk)
+            more_hint = "\n\nEscribe 'más' para ver más." if len(docs) > STATE["docs_list_pointer"] else ""
+            messages.append({"role": "assistant", "content": "Más documentos:\n" + "\n".join(next_chunk) + more_hint})
+            return messages, gr.update(value=None), gr.update(value="")
+        else:
+            messages.append({"role": "assistant", "content": "No hay más documentos para mostrar."})
+            return messages, gr.update(value=None), gr.update(value="")
 
     # Bilingual fallback: which documents are missing / need to upload
     if _wants_missing_docs(user_text):
@@ -372,6 +461,20 @@ def respond(user_text, history, files):
                 data = f.read()
             fname = os.path.basename(fp)
             proposal = propose_slot(fname, text_hint=user_text or "")
+            # UI-side guard: check that the proposed slot exists; if no, include hint
+            pid = STATE.get("property_id")
+            slot_hint = ""
+            if pid:
+                try:
+                    chk = slot_exists(pid, proposal["document_group"], proposal.get("document_subgroup", ""), proposal["document_name"])
+                    if not (chk or {}).get("exists"):
+                        cand = (chk or {}).get("candidates", [])
+                        if cand:
+                            slot_hint = f" (nota: no existe esa celda, candidatos: {', '.join(cand[:5])})"
+                        else:
+                            slot_hint = " (nota: no existe esa celda en este grupo/subgrupo)"
+                except Exception:
+                    pass
             pending_list.append({"filename": fname, "data": data, "proposal": proposal})
         STATE["pending_files"] = pending_list
         lines = []
@@ -391,6 +494,7 @@ def respond(user_text, history, files):
                 messages.append({"role": "assistant", "content": "No hay propiedad activa. Crea una primero (p. ej., 'nombre: X dirección: Y')."})
                 return messages, gr.update(value=None), gr.update(value="")
             uploaded_msgs = []
+            last_ref = None
             for p in STATE["pending_files"]:
                 prop = p["proposal"]
                 out = upload_and_link(
@@ -402,8 +506,19 @@ def respond(user_text, history, files):
                     prop["document_name"],
                     {},
                 )
-                uploaded_msgs.append(f"✅ Subido '{prop['document_name']}'. URL firmada (1h): {out.get('signed_url')}")
+                show_name = out.get("document_name") or prop["document_name"]
+                uploaded_msgs.append(f"✅ Subido '{show_name}'. URL firmada (1h): {out.get('signed_url')}")
+                last_ref = {
+                    "document_group": prop["document_group"],
+                    "document_subgroup": prop.get("document_subgroup", ""),
+                    "document_name": show_name,
+                }
+                # Invalida cache de listados para que "más" se regenere con todos
+                STATE["last_listed_docs"] = []
+                STATE["docs_list_pointer"] = 0
             STATE["pending_files"] = []
+            if last_ref:
+                STATE["last_uploaded_doc"] = last_ref
             messages.append({"role": "assistant", "content": "\n".join(uploaded_msgs)})
             return messages, gr.update(value=None), gr.update(value="")
         elif any(w in text_lower for w in ("no", "cancel", "change", "different")):
@@ -431,7 +546,12 @@ def respond(user_text, history, files):
     pid = STATE.get("property_id")
     thread_id = f"property-{pid}" if pid else f"session-{STATE['session_id']}"
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
-    out = agent.invoke({"input": user_text, "property_id": pid}, config=config)
+    # Pass last uploaded doc as agent context so it can run qa_document on follow-up questions
+    last_ref = STATE.get("last_uploaded_doc") or None
+    payload = {"input": user_text, "property_id": pid}
+    if last_ref:
+        payload["last_doc_ref"] = last_ref
+    out = agent.invoke(payload, config=config)
 
     pid_out = out.get("property_id") or ((out.get("tool_result") or {}).get("id") if isinstance(out.get("tool_result"), dict) else None)
     extra = ""

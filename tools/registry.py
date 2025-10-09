@@ -13,12 +13,13 @@ from .docs_tools import (
     upload_and_link as _upload_and_link,
     list_docs as _list_docs,
     signed_url_for as _signed_url_for,
+    slot_exists as _slot_exists,
 )
 from .numbers_tools import set_number as _set_number, get_numbers as _get_numbers, calc_numbers as _calc_numbers
 from .summary_tools import get_summary_spec as _get_summary_spec, upsert_summary_value as _upsert_summary_value, compute_summary as _compute_summary
 from .email_tool import send_email as _send_email
 from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google
-from .rag_tool import summarize_document as _summarize_document
+from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document
 
 # ---------- Schemas ----------
 
@@ -90,6 +91,18 @@ class SignedUrlInput(BaseModel):
 def signed_url_for_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
     """Create a short-lived signed URL for a stored document."""
     return {"signed_url": _signed_url_for(property_id, document_group, document_subgroup, document_name)}
+
+
+class SlotExistsInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str = ""
+    document_name: str
+
+@tool("slot_exists")
+def slot_exists_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
+    """Check if a document slot exists in the per-property documents framework (and list available names)."""
+    return _slot_exists(property_id, document_group, document_subgroup, document_name)
 
 
 class SetNumberInput(BaseModel):
@@ -238,6 +251,20 @@ def summarize_document_tool(property_id: str, document_group: str, document_subg
     """Fetches the document via signed URL and returns a short summary. Use when the user asks to summarize a specific document."""
     return _summarize_document(property_id, document_group, document_subgroup, document_name, model, max_sentences)
 
+# --- question-answer on a specific document ---
+class QADocumentInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str = ""
+    document_name: str
+    question: str
+    model: Optional[str] = None
+
+@tool("qa_document")
+def qa_document_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str, question: str, model: Optional[str] = None) -> Dict:
+    """Answer a focused question about a single stored document in Spanish."""
+    return _qa_document(property_id, document_group, document_subgroup, document_name, question, model)
+
 # Export the registry
 TOOLS = [
     add_property_tool,
@@ -260,4 +287,6 @@ TOOLS = [
     list_properties_tool,          # NEW
     search_properties_tool,        # NEW
     summarize_document_tool,       # NEW
+    qa_document_tool,              # NEW
+    slot_exists_tool,              # NEW
 ]

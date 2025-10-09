@@ -1,6 +1,6 @@
 from __future__ import annotations
-import io, requests, zipfile
-from typing import Dict
+import io, requests, zipfile, datetime as dt
+from typing import Dict, Optional
 from urllib.parse import urlparse
 from os.path import splitext
 from xml.etree import ElementTree as ET
@@ -85,3 +85,32 @@ def summarize_document(property_id: str, group: str, subgroup: str, name: str, m
     )
     summary = llm.invoke(prompt).content
     return {"summary": summary, "signed_url": url}
+
+
+def qa_document(property_id: str, group: str, subgroup: str, name: str, question: str, model: Optional[str] = None, max_chars: int = 60000) -> Dict:
+    """Answer a focused question about a single stored document.
+
+    Fetches the document via a signed URL, extracts text, and uses an LLM to
+    answer the user's question in Spanish. Returns an answer and the signed URL.
+    """
+    url = signed_url_for(property_id, group, subgroup, name, expires=600)
+    resp = requests.get(url)
+    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+
+    if not text.strip():
+        return {
+            "answer": "No se pudo extraer texto del documento (podría ser una imagen o un formato no compatible).",
+            "signed_url": url,
+        }
+
+    today = dt.date.today().isoformat()
+    text = text[:max_chars]
+    llm = ChatOpenAI(model=model or "gpt-4o-mini")
+    prompt = (
+        "Eres un asistente legal/administrativo. Responde en español con una frase clara y directa. "
+        "Si el documento no contiene la información solicitada, di explícitamente que no aparece. "
+        f"Hoy es {today}. Pregunta del usuario: {question}\n\n"
+        "Texto del documento (parcial):\n" + text
+    )
+    answer = llm.invoke(prompt).content
+    return {"answer": answer, "signed_url": url}
