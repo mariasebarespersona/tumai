@@ -1,0 +1,28 @@
+# requirements.clean.txt
+fastapi==0.114.2
+uvicorn==0.30.6
+
+# Gradio stack (schema mismatch fix)
+gradio>=4.0.0,<4.44.0
+
+jsonschema>=4.22.0
+httpx>=0.27.0
+
+# LangGraph + LC core WITHOUT installing the "langchain" meta package
+langgraph==0.2.45
+langgraph-checkpoint==2.0.21
+langchain-core>=0.2.43,<0.3.0
+langchain-openai>=0.1.23
+langsmith==0.1.144
+
+# Supabase + realtime needs websockets>=13
+supabase==2.7.3
+websockets>=13.0,<14.0
+
+# the rest of your deps
+python-dotenv
+pypdf
+pandas
+requests
+schedule
+python-dateutil

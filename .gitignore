@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+
+# Local data / cache
+*.sqlite
+*.db
+*.log
+
+# Credentials and service files
+*.key
+*.pem
+
+# Python tooling
+.build/
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+
+# Node/gradio temp
+node_modules/
