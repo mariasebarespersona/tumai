@@ -186,11 +186,20 @@ def qa_with_citations(property_id: str, query: str, top_k: int = 5, model: str |
     context = "\n\n".join([f"[#{i}] {h['document_group']} / {h.get('document_subgroup','')} / {h['document_name']} (chunk {h['chunk_index']}):\n{h['text']}" for i, h in enumerate(ctx_hits, 1)])
 
     prompt = (
-        "Responde en español de forma breve y directa a la pregunta del usuario usando exclusivamente el contexto."
-        " Si no está en el contexto, responde 'No aparece en los documentos'.\n\n"
-        f"Pregunta: {query}\n\nContexto:\n{context}"
+        "Eres un asistente experto en análisis de documentos. Responde en español de forma clara y completa.\n"
+        "Tu tarea es responder a la pregunta del usuario usando SOLO la información del contexto proporcionado.\n\n"
+        "INSTRUCCIONES:\n"
+        "- Lee cuidadosamente todos los fragmentos del contexto\n"
+        "- Busca información relevante que responda directa o indirectamente la pregunta\n"
+        "- Si encuentras información relevante, responde de forma completa y natural\n"
+        "- Si la pregunta es sobre pagos, fechas, formas de pago, etc., extrae TODA la información relacionada\n"
+        "- Incluye detalles específicos como fechas, cantidades, métodos de pago, plazos, etc.\n"
+        "- Solo responde 'No aparece en los documentos' si realmente no hay NINGUNA información relacionada\n\n"
+        f"PREGUNTA: {query}\n\n"
+        f"CONTEXTO:\n{context}\n\n"
+        "RESPUESTA:"
     )
-    llm = ChatOpenAI(model=model or "gpt-4o-mini")
+    llm = ChatOpenAI(model=model or "gpt-4o", temperature=0)
     answer = llm.invoke(prompt).content
     citations = [
         {
