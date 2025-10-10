@@ -19,7 +19,8 @@ from .numbers_tools import set_number as _set_number, get_numbers as _get_number
 from .summary_tools import get_summary_spec as _get_summary_spec, upsert_summary_value as _upsert_summary_value, compute_summary as _compute_summary
 from .email_tool import send_email as _send_email
 from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google
-from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document
+from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document, qa_payment_schedule as _qa_payment_schedule
+from .rag_index import index_document as _index_document, qa_with_citations as _qa_with_citations, index_all_documents as _index_all_documents
 
 # ---------- Schemas ----------
 
@@ -265,6 +266,49 @@ def qa_document_tool(property_id: str, document_group: str, document_subgroup: s
     """Answer a focused question about a single stored document in Spanish."""
     return _qa_document(property_id, document_group, document_subgroup, document_name, question, model)
 
+# --- payment schedule QA ---
+class QAPaymentScheduleInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str = ""
+    document_name: str
+    today_iso: Optional[str] = None
+
+@tool("qa_payment_schedule")
+def qa_payment_schedule_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str, today_iso: Optional[str] = None) -> Dict:
+    """Extract payment cadence and compute next due date based on the document text."""
+    return _qa_payment_schedule(property_id, document_group, document_subgroup, document_name, today_iso)
+
+# --- RAG indexing + QA with citations ---
+class IndexDocumentInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str = ""
+    document_name: str
+
+@tool("rag_index_document")
+def rag_index_document_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
+    """Fetches, splits and stores document chunks for retrieval QA."""
+    return _index_document(property_id, document_group, document_subgroup, document_name)
+
+class QAWithCitationsInput(BaseModel):
+    property_id: str
+    query: str
+    top_k: int = 5
+
+@tool("rag_qa_with_citations")
+def rag_qa_with_citations_tool(property_id: str, query: str, top_k: int = 5) -> Dict:
+    """RAG QA over indexed chunks; returns answer and citations."""
+    return _qa_with_citations(property_id, query, top_k)
+
+class IndexAllDocumentsInput(BaseModel):
+    property_id: str
+
+@tool("rag_index_all_documents")
+def rag_index_all_documents_tool(property_id: str) -> Dict:
+    """Index all documents with file for a property. Use at session start or when results seem incomplete."""
+    return _index_all_documents(property_id)
+
 # Export the registry
 TOOLS = [
     add_property_tool,
@@ -288,5 +332,9 @@ TOOLS = [
     search_properties_tool,        # NEW
     summarize_document_tool,       # NEW
     qa_document_tool,              # NEW
+    qa_payment_schedule_tool,      # NEW
+    rag_index_document_tool,       # NEW
+    rag_qa_with_citations_tool,    # NEW
+    rag_index_all_documents_tool,  # NEW
     slot_exists_tool,              # NEW
 ]

@@ -8,7 +8,7 @@ from tools.property_tools import list_frameworks, list_properties as db_list_pro
 from tools.property_tools import search_properties as db_search_properties
 from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists
 from tools.registry import transcribe_audio_tool  # decorator tool (Google STT)
-from tools.rag_tool import summarize_document as rag_summarize, qa_document as rag_qa
+from tools.rag_tool import summarize_document as rag_summarize, qa_document as rag_qa, qa_payment_schedule as rag_qa_pay
 
 agent = build_graph()
 
@@ -24,6 +24,7 @@ STATE = {
     "pending_create": False,  # awaiting name+address to create a property
     "last_listed_docs": [],   # cached list of doc lines for pagination
     "docs_list_pointer": 0,   # current pagination index
+    "rag_backfilled": False,   # whether we've indexed all docs once
 }
 
 def _extract_final_ai_message(out: dict) -> str:
@@ -120,6 +121,14 @@ def _wants_summary_this(text: str) -> bool:
     return (
         ("resumen" in t or "resumeme" in t or "resume" in t or "sumariza" in t or "summary" in t)
         and ("este" in t or "ese" in t or "this" in t or "that" in t or "documento" in t or "document" in t)
+    )
+
+
+def _wants_index_all(text: str) -> bool:
+    t = _normalize(text)
+    return (
+        ("indexa" in t or "indexar" in t or "reindexa" in t or "reindexar" in t)
+        and ("documentos" in t or "todo" in t or "todos" in t)
     )
 
 
@@ -353,6 +362,33 @@ def respond(user_text, history, files):
         messages.append({"role": "assistant", "content": "He encontrado estas propiedades:\n" + "\n".join(lines) + "\n\nResponde con el número o pega el id para continuar."})
         return messages, gr.update(value=None), gr.update(value="")
 
+    # Indexación manual bajo demanda
+    if _wants_index_all(user_text):
+        pid = STATE.get("property_id")
+        if not pid:
+            messages.append({"role": "assistant", "content": "Primero fija una propiedad para indexar sus documentos."})
+            return messages, gr.update(value=None), gr.update(value="")
+        try:
+            from tools.registry import rag_index_all_documents_tool as _idxall
+            out = _idxall.invoke({"property_id": pid})
+            STATE["rag_backfilled"] = True
+            extra = ""
+            if out.get("warning"):
+                extra = f"\nAviso: {out.get('warning')}"
+            if out.get("error"):
+                extra = f"\nError: {out.get('error')}"
+            detail_lines = []
+            for d in (out.get("details") or [])[:8]:
+                w = f" — {d.get('warning')}" if d.get('warning') else ""
+                e = f" — error: {d.get('error')}" if d.get('error') else ""
+                detail_lines.append(f"- {d.get('doc')} → {d.get('indexed',0)}{w}{e}")
+            details = ("\n" + "\n".join(detail_lines)) if detail_lines else ""
+            messages.append({"role": "assistant", "content": f"Indexación completada: {out.get('indexed', 0)} fragmentos.{extra}{details}"})
+            return messages, gr.update(value=None), gr.update(value="")
+        except Exception as e:
+            messages.append({"role": "assistant", "content": f"No pude indexar: {e}"})
+            return messages, gr.update(value=None), gr.update(value="")
+
     # Bilingual fallback: which documents are uploaded already
     if _wants_uploaded_docs(user_text):
         pid = STATE.get("property_id")
@@ -372,6 +408,11 @@ def respond(user_text, history, files):
                 STATE["docs_list_pointer"] = len(chunk)
                 more_hint = "\n\nEscribe 'más' para ver más." if len(STATE["last_listed_docs"]) > STATE["docs_list_pointer"] else ""
                 reply = "Documentos ya subidos:\n" + "\n".join(chunk) + more_hint
+                # Prepara selección numérica a partir del listado
+                STATE["search_hits"] = [
+                    {"id": r.get("document_name"), "name": r.get("document_name"), "address": f"{r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}"}
+                    for r in uploaded
+                ]
                 # Si hay exactamente uno, guarda referencia para follow-up (resumen, abrir, etc.)
                 if len(uploaded) == 1:
                     u = uploaded[0]
@@ -388,7 +429,7 @@ def respond(user_text, history, files):
             messages.append({"role": "assistant", "content": f"No he podido consultar los documentos: {e}"})
             return messages, gr.update(value=None), gr.update(value="")
 
-    # Follow-up: summarize the last uploaded document quickly
+    # Follow-up: summarize the last uploaded document quickly (or best match)
     if _wants_summary_this(user_text):
         pid = STATE.get("property_id")
         ref = STATE.get("last_uploaded_doc") or (_match_document_from_text(pid, user_text) if pid else None)
@@ -401,18 +442,43 @@ def respond(user_text, history, files):
                 messages.append({"role": "assistant", "content": f"No he podido resumir el documento: {e}"})
                 return messages, gr.update(value=None), gr.update(value="")
         # si no hay referencia, cae al flujo normal/agent
+    # Generic summary intent (RAG) when user says "hazme un resumen del contrato X"
+    if re.search(r"(?i)resumen|resume|resumeme|resúmeme", user_text):
+        pid = STATE.get("property_id")
+        if pid:
+            try:
+                from tools.registry import rag_qa_with_citations_tool as _ragqa
+                qa = _ragqa.invoke({"property_id": pid, "query": user_text, "top_k": 6})
+                messages.append({"role": "assistant", "content": qa.get("answer", "(sin respuesta)")})
+                return messages, gr.update(value=None), gr.update(value="")
+            except Exception:
+                pass
 
-    # Quick QA on a specific document if the user asks a question mentioning it
-    if any(q in _normalize(user_text) for q in ("lee el", "cuando", "cuándo", "que pone", "qué pone", "dime", "pregunta")):
+    # Check if user is asking a question about a specific document
+    # Priority: use RAG QA with citations for ANY question about ANY document
+    qnorm = _normalize(user_text)
+    question_words = ["qué", "que", "cual", "cuál", "cuando", "cuándo", "donde", "dónde", 
+                      "cómo", "como", "por qué", "porque", "cuanto", "cuánto", "cuanta", "cuánta",
+                      "quien", "quién", "lee el", "que pone", "qué pone", "que dice", "qué dice",
+                      "dime", "explicame", "explícame"]
+    is_question = any(w in qnorm for w in question_words)
+    
+    if is_question:
         pid = STATE.get("property_id")
         ref = STATE.get("last_uploaded_doc") or (_match_document_from_text(pid, user_text) if pid else None)
         if pid and ref:
             try:
-                out = rag_qa(pid, ref["document_group"], ref.get("document_subgroup", ""), ref["document_name"], question=user_text)
-                messages.append({"role": "assistant", "content": out.get("answer", "(sin respuesta)")})
+                from tools.registry import rag_qa_with_citations_tool as _ragqa
+                qa = _ragqa.invoke({"property_id": pid, "query": user_text, "top_k": 6})
+                ans = qa.get("answer", "(sin respuesta)")
+                cits = qa.get("citations") or []
+                if cits:
+                    lines = [f"- {c['document_group']} / {c.get('document_subgroup','')} / {c['document_name']} (trozo {c['chunk_index']})" for c in cits]
+                    ans += "\n\nFuentes:\n" + "\n".join(lines)
+                messages.append({"role": "assistant", "content": ans})
                 return messages, gr.update(value=None), gr.update(value="")
             except Exception as e:
-                messages.append({"role": "assistant", "content": f"No he podido leer/responder sobre el documento: {e}"})
+                messages.append({"role": "assistant", "content": f"No he podido responder: {e}"})
                 return messages, gr.update(value=None), gr.update(value="")
 
     # Pagination: user asked for "más" after listing documents
@@ -513,6 +579,17 @@ def respond(user_text, history, files):
                     "document_subgroup": prop.get("document_subgroup", ""),
                     "document_name": show_name,
                 }
+                # Try to index the document for RAG (best effort)
+                try:
+                    from tools.registry import rag_index_document_tool as _idx
+                    _ = _idx.invoke({
+                        "property_id": pid,
+                        "document_group": prop["document_group"],
+                        "document_subgroup": prop.get("document_subgroup", ""),
+                        "document_name": show_name,
+                    })
+                except Exception:
+                    pass
                 # Invalida cache de listados para que "más" se regenere con todos
                 STATE["last_listed_docs"] = []
                 STATE["docs_list_pointer"] = 0
@@ -540,6 +617,41 @@ def respond(user_text, history, files):
                 return messages, gr.update(value=None), gr.update(value="")
             except Exception as e:
                 messages.append({"role": "assistant", "content": f"No he podido crear la propiedad: {e}"})
+                return messages, gr.update(value=None), gr.update(value="")
+
+    # If the user asks an open question unrelated to UI-specific intents → use RAG QA with citations by default
+    if not any([
+        _wants_list_properties(user_text),
+        _wants_property_search(user_text),
+        _wants_uploaded_docs(user_text),
+        _wants_missing_docs(user_text),
+        _wants_index_all(user_text),
+        files,
+        STATE.get("pending_files"),
+        STATE.get("pending_create"),
+    ]):
+        pid = STATE.get("property_id")
+        if pid and user_text.strip():
+            # Si aún no hemos backfilleado, intenta una vez
+            if not STATE.get("rag_backfilled"):
+                try:
+                    from tools.registry import rag_index_all_documents_tool as _idxall
+                    _idxall.invoke({"property_id": pid})
+                    STATE["rag_backfilled"] = True
+                except Exception:
+                    pass
+            try:
+                from tools.registry import rag_qa_with_citations_tool as _ragqa
+                qa = _ragqa.invoke({"property_id": pid, "query": user_text, "top_k": 5})
+                ans = qa.get("answer", "(sin respuesta)")
+                cits = qa.get("citations") or []
+                if cits:
+                    lines = [f"- {c['document_group']} / {c.get('document_subgroup','')} / {c['document_name']} (trozo {c['chunk_index']})" for c in cits]
+                    ans += "\n\nFuentes:\n" + "\n".join(lines)
+                messages.append({"role": "assistant", "content": ans})
+                return messages, gr.update(value=None), gr.update(value="")
+            except Exception as e:
+                messages.append({"role": "assistant", "content": f"No he podido ejecutar RAG QA: {e}"})
                 return messages, gr.update(value=None), gr.update(value="")
 
     # Normal agent chat flow
