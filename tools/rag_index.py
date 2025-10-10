@@ -103,16 +103,31 @@ def _score_lexical(text: str, query_tokens: List[str]) -> float:
     return score
 
 
-def search_chunks(property_id: str, query: str, limit: int = 30) -> List[Dict[str, Any]]:
+def search_chunks(property_id: str, query: str, limit: int = 30, document_name: str | None = None, document_group: str | None = None, document_subgroup: str | None = None) -> List[Dict[str, Any]]:
     """Simple lexical retrieval across rag_chunks for this property.
     Returns a list of {meta..., text, score} sorted by score.
+    Optionally filter by document_name, document_group, document_subgroup.
     """
     try:
-        rows = sb.table("rag_chunks").select("property_id,document_group,document_subgroup,document_name,chunk_index,text,embedding").eq("property_id", property_id).execute().data
+        q = sb.table("rag_chunks").select("property_id,document_group,document_subgroup,document_name,chunk_index,text,embedding").eq("property_id", property_id)
+        if document_name:
+            q = q.eq("document_name", document_name)
+        if document_group:
+            q = q.eq("document_group", document_group)
+        if document_subgroup:
+            q = q.eq("document_subgroup", document_subgroup)
+        rows = q.execute().data
     except Exception:
         # Fallback when embedding column doesn't exist
         try:
-            rows = sb.table("rag_chunks").select("property_id,document_group,document_subgroup,document_name,chunk_index,text").eq("property_id", property_id).execute().data
+            q = sb.table("rag_chunks").select("property_id,document_group,document_subgroup,document_name,chunk_index,text").eq("property_id", property_id)
+            if document_name:
+                q = q.eq("document_name", document_name)
+            if document_group:
+                q = q.eq("document_group", document_group)
+            if document_subgroup:
+                q = q.eq("document_subgroup", document_subgroup)
+            rows = q.execute().data
         except Exception:
             rows = []
     if not rows:
@@ -159,11 +174,12 @@ def search_chunks(property_id: str, query: str, limit: int = 30) -> List[Dict[st
     return scored[:limit]
 
 
-def qa_with_citations(property_id: str, query: str, top_k: int = 5, model: str | None = None) -> Dict[str, Any]:
+def qa_with_citations(property_id: str, query: str, top_k: int = 5, model: str | None = None, document_name: str | None = None, document_group: str | None = None, document_subgroup: str | None = None) -> Dict[str, Any]:
     """Answer a question using retrieved chunks; return answer and citations.
     Citations: list of {group, subgroup, name, chunk_index}.
+    Optionally filter by document_name, document_group, document_subgroup to search only in specific document(s).
     """
-    hits = search_chunks(property_id, query, limit=60)
+    hits = search_chunks(property_id, query, limit=60, document_name=document_name, document_group=document_group, document_subgroup=document_subgroup)
     if not hits:
         return {"answer": "No he encontrado información relevante en los documentos indexados."}
     ctx_hits = hits[:top_k]

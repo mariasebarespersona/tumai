@@ -295,11 +295,14 @@ class QAWithCitationsInput(BaseModel):
     property_id: str
     query: str
     top_k: int = 5
+    document_name: str | None = None
+    document_group: str | None = None
+    document_subgroup: str | None = None
 
 @tool("rag_qa_with_citations")
-def rag_qa_with_citations_tool(property_id: str, query: str, top_k: int = 5) -> Dict:
-    """RAG QA over indexed chunks; returns answer and citations."""
-    return _qa_with_citations(property_id, query, top_k)
+def rag_qa_with_citations_tool(property_id: str, query: str, top_k: int = 5, document_name: str | None = None, document_group: str | None = None, document_subgroup: str | None = None) -> Dict:
+    """RAG QA over indexed chunks; returns answer and citations. Optionally filter by document_name, document_group, document_subgroup to search only in specific document(s)."""
+    return _qa_with_citations(property_id, query, top_k, document_name=document_name, document_group=document_group, document_subgroup=document_subgroup)
 
 class IndexAllDocumentsInput(BaseModel):
     property_id: str

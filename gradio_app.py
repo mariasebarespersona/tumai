@@ -142,6 +142,13 @@ def _match_document_from_text(pid: str, text: str):
     except Exception:
         return None
     t = _normalize(text)
+    
+    # Remove common connector words that don't help matching
+    stopwords = ["de", "del", "de la", "el", "la", "los", "las", "un", "una", "sobre", "para"]
+    t_clean = t
+    for sw in stopwords:
+        t_clean = t_clean.replace(f" {sw} ", " ")
+    
     best = None
     best_score = 0
     for r in rows:
@@ -150,15 +157,38 @@ def _match_document_from_text(pid: str, text: str):
         name = _normalize(r.get("document_name", ""))
         group = _normalize(r.get("document_group", ""))
         subgroup = _normalize(r.get("document_subgroup", ""))
+        
+        # Clean document name too
+        name_clean = name
+        for sw in stopwords:
+            name_clean = name_clean.replace(f" {sw} ", " ")
+        
         score = 0
-        if name and all(tok in t for tok in name.split()):
-            score += 3
-        elif name and any(tok in t for tok in name.split()):
-            score += 2
-        if subgroup and any(tok in t for tok in subgroup.split()):
-            score += 1
-        if group and any(tok in t for tok in group.split()):
-            score += 1
+        name_tokens = [tok for tok in name_clean.split() if len(tok) > 2]
+        
+        # Perfect match: all significant tokens present
+        if name_tokens and all(tok in t_clean for tok in name_tokens):
+            score += 5
+        # Good match: most tokens present
+        elif name_tokens:
+            matched = sum(1 for tok in name_tokens if tok in t_clean)
+            if matched >= len(name_tokens) * 0.7:  # 70% match
+                score += 4
+            elif matched >= 2:  # At least 2 keywords
+                score += 3
+            elif matched == 1:
+                score += 1
+        
+        # Bonus for subgroup/group match
+        if subgroup:
+            subgroup_tokens = [tok for tok in subgroup.split() if len(tok) > 2]
+            if any(tok in t_clean for tok in subgroup_tokens):
+                score += 1
+        if group:
+            group_tokens = [tok for tok in group.split() if len(tok) > 2]
+            if any(tok in t_clean for tok in group_tokens):
+                score += 0.5
+        
         if score > best_score:
             best_score = score
             best = {
@@ -166,7 +196,7 @@ def _match_document_from_text(pid: str, text: str):
                 "document_subgroup": r.get("document_subgroup", ""),
                 "document_name": r.get("document_name", ""),
             }
-    return best if best_score >= 2 else None
+    return best if best_score >= 3 else None
 
 
 def _wants_property_search(text: str) -> bool:
@@ -466,10 +496,23 @@ def respond(user_text, history, files):
     if is_question:
         pid = STATE.get("property_id")
         ref = STATE.get("last_uploaded_doc") or (_match_document_from_text(pid, user_text) if pid else None)
-        if pid and ref:
+        if pid:
             try:
                 from tools.registry import rag_qa_with_citations_tool as _ragqa
-                qa = _ragqa.invoke({"property_id": pid, "query": user_text, "top_k": 6})
+                # If we found a specific document reference, filter by it
+                if ref:
+                    qa = _ragqa.invoke({
+                        "property_id": pid, 
+                        "query": user_text, 
+                        "top_k": 6,
+                        "document_name": ref["document_name"],
+                        "document_group": ref["document_group"],
+                        "document_subgroup": ref.get("document_subgroup", "")
+                    })
+                else:
+                    # Search across all documents
+                    qa = _ragqa.invoke({"property_id": pid, "query": user_text, "top_k": 6})
+                
                 ans = qa.get("answer", "(sin respuesta)")
                 cits = qa.get("citations") or []
                 if cits:
