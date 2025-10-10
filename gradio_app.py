@@ -495,7 +495,8 @@ def respond(user_text, history, files):
     
     if is_question:
         pid = STATE.get("property_id")
-        ref = STATE.get("last_uploaded_doc") or (_match_document_from_text(pid, user_text) if pid else None)
+        # Prioritize document mentioned in current text over last uploaded doc
+        ref = (_match_document_from_text(pid, user_text) if pid else None) or STATE.get("last_uploaded_doc")
         if pid:
             try:
                 from tools.registry import rag_qa_with_citations_tool as _ragqa
