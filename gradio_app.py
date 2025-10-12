@@ -9,6 +9,7 @@ from tools.property_tools import search_properties as db_search_properties
 from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists
 from tools.registry import transcribe_audio_tool  # decorator tool (Google STT)
 from tools.rag_tool import summarize_document as rag_summarize, qa_document as rag_qa, qa_payment_schedule as rag_qa_pay
+from tools.email_tool import send_email
 
 agent = build_graph()
 
@@ -114,6 +115,25 @@ def _wants_uploaded_docs(text: str) -> bool:
 def _wants_more(text: str) -> bool:
     t = _normalize(text)
     return any(p in t for p in ("mas", "más", "siguiente", "more", "next", "otro", "otra", "otra cosa"))
+
+
+def _wants_email(text: str) -> bool:
+    """Detect if user wants to send something via email."""
+    t = _normalize(text)
+    patterns = [
+        "manda", "mandame", "envia", "enviame", "envía", "envíame",
+        "manda.*email", "manda.*correo", "envia.*email", "envia.*correo",
+        "por email", "por correo", "al email", "al correo",
+        "send.*email", "email.*this", "email me"
+    ]
+    return any(p in t for p in patterns) or re.search(r"\b(manda|envia|enviame|mandame|send)\b.*\b(email|correo|mail)\b", t) is not None
+
+
+def _extract_email(text: str) -> str | None:
+    """Extract email address from text."""
+    pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    match = re.search(pattern, text)
+    return match.group(0) if match else None
 
 
 def _wants_summary_this(text: str) -> bool:
@@ -329,6 +349,68 @@ def respond(user_text, history, files):
     if filenames:
         display_text = f"{user_text}\n\n📎 {', '.join(filenames)}"
     messages.append({"role": "user", "content": display_text})
+
+    # Handle email requests
+    if _wants_email(user_text) or STATE.get("pending_email"):
+        # Check if user provided email directly in the message
+        email = _extract_email(user_text)
+        
+        if STATE.get("pending_email"):
+            # We already asked for email, waiting for response
+            if email:
+                # Send the pending content
+                content_to_send = STATE.get("email_content", "")
+                subject = STATE.get("email_subject", "Información de RAMA AI")
+                try:
+                    send_email(
+                        to=[email],
+                        subject=subject,
+                        html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{content_to_send}</pre></body></html>"
+                    )
+                    messages.append({"role": "assistant", "content": f"✅ Email enviado correctamente a {email}"})
+                    # Clean up state
+                    STATE["pending_email"] = False
+                    STATE["email_content"] = None
+                    STATE["email_subject"] = None
+                    return messages, gr.update(value=None), gr.update(value="")
+                except Exception as e:
+                    messages.append({"role": "assistant", "content": f"❌ Error al enviar email: {e}"})
+                    STATE["pending_email"] = False
+                    return messages, gr.update(value=None), gr.update(value="")
+            else:
+                messages.append({"role": "assistant", "content": "No he podido extraer un email válido. Por favor, proporciona tu dirección de email (ejemplo: tu@email.com)"})
+                return messages, gr.update(value=None), gr.update(value="")
+        
+        elif _wants_email(user_text):
+            # User wants to send something by email
+            # Check if we have content from previous message
+            if len(messages) >= 2 and messages[-2].get("role") == "assistant":
+                # Get the last assistant message as the content to send
+                content = messages[-2].get("content", "")
+                if content and not any(x in content for x in ["No he podido", "No aparece en los documentos", "Error"]):
+                    # If email was provided in same message, send immediately
+                    if email:
+                        try:
+                            send_email(
+                                to=[email],
+                                subject="Información de RAMA AI",
+                                html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{content}</pre></body></html>"
+                            )
+                            messages.append({"role": "assistant", "content": f"✅ Email enviado correctamente a {email}"})
+                            return messages, gr.update(value=None), gr.update(value="")
+                        except Exception as e:
+                            messages.append({"role": "assistant", "content": f"❌ Error al enviar email: {e}"})
+                            return messages, gr.update(value=None), gr.update(value="")
+                    else:
+                        # Ask for email
+                        STATE["pending_email"] = True
+                        STATE["email_content"] = content
+                        STATE["email_subject"] = "Información de RAMA AI"
+                        messages.append({"role": "assistant", "content": "Por supuesto. ¿A qué dirección de email te lo envío?"})
+                        return messages, gr.update(value=None), gr.update(value="")
+            # No content to send
+            messages.append({"role": "assistant", "content": "¿Qué información te gustaría que te enviara por email?"})
+            return messages, gr.update(value=None), gr.update(value="")
 
     # Primero: listados generales de propiedades
     if _wants_list_properties(user_text):
