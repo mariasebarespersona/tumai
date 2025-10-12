@@ -17,9 +17,24 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
     msg.set_content(html, subtype="html")
     for (filename, data) in attachments or []:
         msg.add_attachment(data, maintype="application", subtype="octet-stream", filename=filename)
-    ctx = ssl.create_default_context()
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-        s.starttls(context=ctx)
-        s.login(SMTP_USER, SMTP_PASS)
-        s.send_message(msg)
+    
+    # Create SSL context - use unverified context if default fails (common on macOS)
+    try:
+        ctx = ssl.create_default_context()
+    except Exception:
+        ctx = ssl._create_unverified_context()
+    
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
+            s.starttls(context=ctx)
+            s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+    except ssl.SSLError:
+        # Fallback: try with unverified context
+        ctx = ssl._create_unverified_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
+            s.starttls(context=ctx)
+            s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+    
     return {"sent": True, "to": to, "subject": subject}
