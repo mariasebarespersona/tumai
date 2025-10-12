@@ -361,17 +361,44 @@ def respond(user_text, history, files):
                 # Send the pending content
                 content_to_send = STATE.get("email_content", "")
                 subject = STATE.get("email_subject", "Información de RAMA AI")
+                document_ref = STATE.get("email_document")
+                attachments = []
+                
+                # If there's a document reference, download and attach it
+                if document_ref:
+                    try:
+                        from tools.docs_tools import signed_url_for
+                        import requests
+                        pid = STATE.get("property_id")
+                        url = signed_url_for(
+                            pid,
+                            document_ref["document_group"],
+                            document_ref.get("document_subgroup", ""),
+                            document_ref["document_name"],
+                            expires=600
+                        )
+                        resp = requests.get(url)
+                        filename = document_ref["document_name"].replace(" ", "_") + ".pdf"
+                        attachments.append((filename, resp.content))
+                    except Exception as e:
+                        pass  # Continue without attachment if it fails
+                
                 try:
                     send_email(
                         to=[email],
                         subject=subject,
-                        html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{content_to_send}</pre></body></html>"
+                        html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{content_to_send}</pre></body></html>",
+                        attachments=attachments if attachments else None
                     )
-                    messages.append({"role": "assistant", "content": f"✅ Email enviado correctamente a {email}"})
+                    msg = f"✅ Email enviado correctamente a {email}"
+                    if attachments:
+                        msg += f"\n📎 Documento adjunto: {attachments[0][0]}"
+                    messages.append({"role": "assistant", "content": msg})
                     # Clean up state
                     STATE["pending_email"] = False
                     STATE["email_content"] = None
                     STATE["email_subject"] = None
+                    STATE["email_document"] = None
                     return messages, gr.update(value=None), gr.update(value="")
                 except Exception as e:
                     messages.append({"role": "assistant", "content": f"❌ Error al enviar email: {e}"})
@@ -383,6 +410,10 @@ def respond(user_text, history, files):
         
         elif _wants_email(user_text):
             # User wants to send something by email
+            # Check if user wants to send a document or just content
+            pid = STATE.get("property_id")
+            document_ref = _match_document_from_text(pid, user_text) if pid else None
+            
             # Check if we have content from previous message
             if len(messages) >= 2 and messages[-2].get("role") == "assistant":
                 # Get the last assistant message as the content to send
@@ -390,13 +421,35 @@ def respond(user_text, history, files):
                 if content and not any(x in content for x in ["No he podido", "No aparece en los documentos", "Error"]):
                     # If email was provided in same message, send immediately
                     if email:
+                        attachments = []
+                        if document_ref:
+                            try:
+                                from tools.docs_tools import signed_url_for
+                                import requests
+                                url = signed_url_for(
+                                    pid,
+                                    document_ref["document_group"],
+                                    document_ref.get("document_subgroup", ""),
+                                    document_ref["document_name"],
+                                    expires=600
+                                )
+                                resp = requests.get(url)
+                                filename = document_ref["document_name"].replace(" ", "_") + ".pdf"
+                                attachments.append((filename, resp.content))
+                            except Exception:
+                                pass
+                        
                         try:
                             send_email(
                                 to=[email],
                                 subject="Información de RAMA AI",
-                                html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{content}</pre></body></html>"
+                                html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{content}</pre></body></html>",
+                                attachments=attachments if attachments else None
                             )
-                            messages.append({"role": "assistant", "content": f"✅ Email enviado correctamente a {email}"})
+                            msg = f"✅ Email enviado correctamente a {email}"
+                            if attachments:
+                                msg += f"\n📎 Documento adjunto: {attachments[0][0]}"
+                            messages.append({"role": "assistant", "content": msg})
                             return messages, gr.update(value=None), gr.update(value="")
                         except Exception as e:
                             messages.append({"role": "assistant", "content": f"❌ Error al enviar email: {e}"})
@@ -406,6 +459,7 @@ def respond(user_text, history, files):
                         STATE["pending_email"] = True
                         STATE["email_content"] = content
                         STATE["email_subject"] = "Información de RAMA AI"
+                        STATE["email_document"] = document_ref
                         messages.append({"role": "assistant", "content": "Por supuesto. ¿A qué dirección de email te lo envío?"})
                         return messages, gr.update(value=None), gr.update(value="")
             # No content to send
