@@ -25,6 +25,7 @@ venv/
 *.sqlite
 *.db
 *.log
+.sessions.json
 
 # Credentials and service files
 *.key
