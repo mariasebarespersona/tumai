@@ -6,19 +6,54 @@ from .utils import docs_schema, utcnow_iso
 
 # -------- classification proposal (simple heuristic + LLM-friendly output) -----
 DOC_GROUPS = {
-    "Compra": ["escritura", "registro", "arras", "impuesto", "contrato privado", "itp", "iba"],
-    "Reforma:Docs diseño": ["contrato arquitecto", "mapas", "planos", "arquitecto", "aparejador", "licencia"],
-    "Reforma:Docs obra": ["constructor", "contrato constructor"],
-    "Reforma:Docs facturas": ["factura", "fontaneria", "electricista", "calefaccion", "carpinteria", "diseño"],
+    "Compra": ["escritura notarial", "escritura", "registro publico", "registro", "arras", "impuestos", "impuesto", "contrato privado", "itp", "iba", "comentario sobre impuestos"],
+    "Reforma:Docs diseño": ["contrato arquitecto", "contrato aparejador", "mapas de nivel", "mapas", "planos del terreno", "planos arquitecto", "planos de la casa", "planos", "licencia obra", "licencia", "arquitecto", "aparejador"],
+    "Reforma:Docs obra": ["contrato constructor", "constructor"],
+    "Reforma:Docs facturas": ["factura fontaneria", "factura electricista", "factura calefaccion", "factura carpinteria", "factura diseño", "factura"],
     "Reforma:Docs registro obra nueva": ["registro documento", "documento de impuestos"],
     "Venta": ["certificacion"],
 }
 
 # Mapear keywords a nombres canónicos EXACTOS de las celdas existentes en BD
 KEYWORD_TO_DOCNAME = {
+    # Compra
+    "escritura notarial": "Escritura notarial",
+    "escritura": "Escritura notarial",
+    "registro publico": "Registro publico",
+    "registro": "Registro publico",
+    "arras": "Arras",
+    "impuestos": "Impuestos",
+    "impuesto": "Impuestos",
+    "contrato privado": "Contrato privado",
+    "comentario sobre impuestos": "Comentario sobre impuestos ITP/IBA",
+    "itp": "Comentario sobre impuestos ITP/IBA",
+    "iba": "Comentario sobre impuestos ITP/IBA",
+    # Reforma - Docs diseño
     "contrato arquitecto": "Contrato arquitecto",
     "contrato aparejador": "Contrato aparejador",
+    "mapas de nivel": "Mapas de nivel",
+    "mapas": "Mapas de nivel",
+    "planos del terreno": "Planos del terreno",
+    "planos arquitecto": "Planos arquitecto/de la casa",
+    "planos de la casa": "Planos arquitecto/de la casa",
+    "planos": "Planos arquitecto/de la casa",
+    "licencia obra": "Licencia obra",
+    "licencia": "Licencia obra",
+    # Reforma - Docs obra
     "contrato constructor": "Contrato constructor",
+    "constructor": "Contrato constructor",
+    # Reforma - Docs facturas
+    "factura fontaneria": "Factura fontaneria",
+    "factura electricista": "Factura electricista",
+    "factura calefaccion": "Factura calefaccion",
+    "factura carpinteria": "Factura carpinteria",
+    "factura diseño": "Factura diseño",
+    "factura": "Factura diseño",
+    # Reforma - Docs registro obra nueva
+    "registro documento": "Registro documento",
+    "documento de impuestos": "Documento de impuestos",
+    # Venta
+    "certificacion": "Certificacion",
 }
 
 
@@ -31,23 +66,28 @@ def _normalize(text: str) -> str:
 def propose_slot(filename: str, text_hint: str = "") -> Dict:
     fn = _normalize(filename)
     hint = _normalize(text_hint)
-    best = "Compra", "", "Contrato privado"
+    combined = fn + " " + hint
+    
+    # First, try to find the longest matching keyword across all groups
+    all_keywords = []
     for key, kws in DOC_GROUPS.items():
-        # Prefer longer keywords first (e.g., "contrato arquitecto" before "arquitecto")
-        skws = sorted(kws, key=lambda s: -len(s))
-        score = sum(1 for kw in skws if (kw in fn) or (kw in hint))
-        if score > 0:
+        for kw in kws:
             parts = key.split(":")
             group = parts[0]
             subgroup = parts[1] if len(parts) > 1 else ""
-            # choose the first matching keyword by length
-            matched = next((kw for kw in skws if (kw in fn) or (kw in hint)), None)
-            if matched:
-                doc_name = KEYWORD_TO_DOCNAME.get(matched, matched.title())
-            else:
-                doc_name = "Documento"
+            all_keywords.append((kw, group, subgroup))
+    
+    # Sort by keyword length (longest first) to prioritize specific matches
+    all_keywords.sort(key=lambda x: -len(x[0]))
+    
+    # Find the first (longest) keyword that matches
+    for kw, group, subgroup in all_keywords:
+        if kw in combined:
+            doc_name = KEYWORD_TO_DOCNAME.get(kw, kw.title())
             return {"document_group": group, "document_subgroup": subgroup, "document_name": doc_name}
-    return {"document_group": best[0], "document_subgroup": best[1], "document_name": best[2]}
+    
+    # Default fallback
+    return {"document_group": "Compra", "document_subgroup": "", "document_name": "Contrato privado"}
 
 # -------- upload + link --------------------------------------------------------
 
@@ -182,3 +222,82 @@ def slot_exists(property_id: str, document_group: str, document_subgroup: str, d
         rows = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data
         names = [r["document_name"] for r in rows if r.get("document_group") == document_group and (r.get("document_subgroup") or "") == sg]
         return {"exists": document_name in names, "candidates": names}
+
+
+# -------- destructive operations (use with caution) ---------------------------
+def _clear_document_link(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> None:
+    """Clear storage/link metadata for a specific document cell in the per-property schema.
+    Sets storage_key to empty string, clears content_type/metadata/urls.
+    """
+    schema = docs_schema(property_id)
+    sg = document_subgroup or ""
+    upd = {
+        "storage_key": "",
+        "content_type": None,
+        "metadata": {},
+        "last_signed_url": None,
+        "signed_url_expires_at": None,
+    }
+    try:
+        sb.postgrest.schema = schema
+        (sb.table("documents")
+           .update(upd)
+           .eq("property_id", property_id)
+           .eq("document_group", document_group)
+           .eq("document_subgroup", sg)
+           .eq("document_name", document_name)
+           .execute())
+    except Exception:
+        # Fallback via RPC – attempt to reuse update function with empty values
+        payload = {
+            "p_id": property_id,
+            "g": document_group,
+            "sg": sg,
+            "n": document_name,
+            "storage_key": "",
+            "content_type": None,
+            "metadata": {},
+            "signed_url": "",
+            "expires_at": utcnow_iso(),
+        }
+        try:
+            sb.rpc("update_property_document_link", payload).execute()
+        except Exception:
+            # If server RPC isn't available, we silently continue after deleting storage
+            pass
+
+
+def purge_property_documents(property_id: str) -> dict:
+    """Remove all uploaded files for a single property and clear their links.
+    Returns a summary dict: {removed_files: int, cleared_rows: int}.
+    """
+    rows = list_docs(property_id)
+    removed = 0
+    cleared = 0
+    for r in rows:
+        key = r.get("storage_key")
+        if key:
+            try:
+                sb.storage.from_(BUCKET).remove([key])
+                removed += 1
+            except Exception:
+                # Continue clearing link even if storage removal fails
+                pass
+            try:
+                _clear_document_link(property_id, r.get("document_group",""), r.get("document_subgroup",""), r.get("document_name",""))
+                cleared += 1
+            except Exception:
+                pass
+    return {"removed_files": removed, "cleared_rows": cleared}
+
+
+def purge_all_documents() -> dict:
+    """Iterate over all properties and purge their uploaded documents."""
+    props = (sb.table("properties").select("id,name").execute()).data
+    total_removed = 0
+    total_cleared = 0
+    for p in props or []:
+        res = purge_property_documents(p["id"])
+        total_removed += res.get("removed_files", 0)
+        total_cleared += res.get("cleared_rows", 0)
+    return {"properties": len(props or []), "removed_files": total_removed, "cleared_rows": total_cleared}

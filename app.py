@@ -2,7 +2,7 @@ from __future__ import annotations
 import env_loader  # loads .env first
 import base64, os, uuid, re, unicodedata, json
 from typing import Dict, Any
-from fastapi import FastAPI, UploadFile, Form
+from fastapi import FastAPI, UploadFile, Form, File
 from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
@@ -205,10 +205,15 @@ def _wants_uploaded_docs(text: str) -> bool:
 def _wants_missing_docs(text: str) -> bool:
     t = _normalize(text)
     regexes = [
-        r"\b(documentos?)\b.*\b(faltan|pendientes|por\s+subir)\b",
-        r"\b(cuales|que|qué)\s+documentos\b.*\b(faltan|pendientes)\b",
-        r"\b(no\s+he\s+subido|aun\s+no\s+he\s+subido|todavia\s+no\s+he\s+subido)\b",
-        r"\b(documents?)\b.*\b(missing|pending|to\s+upload)\b",
+        # español
+        r"\b(documentos?)\b.*\b(faltan|falta|pendientes|por\s+(subir|anadir|añadir|cargar))\b",
+        r"\b(cuales|que|qué)\s+documentos\b.*\b(faltan|falta|pendientes)\b",
+        r"\b(que|qué)\s+documentos\s+me\s+faltan\b",
+        r"\b(que|qué)\s+me\s+falta\b.*\b(documentos?)\b",
+        r"\b(no\s+he\s+subido|aun\s+no\s+he\s+subido|todavia\s+no\s+he\s+subido|todavía\s+no\s+he\s+subido)\b",
+        # inglés
+        r"\b(documents?)\b.*\b(missing|pending|to\s+upload|to\s+add)\b",
+        r"\b(which|what)\s+documents?\b.*\b(missing|pending)\b",
     ]
     for rx in regexes:
         if re.search(rx, t):
@@ -217,15 +222,22 @@ def _wants_missing_docs(text: str) -> bool:
 
 
 def _wants_email(text: str) -> bool:
-    """Detect if user wants to send something via email."""
+    """Detect if user wants to send something via email (avoid false positives).
+    Requires mention of email/correo/mail or explicit phrases like 'email me'.
+    """
     t = _normalize(text)
-    patterns = [
-        "manda", "mandame", "envia", "enviame", "envía", "envíame",
-        "manda.*email", "manda.*correo", "envia.*email", "envia.*correo",
-        "por email", "por correo", "al email", "al correo",
-        "send.*email", "email.*this", "email me"
-    ]
-    return any(p in t for p in patterns) or re.search(r"\b(manda|envia|enviame|mandame|send)\b.*\b(email|correo|mail)\b", t) is not None
+    # Direct phrases
+    if "email me" in t or re.search(r"\bemail\b", t):
+        return True
+    if re.search(r"\b(correo|mail)\b", t):
+        return True
+    # Verb + email/correo
+    if re.search(r"\b(manda|mandame|envia|enviame|env\u00eda|env\u00edame|send)\b.*\b(email|correo|mail)\b", t):
+        return True
+    # 'por/al email/correo'
+    if re.search(r"\b(por|al)\b.*\b(email|correo|mail)\b", t):
+        return True
+    return False
 
 
 def _wants_focus_numbers(text: str) -> bool:
@@ -234,9 +246,9 @@ def _wants_focus_numbers(text: str) -> bool:
     if _wants_list_numbers(text) or _wants_numbers_help(text) or _wants_set_number(text) or _parse_number_value(text) is not None:
         return False
     patterns = [
-        r"\b(numeros|números|numbers)\b",
+        r"\b(numeros|números|numbers|number)\b",
         r"\bframework\s+de\s+(los\s+)?n(ú|u)meros\b",
-        r"\b(enfocar|centrar|trabajar|empezar|iniciar|start)\s+(en|con)?\s*(los\s+)?(n(ú|u)meros|numbers)\b",
+        r"\b(enfocar|centrar|trabajar|empezar|iniciar|start)\s+(en|con)?\s*(los\s+)?(n(ú|u)meros|numbers|number)\b",
     ]
     return any(re.search(p, t) for p in patterns)
 
@@ -244,47 +256,74 @@ def _wants_focus_numbers(text: str) -> bool:
 def _wants_list_numbers(text: str) -> bool:
     t = _normalize(text)
     patterns = [
-        r"\b(lista(me)?|ver|mostrar)\b.*\b(esquema|schema|items|lineas|líneas)\b.*\b(n(ú|u)meros|numbers)\b",
-        r"\b(esquema|schema)\b.*\b(n(ú|u)meros|numbers)\b",
+        r"\b(lista(me)?|ver|mostrar)\b.*\b(esquema|schema|items|lineas|líneas|framework|plantilla|tabla)\b.*\b(n(ú|u)meros|numbers|number)\b",
+        r"\b(esquema|schema|framework|plantilla|tabla)\b.*\b(n(ú|u)meros|numbers|number)\b",
     ]
-    return any(re.search(p, t) for p in patterns)
+    if any(re.search(p, t) for p in patterns):
+        return True
+    # Also accept "numbers framework" or "framework numbers"
+    if ("numbers" in t or "números" in t or "numeros" in t or "number" in t) and "framework" in t:
+        return True
+    return False
 
 
 def _wants_numbers_help(text: str) -> bool:
     t = _normalize(text)
     patterns = [
-        r"\b(que|qué)\s+me\s+hace\s+falta\b.*\b(n(ú|u)meros|numbers|framework)\b",
-        r"\b(que|qué)\s+falt(a|an)\b.*\b(n(ú|u)meros|numbers)\b",
-        r"\b(completar|rellenar)\b.*\b(n(ú|u)meros|numbers)\b",
+        r"\b(que|qué)\s+me\s+hace\s+falta\b.*\b(n(ú|u)meros|numbers|number|framework)\b",
+        r"\b(que|qué)\s+datos\b.*\b(mandar|enviar|aportar)\b.*\b(framework|n(ú|u)meros|numbers|number)\b",
+        r"\b(que|qué)\s+falt(a|an)\b.*\b(n(ú|u)meros|numbers|number|framework)\b",
+        r"\b(completar|rellenar)\b.*\b(n(ú|u)meros|numbers|number|framework)\b",
     ]
     return any(re.search(p, t) for p in patterns)
 
 
+def _wants_calc_numbers(text: str) -> bool:
+    t = _normalize(text)
+    return bool(re.search(r"\b(calcula|calcular|recalcula|recalcular|compute|calc)\b.*\b(n(ú|u)meros|numbers|totales|resumen)\b", t))
+
+
+def _wants_frameworks_info(text: str) -> bool:
+    t = _normalize(text)
+    return ("frameworks" in t or "esquemas" in t) and any(w in t for w in ("que", "qué", "hay", "cuales", "cuáles", "listar", "ver"))
+
+
 def _parse_number_value(text: str) -> float | None:
-    """Extract a numeric value from text, handling 1.234,56 and 1,234.56 and percentages."""
-    t = text.strip()
-    m = re.search(r"([-+]?\d{1,3}(?:[\.,]\d{3})*|[-+]?\d+)(?:[\.,]\d+)?\s*%?", t)
+    """Extract numeric value robustly (supports 1.234,56 | 1,234.56 | 1000.0 | 1.000 | 7%)."""
+    m = re.search(r"[-+]?\d[\d\.,]*\s*%?", text)
     if not m:
         return None
-    num_str = m.group(0)
-    # Remove spaces
-    num_str = num_str.replace(" ", "")
-    # Handle percent sign (keep numeric part)
-    num_str = num_str.replace("%", "")
-    # Normalize decimal separator: if both separators present, assume dot is thousand and comma is decimal
-    if "," in num_str and "." in num_str:
-        num_str = num_str.replace(".", "").replace(",", ".")
-    else:
-        # If only comma, treat as decimal
-        if "," in num_str:
-            num_str = num_str.replace(",", ".")
+    token = m.group(0).strip()
+    token = token.replace(" ", "").replace("%", "")
+    # Both separators present: last one is decimal
+    if "," in token and "." in token:
+        last_dot = token.rfind('.')
+        last_comma = token.rfind(',')
+        if last_dot > last_comma:
+            token = token.replace(',', '')  # dot is decimal
         else:
-            # Only dots: remove thousand separators heuristically
-            parts = num_str.split(".")
-            if len(parts) > 2:
-                num_str = "".join(parts[:-1]) + "." + parts[-1]
+            token = token.replace('.', '')
+            token = token.replace(',', '.')
+    elif "," in token:
+        if token.count(',') > 1:
+            last = token.rfind(',')
+            token = token[:last].replace(',', '') + '.' + token[last+1:]
+        else:
+            parts = token.split(',')
+            if len(parts) == 2 and len(parts[1]) == 3 and parts[0].isdigit():
+                token = parts[0] + parts[1]
+            else:
+                token = token.replace(',', '.')
+    elif "." in token:
+        if token.count('.') > 1:
+            last = token.rfind('.')
+            token = token[:last].replace('.', '') + '.' + token[last+1:]
+        else:
+            before, after = token.split('.')
+            if before.isdigit() and len(after) == 3:
+                token = before + after
     try:
-        return float(num_str)
+        return float(token)
     except Exception:
         return None
 
@@ -419,10 +458,17 @@ async def ui_chat(
     text: str = Form(""),
     session_id: str = Form("web-ui"),
     property_id: str | None = Form(None),
-    files: list[UploadFile] | None = None,
+    files: list[UploadFile] = File(default=[]),
 ):
     STATE = get_session(session_id)
     user_text = text or ""
+    
+    # Debug logging for files
+    if files and len(files) > 0:
+        print(f"[DEBUG] Received {len(files)} file(s): {[f.filename for f in files]}")
+    else:
+        print(f"[DEBUG] No files received")
+    
     def make_response(answer: str, extra: dict | None = None):
         resp = {"answer": answer, "property_id": STATE.get("property_id")}
         if extra:
@@ -459,6 +505,100 @@ async def ui_chat(
                 print(f"[DEBUG] Auto-selected property: {chosen['name']} ({chosen['id']})")
         except:
             pass  # Silently fail if search doesn't work
+
+    # If user referenced a filename but no file bytes arrived (e.g., UI sent only text like "📎 foo.pdf"), propose slot anyway
+    if len(files) == 0 and ("📎" in user_text or re.search(r"[\w\-\.]+\.pdf", user_text, flags=re.IGNORECASE)):
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        try:
+            # Try to extract first *.pdf from text
+            m = re.search(r"([\w\-\.]+\.pdf)", user_text, flags=re.IGNORECASE)
+            fname = m.group(1) if m else "documento.pdf"
+            proposal = propose_slot(fname, user_text)
+            STATE["pending_proposal"] = {"filename": fname, "proposal": proposal}
+            save_sessions()
+            g = proposal["document_group"]; sg = proposal.get("document_subgroup", ""); n = proposal["document_name"]
+            return make_response(f"Propongo las siguientes ubicaciones:\n{fname}: {g} / {sg} / {n}\nAdjunta el archivo y responde 'sí' para confirmar.")
+        except Exception as e:
+            return make_response(f"No he podido proponer ubicación: {e}")
+
+    # Handle file uploads: propose destination and ask for confirmation
+    if files and len(files) > 0:
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        # For now handle a single file per turn (first one)
+        f = files[0]
+        try:
+            fname = f.filename or "archivo.pdf"
+            print(f"[DEBUG] Proposing slot for file: {fname}")
+            # Read and store file bytes in session for later confirmation
+            file_bytes = await f.read()
+            import base64
+            file_b64 = base64.b64encode(file_bytes).decode("utf-8")
+            
+            # Suggest slot using filename; we can extend hint with `user_text` context
+            proposal = propose_slot(fname, user_text)
+            print(f"[DEBUG] Proposal: {proposal}")
+            STATE["pending_proposal"] = {
+                "filename": fname,
+                "proposal": proposal,
+                "file_b64": file_b64,  # Store file bytes as base64
+            }
+            save_sessions()
+            g = proposal["document_group"]
+            sg = proposal.get("document_subgroup", "")
+            n = proposal["document_name"]
+            response_text = f"Propongo las siguientes ubicaciones:\n{fname}: {g} / {sg} / {n}\n¿Confirmas la subida? (sí/no)"
+            print(f"[DEBUG] Returning response: {response_text}")
+            return make_response(response_text)
+        except Exception as e:
+            print(f"[DEBUG] Error proposing slot: {e}")
+            return make_response(f"No he podido proponer ubicación: {e}")
+
+    # Confirmation flow for last proposal
+    if STATE.get("pending_proposal"):
+        t = _normalize(user_text)
+        if any(w in t for w in ["si", "sí", "vale", "confirmo", "ok"]):
+            pid = STATE.get("property_id")
+            if not pid:
+                return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+            try:
+                filename = STATE["pending_proposal"]["filename"]
+                proposal = STATE["pending_proposal"]["proposal"]
+                file_b64 = STATE["pending_proposal"].get("file_b64")
+                
+                if not file_b64:
+                    # Fallback: no file was stored, ask user to reattach
+                    STATE["pending_proposal"] = None
+                    save_sessions()
+                    return make_response("No tengo el archivo guardado. Por favor, adjúntalo de nuevo.")
+                
+                # Decode file bytes from base64
+                import base64
+                file_bytes = base64.b64decode(file_b64)
+                
+                out = upload_and_link(
+                    pid,
+                    file_bytes,
+                    filename,
+                    proposal["document_group"],
+                    proposal.get("document_subgroup", ""),
+                    proposal["document_name"],
+                    metadata={}
+                )
+                STATE["pending_proposal"] = None
+                save_sessions()
+                return make_response(f"✅ Subido '{proposal['document_name']}'.")
+            except Exception as e:
+                STATE["pending_proposal"] = None
+                save_sessions()
+                return make_response(f"No he podido subir el documento: {e}")
+        elif any(w in t for w in ["no", "cambia", "otra", "diferente"]):
+            STATE["pending_proposal"] = None
+            save_sessions()
+            return make_response("De acuerdo. Dime el grupo/subgrupo/nombre exacto o vuelve a adjuntar el archivo con una pista (por ejemplo 'Contrato arquitecto').")
     
     # Handle email requests - check if we're waiting for email first
     # BUT: if user is clearly asking for something else (like selecting a property), cancel pending email
@@ -644,10 +784,34 @@ async def ui_chat(
             rows = db_list_properties(limit=30)
             if not rows:
                 return make_response("No hay propiedades en la base de datos todavía.")
-            lines = [f"- {r.get('name','(sin nombre)')} — {r.get('address','')} — id: {r.get('id')}" for r in rows]
+            lines = [f"- {r.get('name','(sin nombre)')} — {r.get('address','')}" for r in rows]
             return make_response("Propiedades encontradas:\n" + "\n".join(lines))
         except Exception as e:
             return make_response(f"Error al listar propiedades: {e}")
+
+    # Destructive: by default, purge documents ONLY for current property unless user explicitly says "todas las propiedades"
+    norm = _normalize(user_text)
+    if re.search(r"\b(borra|elimina|purga)\b", norm) and re.search(r"\b(documentos)\b", norm) and not re.search(r"\b(?:de\s+)?todas\s+las\s+propiedades\b", norm):
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("Primero selecciona una propiedad para poder borrar sus documentos.")
+        try:
+            from tools.docs_tools import purge_property_documents
+            res = purge_property_documents(pid)
+            return make_response(
+                f"✅ Eliminados los documentos de la propiedad actual. Ficheros borrados: {res.get('removed_files',0)}; celdas limpiadas: {res.get('cleared_rows',0)}."
+            )
+        except Exception as e:
+            return make_response(f"❌ No he podido borrar los documentos de esta propiedad: {e}")
+
+    # Destructive: purge all documents for all properties (requires explicit confirmation phrase)
+    if re.search(r"\b(confir|confirmo|borra|elimina|purga)\b", norm) and re.search(r"\b(?:de\s+)?todas\s+las\s+propiedades\b", norm):
+        try:
+            from tools.docs_tools import purge_all_documents
+            res = purge_all_documents()
+            return make_response(f"✅ Eliminados documentos de {res.get('properties',0)} propiedades. Ficheros borrados: {res.get('removed_files',0)}; celdas limpiadas: {res.get('cleared_rows',0)}.")
+        except Exception as e:
+            return make_response(f"❌ No he podido borrar los documentos: {e}")
     
     # If we were in a create flow but the user is clearly switching/listing, cancel create flow
     if STATE.get("pending_create") and (_wants_property_search(user_text) or _wants_list_properties(user_text)):
@@ -668,7 +832,11 @@ async def ui_chat(
                 STATE["pending_create"] = False
                 save_sessions()
                 fr = list_frameworks(row["id"])
-                return make_response(f"✅ Propiedad creada: {row['name']} — {row['address']}\nid: {row['id']}\nFrameworks: {fr}")
+                return make_response(
+                    f"Trabajaremos con la propiedad: {row['name']} — {row['address']}\n"
+                    f"He creado 2 plantillas por completar: Documentos y Números. ¿Por dónde quieres empezar?",
+                    {"property_id": row["id"]},
+                )
             except Exception as e:
                 STATE["pending_create"] = False
                 save_sessions()
@@ -696,7 +864,7 @@ async def ui_chat(
             if not hits:
                 rows = db_list_properties(limit=10)
                 if rows:
-                    lines = [f"- {r.get('name','(sin nombre)')} — {r.get('address','')} — id: {r.get('id')}" for r in rows]
+                    lines = [f"- {r.get('name','(sin nombre)')} — {r.get('address','')}" for r in rows]
                     return make_response("No encontré coincidencias. Estas son las propiedades recientes:\n" + "\n".join(lines))
                 return make_response("No encontré propiedades que coincidan. Prueba con otro nombre o dirección.")
             if len(hits) == 1:
@@ -706,11 +874,12 @@ async def ui_chat(
                 print(f"[DEBUG] Property search - Set property_id to {chosen['id']} for session {session_id}")
                 fr = list_frameworks(chosen["id"])
                 return make_response(
-                    f"Usaremos la propiedad: {chosen.get('name','(sin nombre)')} — {chosen.get('address','')}\nid: {chosen['id']}\nFrameworks: {fr}",
+                    f"Trabajaremos con la propiedad: {chosen.get('name','(sin nombre)')} — {chosen.get('address','')}\n"
+                    f"Tienes 2 plantillas por completar: Documentos y Números. ¿Por dónde quieres empezar?",
                     {"property_id": chosen["id"]},
                 )
             STATE["search_hits"] = hits
-            lines = [f"{i+1}. {h['name']} — {h.get('address','')} — id: {h['id']}" for i, h in enumerate(hits)]
+            lines = [f"{i+1}. {h['name']} — {h.get('address','')}" for i, h in enumerate(hits)]
             return make_response("He encontrado estas propiedades:\n" + "\n".join(lines) + "\n\nResponde con el número para continuar.")
         except Exception as e:
             return make_response(f"No he podido buscar propiedades: {e}")
@@ -731,8 +900,8 @@ async def ui_chat(
         except Exception as e:
             return make_response(f"No he podido consultar los documentos: {e}")
 
-    # Focus numbers mode
-    if _wants_focus_numbers(user_text):
+    # Focus numbers mode (also accept direct mentions like "numbers framework")
+    if _wants_focus_numbers(user_text) or ("framework" in _normalize(user_text) and ("numbers" in _normalize(user_text) or "numeros" in _normalize(user_text) or "números" in _normalize(user_text))):
         STATE["focus"] = "numbers"
         save_sessions()
         return make_response("Perfecto, nos centramos en NÚMEROS. Puedes pedirme: 'listar esquema de números', 'calcular resumen', o 'pon X a Y'.")
@@ -751,6 +920,17 @@ async def ui_chat(
             return make_response("Esquema de números:\n" + "\n".join(lines) + more_hint)
         except Exception as e:
             return make_response(f"No he podido listar los números: {e}")
+
+    # Calculate numbers on demand
+    if STATE.get("focus") == "numbers" and _wants_calc_numbers(user_text):
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        try:
+            results = calc_numbers(pid)
+            return make_response("✅ Cálculo realizado. Puedes volver a pedir el esquema para ver valores actualizados.")
+        except Exception as e:
+            return make_response(f"No he podido calcular los números: {e}")
 
     # Numbers help: what is missing/how to complete
     if STATE.get("focus") == "numbers" and _wants_numbers_help(user_text):

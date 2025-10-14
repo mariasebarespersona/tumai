@@ -14,6 +14,8 @@ from .docs_tools import (
     list_docs as _list_docs,
     signed_url_for as _signed_url_for,
     slot_exists as _slot_exists,
+    purge_property_documents as _purge_property_documents,
+    purge_all_documents as _purge_all_documents,
 )
 from .numbers_tools import set_number as _set_number, get_numbers as _get_numbers, calc_numbers as _calc_numbers
 from .summary_tools import get_summary_spec as _get_summary_spec, upsert_summary_value as _upsert_summary_value, compute_summary as _compute_summary
@@ -104,6 +106,22 @@ class SlotExistsInput(BaseModel):
 def slot_exists_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
     """Check if a document slot exists in the per-property documents framework (and list available names)."""
     return _slot_exists(property_id, document_group, document_subgroup, document_name)
+
+
+# --- Purge documents ---
+class PurgePropertyDocsInput(BaseModel):
+    property_id: str
+
+@tool("purge_property_documents")
+def purge_property_documents_tool(property_id: str) -> Dict:
+    """Delete all uploaded files for a single property and clear the document links."""
+    return _purge_property_documents(property_id)
+
+
+@tool("purge_all_documents")
+def purge_all_documents_tool() -> Dict:
+    """Delete all uploaded files for all properties and clear links."""
+    return _purge_all_documents()
 
 
 class SetNumberInput(BaseModel):
@@ -340,4 +358,6 @@ TOOLS = [
     rag_qa_with_citations_tool,    # NEW
     rag_index_all_documents_tool,  # NEW
     slot_exists_tool,              # NEW
+    purge_property_documents_tool, # NEW
+    purge_all_documents_tool,      # NEW
 ]
