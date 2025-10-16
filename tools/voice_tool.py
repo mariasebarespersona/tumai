@@ -137,6 +137,40 @@ def process_voice_input(audio_data: bytes, language_code: Optional[str] = None) 
             "text": ""
         }
 
+def transcribe_with_openai_api(audio_data: bytes, language_code: Optional[str] = None) -> str:
+    """
+    Transcribe audio using OpenAI API as fallback when local processing fails.
+    """
+    try:
+        import openai
+        import tempfile
+        import os
+        
+        # Create temporary file for audio data
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Use OpenAI API for transcription
+            with open(temp_file_path, "rb") as audio_file:
+                transcript = openai.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language=language_code or "es"
+                )
+            
+            return transcript.text
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                
+    except Exception as e:
+        logger.error(f"OpenAI API transcription error: {str(e)}")
+        raise RuntimeError(f"Failed to transcribe audio with OpenAI API: {str(e)}")
+
 def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -> str:
     """
     Transcribe audio using OpenAI Whisper (local, no API keys required).
@@ -229,11 +263,16 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
                     temp_file_path = temp_file.name
             
         except Exception as e:
-            # Final fallback: try to use original data as WAV
-            logger.warning(f"All audio conversion methods failed: {e}, trying direct approach")
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_file.write(audio_data)
-                temp_file_path = temp_file.name
+            # Final fallback: try OpenAI API for transcription
+            logger.warning(f"All local audio conversion methods failed: {e}, trying OpenAI API")
+            try:
+                return transcribe_with_openai_api(audio_data, language_code)
+            except Exception as api_error:
+                logger.error(f"OpenAI API transcription also failed: {api_error}")
+                # Last resort: try to use original data as WAV
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    temp_file.write(audio_data)
+                    temp_file_path = temp_file.name
         
         try:
             # Transcribe the audio
