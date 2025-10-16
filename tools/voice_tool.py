@@ -161,13 +161,20 @@ def transcribe_with_openai_api(audio_data: bytes, language_code: Optional[str] =
             if not api_key:
                 raise Exception("OPENAI_API_KEY not configured. Please set it as environment variable or in .env file")
             
+            logger.info(f"Using OpenAI API with key: {api_key[:20]}...")
+            
+            # Create OpenAI client
+            client = openai.OpenAI(api_key=api_key)
+            
             # Use OpenAI API for transcription
             with open(temp_file_path, "rb") as audio_file:
-                transcript = openai.audio.transcriptions.create(
+                transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     language=language_code or "es"
                 )
+            
+            logger.info(f"OpenAI API transcription result: {transcript.text[:50]}...")
             
             return transcript.text
             
