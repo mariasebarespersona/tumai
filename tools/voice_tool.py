@@ -106,11 +106,11 @@ def tts_google(text: str, language_code: Optional[str] = None, voice_name: Optio
 def process_voice_input(audio_data: bytes, language_code: Optional[str] = None) -> Dict[str, Any]:
     """
     Process voice input from frontend and return structured response.
-    Handles different audio formats and provides detailed feedback.
+    Uses Whisper for local transcription (no Google Cloud required).
     """
     try:
-        # Transcribe the audio
-        transcribed_text = transcribe_google_wav(audio_data, language_code)
+        # Use Whisper for transcription
+        transcribed_text = transcribe_whisper(audio_data, language_code)
         
         if not transcribed_text:
             return {
@@ -125,8 +125,8 @@ def process_voice_input(audio_data: bytes, language_code: Optional[str] = None) 
         return {
             "success": True,
             "text": cleaned_text,
-            "confidence": "high",  # Could be enhanced to return actual confidence
-            "language": language_code or "es-ES"
+            "confidence": "high",
+            "language": language_code or "es"
         }
         
     except Exception as e:
@@ -136,6 +136,42 @@ def process_voice_input(audio_data: bytes, language_code: Optional[str] = None) 
             "error": f"Error procesando el audio: {str(e)}",
             "text": ""
         }
+
+def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -> str:
+    """
+    Transcribe audio using OpenAI Whisper (local, no API keys required).
+    """
+    try:
+        import whisper
+        import tempfile
+        import os
+        
+        # Load Whisper model (base model is good balance of speed/accuracy)
+        model = whisper.load_model("base")
+        
+        # Create temporary file for audio data
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_file:
+            temp_file.write(audio_data)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Transcribe the audio
+            result = model.transcribe(
+                temp_file_path,
+                language=language_code or "es",  # Spanish by default
+                fp16=False  # Use fp32 for better compatibility
+            )
+            
+            return result["text"]
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file_path):
+                os.unlink(temp_file_path)
+                
+    except Exception as e:
+        logger.error(f"Whisper transcription error: {str(e)}")
+        raise RuntimeError(f"Failed to transcribe audio with Whisper: {str(e)}")
 
 def create_voice_response(text: str, language_code: Optional[str] = None) -> Dict[str, Any]:
     """
