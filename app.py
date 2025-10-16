@@ -438,7 +438,9 @@ def _match_document_from_text(pid: str, text: str):
 
 def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = None,
              property_id: str | None = None, file_tuple: tuple[str, bytes] | None = None) -> Dict[str, Any]:
-    state = {"messages": [], "input": text, "audio": audio_wav_bytes, "property_id": property_id}
+    # Use the existing session state instead of creating a new one
+    STATE = get_session(session_id)
+    state = {"messages": STATE.get("messages", []), "input": text, "audio": audio_wav_bytes, "property_id": property_id or STATE.get("property_id")}
     result = agent.invoke(state, config={"configurable": {"thread_id": session_id}})
     return result
 
