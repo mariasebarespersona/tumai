@@ -480,6 +480,9 @@ async def ui_chat(
     
     def make_response(answer: str, extra: dict | None = None):
         resp = {"answer": answer, "property_id": STATE.get("property_id")}
+        # Always include transcript if available
+        if transcript:
+            resp["transcript"] = transcript
         if extra:
             resp.update(extra)
         return resp
