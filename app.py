@@ -1096,7 +1096,9 @@ async def ui_chat(
                 break
     
     # Include transcript if this was a voice input
+    print(f"[DEBUG] Final transcript value: {transcript}")
     extra = {"transcript": transcript} if transcript else None
+    print(f"[DEBUG] Final response extra: {extra}")
     return make_response(answer or "(sin respuesta)", extra)
 
 
