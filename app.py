@@ -459,21 +459,61 @@ async def ui_chat(
     session_id: str = Form("web-ui"),
     property_id: str | None = Form(None),
     files: list[UploadFile] = File(default=[]),
+    audio: UploadFile | None = File(None),
 ):
     STATE = get_session(session_id)
     user_text = text or ""
     
-    # Debug logging for files
+    # Debug logging for files and audio
     if files and len(files) > 0:
         print(f"[DEBUG] Received {len(files)} file(s): {[f.filename for f in files]}")
     else:
         print(f"[DEBUG] No files received")
+    
+    if audio:
+        print(f"[DEBUG] Received audio file: {audio.filename}, size: {audio.size}")
+    else:
+        print(f"[DEBUG] No audio file received")
     
     def make_response(answer: str, extra: dict | None = None):
         resp = {"answer": answer, "property_id": STATE.get("property_id")}
         if extra:
             resp.update(extra)
         return resp
+    
+    # Process audio if present
+    if audio:
+        try:
+            print(f"[DEBUG] Processing audio file...")
+            audio_bytes = await audio.read()
+            print(f"[DEBUG] Audio bytes length: {len(audio_bytes)}")
+            
+            # Convert to base64 for the voice tool
+            import base64
+            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+            
+            # Use the voice processing tool
+            from tools.registry import process_voice_input_tool
+            voice_result = process_voice_input_tool(audio_b64, "es-ES")
+            
+            print(f"[DEBUG] Voice processing result: {voice_result}")
+            
+            if voice_result.get("success") and voice_result.get("text"):
+                # Use the transcribed text as the user input
+                user_text = voice_result["text"]
+                print(f"[DEBUG] Transcribed text: {user_text}")
+                
+                # Run the turn with the transcribed text
+                result = run_turn(session_id, user_text, None, property_id)
+                return make_response(result["answer"], {"transcript": user_text})
+            else:
+                error_msg = voice_result.get("error", "Error procesando el audio")
+                print(f"[DEBUG] Voice processing error: {error_msg}")
+                return make_response(f"Lo siento, no pude procesar tu mensaje de voz: {error_msg}")
+                
+        except Exception as e:
+            print(f"[DEBUG] Audio processing exception: {str(e)}")
+            return make_response(f"Error procesando el audio: {str(e)}")
     
     # Debug logging
     print(f"[DEBUG] session_id: {session_id}, property_id: {STATE.get('property_id')}, text: {user_text[:50]}")
