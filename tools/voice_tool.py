@@ -185,6 +185,19 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
     Transcribe audio using OpenAI Whisper (local, no API keys required).
     """
     try:
+        # First, try OpenAI API if available (fastest and most reliable)
+        try:
+            from dotenv import load_dotenv
+            import os
+            load_dotenv()
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                logger.info("OpenAI API key found, trying API transcription first...")
+                return transcribe_with_openai_api(audio_data, language_code)
+        except Exception as api_error:
+            logger.warning(f"OpenAI API not available: {api_error}, trying local methods")
+        
+        # Fallback to local Whisper processing
         import whisper
         import tempfile
         import os
@@ -275,10 +288,14 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
             # Final fallback: try OpenAI API for transcription
             logger.warning(f"All local audio conversion methods failed: {e}, trying OpenAI API")
             try:
-                return transcribe_with_openai_api(audio_data, language_code)
+                logger.info("Attempting OpenAI API transcription...")
+                result = transcribe_with_openai_api(audio_data, language_code)
+                logger.info("OpenAI API transcription successful")
+                return result
             except Exception as api_error:
                 logger.error(f"OpenAI API transcription also failed: {api_error}")
                 # Last resort: try to use original data as WAV
+                logger.warning("Using direct approach as last resort")
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                     temp_file.write(audio_data)
                     temp_file_path = temp_file.name
