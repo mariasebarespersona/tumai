@@ -88,16 +88,16 @@ export default function ChatPage() {
   )), [files, removeFile])
 
   return (
-    <div className="flex h-[calc(100vh-72px)] flex-col gap-3">
+    <div className="flex h-[calc(100vh-120px)] flex-col gap-2">
       {/* Chat area */}
-      <div ref={scrollRef} className="glass scrollbar-thin flex-1 overflow-auto rounded-xl p-4">
+      <div ref={scrollRef} className="glass scrollbar-thin flex-1 overflow-auto rounded-xl p-3">
         {messages.length === 0 ? (
           <div className="text-center text-[color:var(--c-green-700)]">
-            <div className="mb-1 text-2xl">🌾</div>
-            <div className="mb-2 text-xl font-bold">¡Bienvenido a RAMA Country Living!</div>
-            <div className="opacity-90">Tu asistente inteligente para gestionar propiedades</div>
-            <div className="mt-5 grid grid-cols-3 gap-3 sm:grid-cols-2">
-              <button className="h-[56px] rounded-[14px] border border-[color:var(--c-green-200)] bg-white text-left px-4 py-3 text-sm shadow-sm hover:bg-[color:var(--c-green-50)]">
+            <div className="mb-1 text-xl">🌾</div>
+            <div className="mb-1 text-lg font-bold">¡Bienvenido a RAMA Country Living!</div>
+            <div className="opacity-90 text-sm">Tu asistente inteligente para gestionar propiedades</div>
+            <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-2">
+              <div className="h-[48px] rounded-[12px] border border-[color:var(--c-green-200)] bg-white text-left px-3 py-2 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <span>🛠️</span>
                   <div>
@@ -105,8 +105,8 @@ export default function ChatPage() {
                     <div className="opacity-70 text-xs">Nueva propiedad</div>
                   </div>
                 </div>
-              </button>
-              <button className="h-[56px] rounded-[14px] border border-[color:var(--c-green-200)] bg-white text-left px-4 py-3 text-sm shadow-sm hover:bg-[color:var(--c-green-50)]">
+              </div>
+              <div className="h-[48px] rounded-[12px] border border-[color:var(--c-green-200)] bg-white text-left px-3 py-2 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <span>▸</span>
                   <div>
@@ -114,8 +114,8 @@ export default function ChatPage() {
                     <div className="opacity-70 text-xs">Subir y organizar</div>
                   </div>
                 </div>
-              </button>
-              <button className="h-[56px] rounded-[14px] border border-[color:var(--c-green-200)] bg-white text-left px-4 py-3 text-sm shadow-sm hover:bg-[color:var(--c-green-50)]">
+              </div>
+              <div className="h-[48px] rounded-[12px] border border-[color:var(--c-green-200)] bg-white text-left px-3 py-2 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <span>💬</span>
                   <div>
@@ -123,8 +123,8 @@ export default function ChatPage() {
                     <div className="opacity-70 text-xs">Preguntas sobre docs</div>
                   </div>
                 </div>
-              </button>
-              <button className="h-[56px] rounded-[14px] border border-[color:var(--c-green-200)] bg-white text-left px-4 py-3 text-sm shadow-sm hover:bg-[color:var(--c-green-50)]">
+              </div>
+              <div className="h-[48px] rounded-[12px] border border-[color:var(--c-green-200)] bg-white text-left px-3 py-2 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <span>✉️</span>
                   <div>
@@ -132,8 +132,8 @@ export default function ChatPage() {
                     <div className="opacity-70 text-xs">Enviar información</div>
                   </div>
                 </div>
-              </button>
-              <button className="h-[56px] rounded-[14px] border border-[color:var(--c-green-200)] bg-white text-left px-4 py-3 text-sm shadow-sm hover:bg-[color:var(--c-green-50)]">
+              </div>
+              <div className="h-[48px] rounded-[12px] border border-[color:var(--c-green-200)] bg-white text-left px-3 py-2 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <span>📊</span>
                   <div>
@@ -141,8 +141,8 @@ export default function ChatPage() {
                     <div className="opacity-70 text-xs">Análisis de contratos</div>
                   </div>
                 </div>
-              </button>
-              <button className="h-[56px] rounded-[14px] border border-[color:var(--c-green-200)] bg-white text-left px-4 py-3 text-sm shadow-sm hover:bg-[color:var(--c-green-50)]">
+              </div>
+              <div className="h-[48px] rounded-[12px] border border-[color:var(--c-green-200)] bg-white text-left px-3 py-2 text-sm shadow-sm">
                 <div className="flex items-center gap-2">
                   <span>⚠️</span>
                   <div>
@@ -150,7 +150,7 @@ export default function ChatPage() {
                     <div className="opacity-70 text-xs">Fechas de pago</div>
                   </div>
                 </div>
-              </button>
+              </div>
             </div>
           </div>
         ) : (
@@ -175,11 +175,11 @@ export default function ChatPage() {
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        className="rounded-xl border-2 border-dashed border-[color:var(--c-green-300)] bg-[color:var(--c-green-100)] p-4 text-[color:var(--c-green-800)]"
+        className="rounded-lg border-2 border-dashed border-[color:var(--c-green-300)] bg-[color:var(--c-green-100)] p-3 text-[color:var(--c-green-800)]"
       >
         <div className="flex items-center justify-between">
-          <div className="font-medium">📎 Arrastra PDFs aquí o haz click</div>
-          <label className="cursor-pointer rounded-md bg-[color:var(--c-green-500)] px-3 py-2 text-white hover:bg-[color:var(--c-green-600)]">
+          <div className="font-medium text-sm">📎 Arrastra PDFs aquí o haz click</div>
+          <label className="cursor-pointer rounded-md bg-[color:var(--c-green-500)] px-2 py-1 text-white text-sm hover:bg-[color:var(--c-green-600)]">
             Elegir archivos
             <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
           </label>
@@ -192,14 +192,14 @@ export default function ChatPage() {
       </div>
 
       {/* Composer */}
-      <div className="glass flex items-end gap-2 rounded-xl p-3">
+      <div className="glass flex items-end gap-2 rounded-lg p-2">
         <button
           onMouseDown={startRecording}
           onMouseUp={stopRecording}
           onTouchStart={startRecording}
           onTouchEnd={stopRecording}
           className={
-            'h-11 w-11 shrink-0 rounded-full border border-[color:var(--c-green-300)] shadow-sm ' +
+            'h-9 w-9 shrink-0 rounded-full border border-[color:var(--c-green-300)] shadow-sm ' +
             (isRecording ? 'bg-[color:var(--c-green-600)] text-white' : 'bg-white text-[color:var(--c-green-800)] hover:bg-[color:var(--c-green-100)]')
           }
           title={isRecording ? 'Suelta para detener' : 'Mantén para grabar voz'}
@@ -211,7 +211,7 @@ export default function ChatPage() {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Escribe tu mensaje..."
           rows={1}
-          className="min-h-[44px] flex-1 resize-none rounded-lg border border-[color:var(--c-green-300)] bg-white/90 px-3 py-2 outline-none focus:ring-2 focus:ring-[color:var(--c-green-400)]"
+          className="min-h-[36px] flex-1 resize-none rounded-lg border border-[color:var(--c-green-300)] bg-white/90 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[color:var(--c-green-400)]"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
@@ -222,7 +222,7 @@ export default function ChatPage() {
         <button
           onClick={onSend}
           disabled={uploading}
-          className="h-11 shrink-0 rounded-lg bg-[color:var(--c-green-600)] px-4 text-white shadow-sm hover:bg-[color:var(--c-green-700)] disabled:opacity-60"
+          className="h-9 shrink-0 rounded-lg bg-[color:var(--c-green-600)] px-3 text-white text-sm shadow-sm hover:bg-[color:var(--c-green-700)] disabled:opacity-60"
         >
           {uploading ? 'Enviando…' : 'Enviar ✈️'}
         </button>
