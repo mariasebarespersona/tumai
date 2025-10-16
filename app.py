@@ -495,9 +495,9 @@ async def ui_chat(
             import base64
             audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
             
-            # Use the voice processing tool
-            from tools.registry import process_voice_input_tool
-            voice_result = process_voice_input_tool(audio_b64, "es-ES")
+            # Use the voice processing function directly
+            from tools.voice_tool import process_voice_input
+            voice_result = process_voice_input(audio_bytes, "es-ES")
             
             print(f"[DEBUG] Voice processing result: {voice_result}")
             
