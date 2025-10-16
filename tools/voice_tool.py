@@ -158,39 +158,63 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         # Load Whisper model (base model is good balance of speed/accuracy)
         model = whisper.load_model("base")
         
-        # Try to determine audio format and handle accordingly
+        # Try to handle WebM format specifically
         try:
+            import webm
             import librosa
             import soundfile as sf
             
-            # Load audio from bytes using librosa
+            # Try to extract audio from WebM using webm library
             audio_data_io = io.BytesIO(audio_data)
             
-            # Try different formats that librosa might support
-            formats_to_try = ['wav', 'mp3', 'flac', 'ogg']
-            y, sr = None, None
-            
-            for fmt in formats_to_try:
-                try:
-                    audio_data_io.seek(0)  # Reset stream position
-                    y, sr = librosa.load(audio_data_io, sr=16000, format=fmt)
-                    logger.info(f"Successfully loaded audio as {fmt} format")
-                    break
-                except Exception as fmt_error:
-                    logger.debug(f"Failed to load as {fmt}: {fmt_error}")
-                    continue
-            
-            if y is None:
-                raise Exception("Could not load audio in any supported format")
-            
-            # Create temporary file for converted audio
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                sf.write(temp_file.name, y, sr, format='WAV')
-                temp_file_path = temp_file.name
+            # Use webm library to extract audio
+            try:
+                webm_data = webm.WebM(audio_data_io)
+                audio_track = webm_data.audio_tracks[0]
+                audio_data_extracted = audio_track.audio_data
+                
+                # Convert extracted audio to numpy array
+                import numpy as np
+                audio_array = np.frombuffer(audio_data_extracted, dtype=np.int16)
+                
+                # Normalize and convert to float
+                audio_float = audio_array.astype(np.float32) / 32768.0
+                
+                # Create temporary file for converted audio
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    sf.write(temp_file.name, audio_float, 16000, format='WAV')
+                    temp_file_path = temp_file.name
+                    
+                logger.info("Successfully extracted audio from WebM using webm library")
+                
+            except Exception as webm_error:
+                logger.warning(f"WebM extraction failed: {webm_error}, trying librosa")
+                
+                # Fallback to librosa with different formats
+                formats_to_try = ['wav', 'mp3', 'flac', 'ogg']
+                y, sr = None, None
+                
+                for fmt in formats_to_try:
+                    try:
+                        audio_data_io.seek(0)  # Reset stream position
+                        y, sr = librosa.load(audio_data_io, sr=16000, format=fmt)
+                        logger.info(f"Successfully loaded audio as {fmt} format")
+                        break
+                    except Exception as fmt_error:
+                        logger.debug(f"Failed to load as {fmt}: {fmt_error}")
+                        continue
+                
+                if y is None:
+                    raise Exception("Could not load audio in any supported format")
+                
+                # Create temporary file for converted audio
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    sf.write(temp_file.name, y, sr, format='WAV')
+                    temp_file_path = temp_file.name
             
         except Exception as e:
-            # Fallback: try to use original data as WAV
-            logger.warning(f"Audio conversion with librosa failed: {e}, trying direct approach")
+            # Final fallback: try to use original data as WAV
+            logger.warning(f"All audio conversion methods failed: {e}, trying direct approach")
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                 temp_file.write(audio_data)
                 temp_file_path = temp_file.name
