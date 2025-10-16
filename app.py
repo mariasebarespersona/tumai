@@ -503,8 +503,8 @@ async def ui_chat(
                 user_text = voice_result["text"]
                 print(f"[DEBUG] Transcribed text: {user_text}")
                 
-                # Run the turn with the transcribed text
-                result = run_turn(session_id, user_text, None, property_id)
+                # Run the turn with the transcribed text (no audio bytes needed since we already transcribed)
+                result = run_turn(session_id, user_text, None, property_id, None)
                 return make_response(result["answer"], {"transcript": user_text})
             else:
                 error_msg = voice_result.get("error", "Error procesando el audio")
