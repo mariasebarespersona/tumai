@@ -152,6 +152,11 @@ def transcribe_with_openai_api(audio_data: bytes, language_code: Optional[str] =
             temp_file_path = temp_file.name
         
         try:
+            # Check if API key is configured
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise Exception("OPENAI_API_KEY not configured. Please set it as environment variable or in .env file")
+            
             # Use OpenAI API for transcription
             with open(temp_file_path, "rb") as audio_file:
                 transcript = openai.audio.transcriptions.create(
