@@ -482,6 +482,7 @@ async def ui_chat(
         return resp
     
     # Process audio if present
+    transcript = None
     if audio:
         try:
             print(f"[DEBUG] Processing audio file...")
@@ -501,11 +502,11 @@ async def ui_chat(
             if voice_result.get("success") and voice_result.get("text"):
                 # Use the transcribed text as the user input
                 user_text = voice_result["text"]
+                transcript = user_text
                 print(f"[DEBUG] Transcribed text: {user_text}")
                 
-                # Run the turn with the transcribed text (no audio bytes needed since we already transcribed)
-                result = run_turn(session_id, user_text, None, property_id, None)
-                return make_response(result["answer"], {"transcript": user_text})
+                # Continue with normal flow using the transcribed text
+                # Don't return here, let the normal processing continue
             else:
                 error_msg = voice_result.get("error", "Error procesando el audio")
                 print(f"[DEBUG] Voice processing error: {error_msg}")
@@ -1083,6 +1084,8 @@ async def ui_chat(
                 answer = str(content)
                 break
     
-    return make_response(answer or "(sin respuesta)")
+    # Include transcript if this was a voice input
+    extra = {"transcript": transcript} if transcript else None
+    return make_response(answer or "(sin respuesta)", extra)
 
 
