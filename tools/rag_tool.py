@@ -72,9 +72,58 @@ def _extract_text(content: bytes, content_type: str, url: str) -> str:
 
 
 def summarize_document(property_id: str, group: str, subgroup: str, name: str, model: str = None, max_sentences: int = 5) -> Dict:
-    url = signed_url_for(property_id, group, subgroup, name, expires=600)
-    resp = requests.get(url)
-    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+    """Summarize a document. If the exact name doesn't match, tries to find a close match using list_docs."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Try the exact name first
+    try:
+        url = signed_url_for(property_id, group, subgroup, name, expires=600)
+        resp = requests.get(url)
+        text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+    except Exception as e:
+        logger.warning(f"Could not find document with exact name '{name}', trying fuzzy match: {e}")
+        # If exact match fails, try to find similar document
+        from .docs_tools import list_docs
+        try:
+            docs = list_docs(property_id)
+            # Find documents with storage_key (uploaded)
+            uploaded_docs = [d for d in docs if d.get('storage_key')]
+            
+            # Try case-insensitive match first
+            name_lower = name.lower()
+            for doc in uploaded_docs:
+                doc_name = doc.get('document_name', '')
+                if doc_name.lower() == name_lower:
+                    logger.info(f"Found case-insensitive match: {doc_name}")
+                    group = doc.get('document_group', group)
+                    subgroup = doc.get('document_subgroup', subgroup)
+                    name = doc_name
+                    url = signed_url_for(property_id, group, subgroup, name, expires=600)
+                    resp = requests.get(url)
+                    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                    break
+            else:
+                # Try partial match (contains)
+                for doc in uploaded_docs:
+                    doc_name = doc.get('document_name', '')
+                    if name_lower in doc_name.lower() or doc_name.lower() in name_lower:
+                        logger.info(f"Found partial match: {doc_name}")
+                        group = doc.get('document_group', group)
+                        subgroup = doc.get('document_subgroup', subgroup)
+                        name = doc_name
+                        url = signed_url_for(property_id, group, subgroup, name, expires=600)
+                        resp = requests.get(url)
+                        text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                        break
+                else:
+                    raise ValueError(f"No document found matching '{name}'")
+        except Exception as fuzzy_error:
+            logger.error(f"Fuzzy match also failed: {fuzzy_error}")
+            return {
+                "summary": f"No se pudo encontrar el documento '{name}'. Por favor, verifica el nombre del documento con list_docs.",
+                "signed_url": None,
+            }
 
     if not text.strip():
         # No textual content extracted; return a helpful message
@@ -100,10 +149,58 @@ def qa_document(property_id: str, group: str, subgroup: str, name: str, question
 
     Fetches the document via a signed URL, extracts text, and uses an LLM to
     answer the user's question in Spanish. Returns an answer and the signed URL.
+    If the exact name doesn't match, tries to find a close match using list_docs.
     """
-    url = signed_url_for(property_id, group, subgroup, name, expires=600)
-    resp = requests.get(url)
-    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Try the exact name first
+    try:
+        url = signed_url_for(property_id, group, subgroup, name, expires=600)
+        resp = requests.get(url)
+        text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+    except Exception as e:
+        logger.warning(f"Could not find document with exact name '{name}', trying fuzzy match: {e}")
+        # If exact match fails, try to find similar document
+        from .docs_tools import list_docs
+        try:
+            docs = list_docs(property_id)
+            uploaded_docs = [d for d in docs if d.get('storage_key')]
+            
+            # Try case-insensitive match first
+            name_lower = name.lower()
+            for doc in uploaded_docs:
+                doc_name = doc.get('document_name', '')
+                if doc_name.lower() == name_lower:
+                    logger.info(f"Found case-insensitive match: {doc_name}")
+                    group = doc.get('document_group', group)
+                    subgroup = doc.get('document_subgroup', subgroup)
+                    name = doc_name
+                    url = signed_url_for(property_id, group, subgroup, name, expires=600)
+                    resp = requests.get(url)
+                    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                    break
+            else:
+                # Try partial match (contains)
+                for doc in uploaded_docs:
+                    doc_name = doc.get('document_name', '')
+                    if name_lower in doc_name.lower() or doc_name.lower() in name_lower:
+                        logger.info(f"Found partial match: {doc_name}")
+                        group = doc.get('document_group', group)
+                        subgroup = doc.get('document_subgroup', subgroup)
+                        name = doc_name
+                        url = signed_url_for(property_id, group, subgroup, name, expires=600)
+                        resp = requests.get(url)
+                        text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                        break
+                else:
+                    raise ValueError(f"No document found matching '{name}'")
+        except Exception as fuzzy_error:
+            logger.error(f"Fuzzy match also failed: {fuzzy_error}")
+            return {
+                "answer": f"No se pudo encontrar el documento '{name}'. Por favor, verifica el nombre del documento con list_docs.",
+                "signed_url": None,
+            }
 
     if not text.strip():
         return {

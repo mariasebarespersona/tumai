@@ -1116,15 +1116,39 @@ async def ui_chat(
         except Exception as e:
             return make_response(f"No he podido consultar los documentos: {e}")
     
-    # Document question/RAG - Priority: any question about documents
+    # Check for explicit summarize/resume request first
     qnorm = _normalize(user_text)
+    is_summarize_request = bool(re.search(r"\b(resume|resumen|resumeme|resumir|summarize|summary)\b", qnorm))
+    
+    pid = STATE.get("property_id")
+    if is_summarize_request and pid:
+        # User wants a summary of a document
+        doc_ref = _match_document_from_text(pid, user_text)
+        if doc_ref:
+            try:
+                result = rag_summarize(
+                    property_id=pid,
+                    group=doc_ref.get("document_group", ""),
+                    subgroup=doc_ref.get("document_subgroup", ""),
+                    name=doc_ref.get("document_name", ""),
+                    max_sentences=5
+                )
+                if result.get("summary"):
+                    answer_text = result["summary"]
+                    STATE["last_assistant_response"] = answer_text
+                    save_sessions()
+                    return make_response(answer_text)
+            except Exception as e:
+                print(f"[DEBUG] Summarize failed: {e}, falling back to agent")
+                # Fall through to agent if summarize fails
+    
+    # Document question/RAG - Priority: any question about documents (but not summarize)
     question_words = ["qué", "que", "cual", "cuál", "cuando", "cuándo", "donde", "dónde", 
                       "cómo", "como", "por qué", "porque", "cuanto", "cuánto", "cuanta", "cuánta",
                       "quien", "quién", "lee el", "que pone", "qué pone", "que dice", "qué dice",
-                      "dime", "explicame", "explícame", "resumen", "resumeme", "di", "día", "dia"]
-    is_question = any(w in qnorm for w in question_words)
+                      "dime", "explicame", "explícame", "di", "día", "dia"]
+    is_question = any(w in qnorm for w in question_words) and not is_summarize_request
     
-    pid = STATE.get("property_id")
     if is_question and pid:
         # Prioritize document mentioned in current text
         doc_ref = _match_document_from_text(pid, user_text)
@@ -1160,7 +1184,8 @@ async def ui_chat(
                 
                 return make_response(answer_text)
         except Exception as e:
-            return make_response(f"No he podido responder: {e}")
+            print(f"[DEBUG] QA with citations failed: {e}, falling back to agent")
+            # Fall through to agent if QA fails
     
     # If no specific intent matched, use the agent
     out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
