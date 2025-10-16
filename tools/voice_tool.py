@@ -158,37 +158,53 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         # Load Whisper model (base model is good balance of speed/accuracy)
         model = whisper.load_model("base")
         
-        # Try to handle WebM format specifically
+        # Try to handle WebM format using PyAV (av library)
         try:
-            import webm
+            import av
             import librosa
             import soundfile as sf
+            import numpy as np
             
-            # Try to extract audio from WebM using webm library
+            # Try to extract audio from WebM using PyAV
             audio_data_io = io.BytesIO(audio_data)
             
-            # Use webm library to extract audio
             try:
-                webm_data = webm.WebM(audio_data_io)
-                audio_track = webm_data.audio_tracks[0]
-                audio_data_extracted = audio_track.audio_data
+                # Open WebM file with PyAV
+                container = av.open(audio_data_io, format='webm')
+                audio_stream = container.streams.audio[0]
                 
-                # Convert extracted audio to numpy array
-                import numpy as np
-                audio_array = np.frombuffer(audio_data_extracted, dtype=np.int16)
+                # Extract audio frames
+                audio_frames = []
+                for frame in container.decode(audio_stream):
+                    # Convert frame to numpy array
+                    audio_array = frame.to_ndarray()
+                    if len(audio_array.shape) > 1:
+                        # Convert stereo to mono
+                        audio_array = np.mean(audio_array, axis=0)
+                    audio_frames.append(audio_array)
                 
-                # Normalize and convert to float
-                audio_float = audio_array.astype(np.float32) / 32768.0
-                
-                # Create temporary file for converted audio
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                    sf.write(temp_file.name, audio_float, 16000, format='WAV')
-                    temp_file_path = temp_file.name
+                if audio_frames:
+                    # Concatenate all audio frames
+                    audio_combined = np.concatenate(audio_frames)
                     
-                logger.info("Successfully extracted audio from WebM using webm library")
+                    # Resample to 16kHz if needed
+                    if audio_stream.sample_rate != 16000:
+                        import librosa
+                        audio_resampled = librosa.resample(audio_combined, orig_sr=audio_stream.sample_rate, target_sr=16000)
+                    else:
+                        audio_resampled = audio_combined
+                    
+                    # Create temporary file for converted audio
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                        sf.write(temp_file.name, audio_resampled, 16000, format='WAV')
+                        temp_file_path = temp_file.name
+                        
+                    logger.info("Successfully extracted audio from WebM using PyAV")
+                else:
+                    raise Exception("No audio frames found in WebM")
                 
-            except Exception as webm_error:
-                logger.warning(f"WebM extraction failed: {webm_error}, trying librosa")
+            except Exception as av_error:
+                logger.warning(f"PyAV extraction failed: {av_error}, trying librosa")
                 
                 # Fallback to librosa with different formats
                 formats_to_try = ['wav', 'mp3', 'flac', 'ogg']
