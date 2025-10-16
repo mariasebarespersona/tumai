@@ -465,6 +465,7 @@ async def ui_chat(
 ):
     STATE = get_session(session_id)
     user_text = text or ""
+    transcript = None  # Initialize transcript at the beginning
     
     # Debug logging for files and audio
     if files and len(files) > 0:
@@ -484,7 +485,6 @@ async def ui_chat(
         return resp
     
     # Process audio if present
-    transcript = None
     if audio:
         try:
             print(f"[DEBUG] Processing audio file...")
@@ -506,6 +506,15 @@ async def ui_chat(
                 user_text = voice_result["text"]
                 transcript = user_text
                 print(f"[DEBUG] Transcribed text: {user_text}")
+                
+                # Add user message to state for better context
+                if "messages" not in STATE:
+                    STATE["messages"] = []
+                STATE["messages"].append({
+                    "role": "user",
+                    "content": user_text
+                })
+                save_sessions()
                 
                 # Continue with normal flow using the transcribed text
                 # Don't return here, let the normal processing continue
