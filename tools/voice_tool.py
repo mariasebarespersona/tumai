@@ -147,6 +147,8 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         import os
         import ssl
         import urllib.request
+        from pydub import AudioSegment
+        import io
         
         # Fix SSL certificate issues for model downloading
         ssl_context = ssl.create_default_context()
@@ -157,10 +159,25 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         # Load Whisper model (base model is good balance of speed/accuracy)
         model = whisper.load_model("base")
         
-        # Create temporary file for audio data
-        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_file:
-            temp_file.write(audio_data)
-            temp_file_path = temp_file.name
+        # Convert audio to WAV format using pydub (no ffmpeg required)
+        try:
+            # Load audio from bytes
+            audio = AudioSegment.from_file(io.BytesIO(audio_data), format="webm")
+            
+            # Convert to WAV format
+            wav_data = audio.export(format="wav").read()
+            
+            # Create temporary file for converted audio
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_file.write(wav_data)
+                temp_file_path = temp_file.name
+            
+        except Exception as e:
+            # Fallback: try to use original data as WAV
+            logger.warning(f"Audio conversion failed: {e}, trying direct approach")
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                temp_file.write(audio_data)
+                temp_file_path = temp_file.name
         
         try:
             # Transcribe the audio
@@ -171,6 +188,16 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
             )
             
             return result["text"]
+            
+        except Exception as e:
+            # If ffmpeg is missing, try to provide a helpful error message
+            if "ffmpeg" in str(e).lower() or "no such file" in str(e).lower():
+                raise RuntimeError(
+                    "ffmpeg is required for audio processing. Please install it with: "
+                    "brew install ffmpeg (if you have Homebrew) or download from https://ffmpeg.org/"
+                )
+            else:
+                raise e
             
         finally:
             # Clean up temporary file
