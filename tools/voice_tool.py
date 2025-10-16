@@ -200,9 +200,18 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
             api_key = os.getenv("OPENAI_API_KEY")
             if api_key:
                 logger.info("OpenAI API key found, trying API transcription first...")
-                return transcribe_with_openai_api(audio_data, language_code)
+                try:
+                    result = transcribe_with_openai_api(audio_data, language_code)
+                    logger.info("OpenAI API transcription completed successfully")
+                    return result
+                except Exception as inner_error:
+                    logger.error(f"OpenAI API transcription failed: {inner_error}", exc_info=True)
+                    raise
+            else:
+                logger.warning("No OpenAI API key found in environment")
         except Exception as api_error:
-            logger.warning(f"OpenAI API not available: {api_error}, trying local methods")
+            logger.error(f"OpenAI API error: {api_error}", exc_info=True)
+            logger.warning("Falling back to local methods")
         
         # Fallback to local Whisper processing
         import whisper
