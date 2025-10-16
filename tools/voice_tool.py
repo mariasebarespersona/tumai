@@ -145,6 +145,10 @@ def transcribe_with_openai_api(audio_data: bytes, language_code: Optional[str] =
         import openai
         import tempfile
         import os
+        from dotenv import load_dotenv
+        
+        # Load environment variables from .env file
+        load_dotenv()
         
         # Create temporary file for audio data
         with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_file:
