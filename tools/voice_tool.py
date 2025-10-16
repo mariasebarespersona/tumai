@@ -147,7 +147,6 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         import os
         import ssl
         import urllib.request
-        from pydub import AudioSegment
         import io
         
         # Fix SSL certificate issues for model downloading
@@ -159,22 +158,23 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         # Load Whisper model (base model is good balance of speed/accuracy)
         model = whisper.load_model("base")
         
-        # Convert audio to WAV format using pydub (no ffmpeg required)
+        # Convert audio using librosa (better format support)
         try:
-            # Load audio from bytes
-            audio = AudioSegment.from_file(io.BytesIO(audio_data), format="webm")
+            import librosa
+            import soundfile as sf
             
-            # Convert to WAV format
-            wav_data = audio.export(format="wav").read()
+            # Load audio from bytes using librosa
+            audio_data_io = io.BytesIO(audio_data)
+            y, sr = librosa.load(audio_data_io, sr=16000)  # Load at 16kHz sample rate
             
             # Create temporary file for converted audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                temp_file.write(wav_data)
+                sf.write(temp_file.name, y, sr, format='WAV')
                 temp_file_path = temp_file.name
             
         except Exception as e:
             # Fallback: try to use original data as WAV
-            logger.warning(f"Audio conversion failed: {e}, trying direct approach")
+            logger.warning(f"Audio conversion with librosa failed: {e}, trying direct approach")
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                 temp_file.write(audio_data)
                 temp_file_path = temp_file.name
