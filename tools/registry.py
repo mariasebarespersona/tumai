@@ -20,7 +20,7 @@ from .docs_tools import (
 from .numbers_tools import set_number as _set_number, get_numbers as _get_numbers, calc_numbers as _calc_numbers
 from .summary_tools import get_summary_spec as _get_summary_spec, upsert_summary_value as _upsert_summary_value, compute_summary as _compute_summary
 from .email_tool import send_email as _send_email
-from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google
+from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google, process_voice_input as _process_voice_input, create_voice_response as _create_voice_response
 from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document, qa_payment_schedule as _qa_payment_schedule
 from .rag_index import index_document as _index_document, qa_with_citations as _qa_with_citations, index_all_documents as _index_all_documents
 
@@ -219,6 +219,26 @@ def synthesize_speech_tool(text: str, language_code: Optional[str] = None, voice
     audio = _tts_google(text, language_code, voice_name)
     return {"audio_b64_mp3": base64.b64encode(audio).decode("utf-8")}
 
+class ProcessVoiceInputInput(BaseModel):
+    audio_b64: str
+    language_code: Optional[str] = None
+
+@tool("process_voice_input")
+def process_voice_input_tool(audio_b64: str, language_code: Optional[str] = None) -> Dict:
+    """Process voice input from frontend. Returns structured response with transcribed text."""
+    import base64
+    audio_data = base64.b64decode(audio_b64)
+    return _process_voice_input(audio_data, language_code)
+
+class CreateVoiceResponseInput(BaseModel):
+    text: str
+    language_code: Optional[str] = None
+
+@tool("create_voice_response")
+def create_voice_response_tool(text: str, language_code: Optional[str] = None) -> Dict:
+    """Create voice response for given text. Returns both text and audio data."""
+    return _create_voice_response(text, language_code)
+
 # --- property query tools ---
 class GetPropertyInput(BaseModel):
     property_id: str
@@ -347,6 +367,8 @@ TOOLS = [
     compute_summary_tool,          # NEW
     transcribe_audio_tool,         # NEW
     synthesize_speech_tool,
+    process_voice_input_tool,      # NEW - Enhanced voice processing
+    create_voice_response_tool,    # NEW - Enhanced voice response
     get_property_tool,             # NEW
     find_property_tool,            # NEW
     list_properties_tool,          # NEW

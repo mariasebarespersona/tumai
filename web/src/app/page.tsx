@@ -15,6 +15,7 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false)
   const [files, setFiles] = useState<File[]>([])
   const [isRecording, setIsRecording] = useState(false)
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -56,24 +57,94 @@ export default function ChatPage() {
 
   const startRecording = useCallback(async () => {
     if (isRecording) return
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    const mr = new MediaRecorder(stream)
-    mediaRecorderRef.current = mr
-    chunksRef.current = []
-    mr.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data) }
-    mr.onstop = async () => {
-      const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
-      const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' })
-      setFiles(prev => [...prev, file])
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000
+        } 
+      })
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+      mediaRecorderRef.current = mr
+      chunksRef.current = []
+      
+      mr.ondataavailable = (e) => { 
+        if (e.data.size) chunksRef.current.push(e.data) 
+      }
+      
+      mr.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm;codecs=opus' })
+        await processVoiceInput(blob)
+        stream.getTracks().forEach(track => track.stop())
+      }
+      
+      mr.start(100) // Collect data every 100ms
+      setIsRecording(true)
+    } catch (err) {
+      console.error('Error starting recording:', err)
+      alert('No se pudo acceder al micrófono. Por favor, verifica los permisos.')
     }
-    mr.start()
-    setIsRecording(true)
   }, [isRecording])
 
   const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop()
-    mediaRecorderRef.current = null
-    setIsRecording(false)
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+      setIsRecording(false)
+    }
+  }, [isRecording])
+
+  const processVoiceInput = useCallback(async (audioBlob: Blob) => {
+    setIsProcessingVoice(true)
+    try {
+      const form = new FormData()
+      form.append('audio', audioBlob, 'voice-input.webm')
+      form.append('text', '') // Empty text for voice input
+      form.append('session_id', 'web-ui')
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        body: form,
+      })
+
+      const data = await response.json()
+      
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      // Add transcribed message to chat
+      if (data.transcript) {
+        const userMessage: ChatMessage = { 
+          id: crypto.randomUUID(), 
+          role: 'user', 
+          content: data.transcript 
+        }
+        setMessages(prev => [...prev, userMessage])
+      }
+
+      // Add AI response
+      if (data.answer) {
+        const aiMessage: ChatMessage = { 
+          id: crypto.randomUUID(), 
+          role: 'assistant', 
+          content: data.answer 
+        }
+        setMessages(prev => [...prev, aiMessage])
+      }
+
+    } catch (error) {
+      console.error('Error processing voice input:', error)
+      const errorMessage: ChatMessage = { 
+        id: crypto.randomUUID(), 
+        role: 'assistant', 
+        content: 'Lo siento, hubo un error procesando tu mensaje de voz. Por favor, intenta de nuevo.' 
+      }
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsProcessingVoice(false)
+    }
   }, [])
 
   const removeFile = useCallback((idx: number) => {
@@ -203,15 +274,26 @@ export default function ChatPage() {
           onMouseUp={stopRecording}
           onTouchStart={startRecording}
           onTouchEnd={stopRecording}
+          disabled={isProcessingVoice}
           className={
             'h-11 w-11 shrink-0 rounded-full border-2 border-[color:var(--c-green-300)] shadow-md transition-all duration-200 ' +
             (isRecording 
               ? 'bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110' 
+              : isProcessingVoice
+              ? 'bg-gradient-to-r from-[color:var(--c-green-400)] to-[color:var(--c-green-500)] text-white animate-pulse'
               : 'bg-white text-[color:var(--c-green-800)] hover:bg-[color:var(--c-green-100)] hover:scale-105')
           }
-          title={isRecording ? 'Suelta para detener' : 'Mantén para grabar voz'}
+          title={
+            isRecording 
+              ? 'Suelta para detener' 
+              : isProcessingVoice 
+              ? 'Procesando mensaje de voz...' 
+              : 'Mantén para grabar voz'
+          }
         >
-          <span className="text-lg">{isRecording ? '◉' : '🎤'}</span>
+          <span className="text-lg">
+            {isRecording ? '◉' : isProcessingVoice ? '⏳' : '🎤'}
+          </span>
         </button>
         <textarea
           value={input}

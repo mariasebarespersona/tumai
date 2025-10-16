@@ -1,6 +1,7 @@
 from __future__ import annotations
-import os, json
-from typing import Optional
+import os, json, base64, io
+from typing import Optional, Dict, Any
+import logging
 
 # Make Google Cloud optional: import lazily and provide clear errors if missing
 try:
@@ -10,6 +11,10 @@ except Exception:  # Libraries not installed
     service_account = None  # type: ignore
     speech = None  # type: ignore
     texttospeech = None  # type: ignore
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def _credentials():
     if os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") and service_account is not None:
@@ -24,22 +29,40 @@ def transcribe_google_wav(bytes_data: bytes, language_code: Optional[str] = None
         raise RuntimeError(
             "Google Cloud Speech is not installed. Install with: pip install google-cloud-speech google-auth"
         )
-    creds = _credentials()
-    client = speech.SpeechClient(credentials=creds) if creds else speech.SpeechClient()
-    language = language_code or os.getenv("GOOGLE_STT_LANGUAGE", "en-US")
+    
+    try:
+        creds = _credentials()
+        client = speech.SpeechClient(credentials=creds) if creds else speech.SpeechClient()
+        language = language_code or os.getenv("GOOGLE_STT_LANGUAGE", "es-ES")  # Default to Spanish
 
-    audio = speech.RecognitionAudio(content=bytes_data)
-    config = speech.RecognitionConfig(
-        language_code=language,
-        enable_automatic_punctuation=True,
-        model="latest_long",
-        audio_channel_count=1,
-        enable_spoken_punctuation=True,
-        enable_spoken_emojis=False,
-    )
-    resp = client.recognize(config=config, audio=audio)
-    text = " ".join([r.alternatives[0].transcript for r in resp.results]) if resp.results else ""
-    return text
+        audio = speech.RecognitionAudio(content=bytes_data)
+        config = speech.RecognitionConfig(
+            language_code=language,
+            enable_automatic_punctuation=True,
+            model="latest_long",
+            audio_channel_count=1,
+            enable_spoken_punctuation=True,
+            enable_spoken_emojis=False,
+            use_enhanced=True,  # Use enhanced model for better accuracy
+            sample_rate_hertz=16000,  # Common sample rate
+            encoding=speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,  # Support for webm
+        )
+        
+        logger.info(f"Transcribing audio with language: {language}")
+        resp = client.recognize(config=config, audio=audio)
+        
+        if resp.results:
+            text = " ".join([r.alternatives[0].transcript for r in resp.results])
+            confidence = resp.results[0].alternatives[0].confidence if resp.results[0].alternatives else 0.0
+            logger.info(f"Transcription completed with confidence: {confidence:.2f}")
+            return text.strip()
+        else:
+            logger.warning("No transcription results returned")
+            return ""
+            
+    except Exception as e:
+        logger.error(f"Transcription error: {str(e)}")
+        raise RuntimeError(f"Failed to transcribe audio: {str(e)}")
 
 def tts_google(text: str, language_code: Optional[str] = None, voice_name: Optional[str] = None) -> bytes:
     """Synthesize speech → MP3 bytes."""
@@ -47,13 +70,95 @@ def tts_google(text: str, language_code: Optional[str] = None, voice_name: Optio
         raise RuntimeError(
             "Google Cloud Text-to-Speech is not installed. Install with: pip install google-cloud-texttospeech google-auth"
         )
-    creds = _credentials()
-    client = texttospeech.TextToSpeechClient(credentials=creds) if creds else texttospeech.TextToSpeechClient()
+    
+    try:
+        creds = _credentials()
+        client = texttospeech.TextToSpeechClient(credentials=creds) if creds else texttospeech.TextToSpeechClient()
 
-    lang = language_code or os.getenv("GOOGLE_TTS_LANGUAGE", "en-US")
-    name = voice_name or os.getenv("GOOGLE_TTS_VOICE", "")
-    voice = texttospeech.VoiceSelectionParams(language_code=lang, name=name or None)
-    audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3)
-    synthesis_input = texttospeech.SynthesisInput(text=text)
-    resp = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
-    return resp.audio_content
+        lang = language_code or os.getenv("GOOGLE_TTS_LANGUAGE", "es-ES")  # Default to Spanish
+        name = voice_name or os.getenv("GOOGLE_TTS_VOICE", "es-ES-Standard-A")  # Spanish voice
+        
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=lang, 
+            name=name or None,
+            ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+        )
+        
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=1.0,  # Normal speed
+            pitch=0.0,  # Normal pitch
+            volume_gain_db=0.0  # Normal volume
+        )
+        
+        synthesis_input = texttospeech.SynthesisInput(text=text)
+        
+        logger.info(f"Synthesizing speech for text: {text[:50]}...")
+        resp = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
+        
+        logger.info("Speech synthesis completed successfully")
+        return resp.audio_content
+        
+    except Exception as e:
+        logger.error(f"TTS error: {str(e)}")
+        raise RuntimeError(f"Failed to synthesize speech: {str(e)}")
+
+def process_voice_input(audio_data: bytes, language_code: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Process voice input from frontend and return structured response.
+    Handles different audio formats and provides detailed feedback.
+    """
+    try:
+        # Transcribe the audio
+        transcribed_text = transcribe_google_wav(audio_data, language_code)
+        
+        if not transcribed_text:
+            return {
+                "success": False,
+                "error": "No se pudo transcribir el audio. Por favor, intenta de nuevo.",
+                "text": ""
+            }
+        
+        # Clean up the transcribed text
+        cleaned_text = transcribed_text.strip()
+        
+        return {
+            "success": True,
+            "text": cleaned_text,
+            "confidence": "high",  # Could be enhanced to return actual confidence
+            "language": language_code or "es-ES"
+        }
+        
+    except Exception as e:
+        logger.error(f"Voice processing error: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error procesando el audio: {str(e)}",
+            "text": ""
+        }
+
+def create_voice_response(text: str, language_code: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Create a voice response for the given text.
+    Returns both the text and audio data.
+    """
+    try:
+        # Generate speech
+        audio_bytes = tts_google(text, language_code)
+        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        return {
+            "success": True,
+            "text": text,
+            "audio_b64": audio_b64,
+            "language": language_code or "es-ES"
+        }
+        
+    except Exception as e:
+        logger.error(f"Voice response creation error: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error generando respuesta de voz: {str(e)}",
+            "text": text,
+            "audio_b64": None
+        }

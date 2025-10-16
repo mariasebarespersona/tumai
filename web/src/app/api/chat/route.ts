@@ -10,11 +10,19 @@ export async function POST(req: NextRequest) {
     const sessionId = String(form.get("session_id") || "web-ui");
     const propertyId = String(form.get("property_id") || "");
     const files = form.getAll("files");
+    const audioFile = form.get("audio") as File | null;
 
     const fwd = new FormData();
     fwd.append("text", text);
     fwd.append("session_id", sessionId);
     if (propertyId) fwd.append("property_id", propertyId);
+    
+    // Handle audio file
+    if (audioFile) {
+      fwd.append("audio", audioFile, audioFile.name);
+    }
+    
+    // Handle regular files
     for (const f of files) {
       if (f instanceof File) {
         fwd.append("files", f, f.name);
@@ -36,6 +44,7 @@ export async function POST(req: NextRequest) {
       answer: data?.answer ?? data?.content ?? "(sin respuesta)",
       property_id: data?.property_id,
       transcript: data?.transcript,
+      audio_response: data?.audio_response, // For voice responses
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
