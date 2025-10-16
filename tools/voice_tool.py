@@ -167,11 +167,16 @@ def transcribe_with_openai_api(audio_data: bytes, language_code: Optional[str] =
             client = openai.OpenAI(api_key=api_key)
             
             # Use OpenAI API for transcription
+            # Convert language code to ISO-639-1 format (2 letters only)
+            lang = language_code or "es"
+            if lang and '-' in lang:
+                lang = lang.split('-')[0]  # Convert 'es-ES' to 'es'
+            
             with open(temp_file_path, "rb") as audio_file:
                 transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
-                    language=language_code or "es"
+                    language=lang
                 )
             
             logger.info(f"OpenAI API transcription result: {transcript.text[:50]}...")

@@ -497,7 +497,7 @@ async def ui_chat(
             
             # Use the voice processing function directly
             from tools.voice_tool import process_voice_input
-            voice_result = process_voice_input(audio_bytes, "es-ES")
+            voice_result = process_voice_input(audio_bytes, "es")
             
             print(f"[DEBUG] Voice processing result: {voice_result}")
             
