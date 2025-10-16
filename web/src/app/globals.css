@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --c-green-50: #f3faf2;
+  --c-green-100: #e6f5e4;
+  --c-green-200: #cdebc7;
+  --c-green-300: #a6d99b;
+  --c-green-400: #7cc46e;
+  --c-green-500: #59b24e;
+  --c-green-600: #3f8e38;
+  --c-green-700: #2f6d2b;
+  --c-green-800: #235224;
+  --c-green-900: #1b3e1c;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  @apply bg-[color:var(--c-green-50)] text-[color:var(--c-green-900)] antialiased;
+}
+
+.country-gradient {
+  background: linear-gradient(180deg, var(--c-green-100), var(--c-green-50));
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: saturate(120%) blur(10px);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: var(--c-green-300);
+  border-radius: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background-color: transparent;
+}

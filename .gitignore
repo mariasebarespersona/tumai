@@ -40,3 +40,5 @@ htmlcov/
 
 # Node/gradio temp
 node_modules/
+web/.next/
+web/node_modules/
