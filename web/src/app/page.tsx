@@ -65,7 +65,12 @@ export default function ChatPage() {
           sampleRate: 16000
         } 
       })
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+      // Try to use WAV format first, fallback to WebM if not supported
+      let mimeType = 'audio/wav'
+      if (!MediaRecorder.isTypeSupported('audio/wav')) {
+        mimeType = 'audio/webm;codecs=opus'
+      }
+      const mr = new MediaRecorder(stream, { mimeType })
       mediaRecorderRef.current = mr
       chunksRef.current = []
       
@@ -74,7 +79,7 @@ export default function ChatPage() {
       }
       
       mr.onstop = async () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm;codecs=opus' })
+        const blob = new Blob(chunksRef.current, { type: mimeType })
         await processVoiceInput(blob)
         stream.getTracks().forEach(track => track.stop())
       }
@@ -99,7 +104,8 @@ export default function ChatPage() {
     setIsProcessingVoice(true)
     try {
       const form = new FormData()
-      form.append('audio', audioBlob, 'voice-input.webm')
+      const fileExtension = audioBlob.type.includes('wav') ? 'wav' : 'webm'
+      form.append('audio', audioBlob, `voice-input.${fileExtension}`)
       form.append('text', '') // Empty text for voice input
       form.append('session_id', 'web-ui')
 

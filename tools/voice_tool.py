@@ -158,14 +158,30 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         # Load Whisper model (base model is good balance of speed/accuracy)
         model = whisper.load_model("base")
         
-        # Convert audio using librosa (better format support)
+        # Try to determine audio format and handle accordingly
         try:
             import librosa
             import soundfile as sf
             
             # Load audio from bytes using librosa
             audio_data_io = io.BytesIO(audio_data)
-            y, sr = librosa.load(audio_data_io, sr=16000)  # Load at 16kHz sample rate
+            
+            # Try different formats that librosa might support
+            formats_to_try = ['wav', 'mp3', 'flac', 'ogg']
+            y, sr = None, None
+            
+            for fmt in formats_to_try:
+                try:
+                    audio_data_io.seek(0)  # Reset stream position
+                    y, sr = librosa.load(audio_data_io, sr=16000, format=fmt)
+                    logger.info(f"Successfully loaded audio as {fmt} format")
+                    break
+                except Exception as fmt_error:
+                    logger.debug(f"Failed to load as {fmt}: {fmt_error}")
+                    continue
+            
+            if y is None:
+                raise Exception("Could not load audio in any supported format")
             
             # Create temporary file for converted audio
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
