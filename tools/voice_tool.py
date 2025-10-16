@@ -145,6 +145,14 @@ def transcribe_whisper(audio_data: bytes, language_code: Optional[str] = None) -
         import whisper
         import tempfile
         import os
+        import ssl
+        import urllib.request
+        
+        # Fix SSL certificate issues for model downloading
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        urllib.request.install_opener(urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl_context)))
         
         # Load Whisper model (base model is good balance of speed/accuracy)
         model = whisper.load_model("base")
