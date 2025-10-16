@@ -98,12 +98,29 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
     1) upload to Storage at key: property/<pid>/<group>/<filename>
     2) update the matching cell row in per-property documents table
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     key = f"property/{property_id}/{document_group}/{filename}"
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    
+    logger.info(f"📤 Uploading document: {filename} → {key}")
 
-    # Use correct file_options keys for supabase-py
-    sb.storage.from_(BUCKET).upload(key, file_bytes, {"content-type": content_type, "upsert": "true"})
-    signed = sb.storage.from_(BUCKET).create_signed_url(key, 3600)  # 1 hour
+    # Step 1: Upload to Storage FIRST (with upsert for idempotency)
+    try:
+        sb.storage.from_(BUCKET).upload(key, file_bytes, {"content-type": content_type, "upsert": "true"})
+        logger.info(f"✅ Storage upload successful: {key}")
+    except Exception as e:
+        logger.error(f"❌ Storage upload failed for {key}: {e}")
+        raise Exception(f"Failed to upload file to storage: {e}")
+    
+    # Step 2: Get signed URL
+    try:
+        signed = sb.storage.from_(BUCKET).create_signed_url(key, 3600)  # 1 hour
+        logger.info(f"✅ Signed URL created for {key}")
+    except Exception as e:
+        logger.error(f"❌ Failed to create signed URL for {key}: {e}")
+        raise Exception(f"Failed to create signed URL: {e}")
 
     schema = docs_schema(property_id)
     sg = document_subgroup or ""
@@ -134,33 +151,52 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
                 f"La celda no existe: {document_group} / {sg} / {document_name}."
             )
 
-        (sb.table("documents")
+        result = (sb.table("documents")
            .update(upd)
            .eq("property_id", property_id)
            .eq("document_group", document_group)
            .eq("document_subgroup", sg)
            .eq("document_name", document_name)
            .execute())
-    except Exception:
+        
+        logger.info(f"✅ Database updated successfully for {document_name}")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Direct DB update failed, trying RPC fallback: {e}")
         # Fallback via RPC when per-property schema is not exposed to PostgREST
-        payload = {
-            "p_id": property_id,
-            "g": document_group,
-            "sg": sg,
-            "n": document_name,
-            "storage_key": key,
-            "content_type": content_type,
-            "metadata": metadata or {},
-            "signed_url": signed.get("signedURL"),
-            "expires_at": expires_at,
-        }
-        sb.rpc("update_property_document_link", payload).execute()
+        try:
+            payload = {
+                "p_id": property_id,
+                "g": document_group,
+                "sg": sg,
+                "n": document_name,
+                "storage_key": key,
+                "content_type": content_type,
+                "metadata": metadata or {},
+                "signed_url": signed.get("signedURL"),
+                "expires_at": expires_at,
+            }
+            sb.rpc("update_property_document_link", payload).execute()
+            logger.info(f"✅ Database updated via RPC for {document_name}")
+        except Exception as rpc_error:
+            logger.error(f"❌ RPC fallback also failed: {rpc_error}")
+            raise Exception(f"Failed to update database: {rpc_error}")
 
+    logger.info(f"🎉 Document upload complete: {filename}")
     return {"storage_key": key, "signed_url": signed.get("signedURL"), "document_name": document_name}
 
 
 def list_docs(property_id: str) -> List[Dict]:
-    """List documents rows for a property. Falls back to RPC if dynamic schema is not exposed by PostgREST."""
+    """
+    List documents rows for a property. Falls back to RPC if dynamic schema is not exposed by PostgREST.
+    
+    IMPORTANT: This reads directly from the database, NOT from cache or vector index.
+    This ensures we always see the latest uploaded documents.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"📋 Listing documents for property: {property_id}")
     schema = docs_schema(property_id)
     try:
         sb.postgrest.schema = schema
@@ -169,11 +205,19 @@ def list_docs(property_id: str) -> List[Dict]:
                 .eq("property_id", property_id)
                 .order("document_group,document_subgroup,document_name")
                 .execute()).data
+        logger.info(f"✅ Found {len(rows)} documents via direct query")
         return rows
-    except Exception:
+    except Exception as e:
+        logger.warning(f"⚠️ Direct query failed, trying RPC: {e}")
         # Fallback through RPC function that queries the per-property schema server-side
         # Requires SQL function: public.list_property_documents(p_id uuid)
-        return sb.rpc("list_property_documents", {"p_id": property_id}).execute().data
+        try:
+            result = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data
+            logger.info(f"✅ Found {len(result)} documents via RPC")
+            return result
+        except Exception as rpc_error:
+            logger.error(f"❌ RPC also failed: {rpc_error}")
+            return []
 
 
 def signed_url_for(property_id: str, document_group: str, document_subgroup: str, document_name: str, expires: int = 3600) -> str:

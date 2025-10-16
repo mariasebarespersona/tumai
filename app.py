@@ -3,6 +3,7 @@ import env_loader  # loads .env first
 import base64, os, uuid, re, unicodedata, json
 from typing import Dict, Any
 from fastapi import FastAPI, UploadFile, Form, File
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
@@ -59,10 +60,30 @@ def get_session(session_id: str):
             "email_subject": None,
             "email_document": None,
             "focus": None,  # can be "documents" | "numbers" | "summary"
+            "messages": [],  # Conversation history for agent context
+            "last_email_used": None,
+            "last_assistant_response": None,
+            "last_doc_ref": None,
         }
     else:
         print(f"[DEBUG] Using EXISTING session: {session_id}, current property_id: {SESSIONS[session_id].get('property_id')}")
+        # Ensure messages field exists in old sessions
+        if "messages" not in SESSIONS[session_id]:
+            SESSIONS[session_id]["messages"] = []
     return SESSIONS[session_id]
+
+
+def add_to_conversation(session_id: str, user_text: str, assistant_text: str):
+    """Add user and assistant messages to conversation history for context."""
+    from langchain_core.messages import HumanMessage, AIMessage
+    STATE = get_session(session_id)
+    
+    if user_text:
+        STATE["messages"].append(HumanMessage(content=user_text))
+    if assistant_text:
+        STATE["messages"].append(AIMessage(content=assistant_text))
+    
+    save_sessions()
 
 
 def _normalize(s: str) -> str:
@@ -440,8 +461,23 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
              property_id: str | None = None, file_tuple: tuple[str, bytes] | None = None) -> Dict[str, Any]:
     # Use the existing session state instead of creating a new one
     STATE = get_session(session_id)
-    state = {"messages": STATE.get("messages", []), "input": text, "audio": audio_wav_bytes, "property_id": property_id or STATE.get("property_id")}
+    
+    # LangGraph with checkpointer automatically maintains message history using thread_id
+    # DON'T pass messages - let the checkpointer load the full history automatically
+    state = {
+        "input": text,  # This will be converted to HumanMessage by prepare_input node
+        "audio": audio_wav_bytes,
+        "property_id": property_id or STATE.get("property_id")
+    }
+    
+    print(f"[MEMORY DEBUG] Invoking agent with thread_id={session_id}, input={text[:50]}")
+    
+    # The checkpointer will automatically load and save the conversation history
     result = agent.invoke(state, config={"configurable": {"thread_id": session_id}})
+    
+    msg_count = len(result.get("messages", []))
+    print(f"[MEMORY DEBUG] Result has {msg_count} messages in history")
+    
     return result
 
 
@@ -485,7 +521,15 @@ async def ui_chat(
             resp["transcript"] = transcript
         if extra:
             resp.update(extra)
-        return resp
+        # Return JSONResponse with no-cache headers to ensure fresh data
+        return JSONResponse(
+            content=resp,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
     
     # Process audio if present
     if audio:
@@ -645,6 +689,40 @@ async def ui_chat(
                 )
                 STATE["pending_proposal"] = None
                 save_sessions()
+                
+                # Verify document was saved by reading it back
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"✅ Document uploaded: {proposal['document_name']}")
+                
+                # Read back to verify
+                try:
+                    docs = list_docs(pid)
+                    uploaded_doc = next((d for d in docs if d.get("document_name") == proposal["document_name"] and d.get("storage_key")), None)
+                    if uploaded_doc:
+                        logger.info(f"✅ Verified document in DB: {uploaded_doc.get('storage_key')}")
+                    else:
+                        logger.warning(f"⚠️ Document not found in DB after upload!")
+                except Exception as e:
+                    logger.error(f"❌ Error verifying document: {e}")
+                
+                # AUTO-INDEX for RAG: Index the document immediately after upload
+                try:
+                    from tools.rag_index import index_document
+                    logger.info(f"🔍 Auto-indexing document for RAG: {proposal['document_name']}")
+                    index_result = index_document(
+                        pid,
+                        proposal["document_group"],
+                        proposal.get("document_subgroup", ""),
+                        proposal["document_name"]
+                    )
+                    if index_result.get("indexed", 0) > 0:
+                        logger.info(f"✅ Document indexed: {index_result['indexed']} chunks")
+                    else:
+                        logger.warning(f"⚠️ Document indexing returned 0 chunks: {index_result.get('error', 'unknown')}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not auto-index document (non-critical): {e}")
+                
                 return make_response(f"✅ Subido '{proposal['document_name']}'.")
             except Exception as e:
                 STATE["pending_proposal"] = None
@@ -1086,6 +1164,12 @@ async def ui_chat(
     
     # If no specific intent matched, use the agent
     out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
+    
+    # Update property_id if the agent changed it (messages are handled by PostgreSQL checkpointer)
+    if out.get("property_id") and out["property_id"] != STATE.get("property_id"):
+        STATE["property_id"] = out["property_id"]
+        save_sessions()
+    
     answer = out.get("answer") or out.get("content") or ""
     if not answer and out.get("messages"):
         msgs = out["messages"]

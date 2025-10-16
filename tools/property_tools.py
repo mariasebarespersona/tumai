@@ -40,24 +40,34 @@ def find_property(name: str, address: str) -> Optional[Dict]:
 
 
 def list_properties(limit: int = 20) -> List[Dict]:
-    return (
-        sb.table("properties")
-        .select("*")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    ).data
+    try:
+        return (
+            sb.table("properties")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        ).data
+    except Exception as e:
+        import logging
+        logging.error(f"Error listing properties: {e}")
+        return []
 
 
 def search_properties(query: str, limit: int = 5) -> List[Dict]:
     """Fuzzy search by name or address (case-insensitive)."""
-    # Supabase PostgREST or() syntax with ilike wildcards
-    pattern = f"*{query}*"
-    return (
-        sb.table("properties")
-        .select("id,name,address")
-        .or_(f"name.ilike.{pattern},address.ilike.{pattern}")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    ).data
+    try:
+        # Supabase PostgREST or() syntax with ilike wildcards
+        pattern = f"*{query}*"
+        return (
+            sb.table("properties")
+            .select("id,name,address")
+            .or_(f"name.ilike.{pattern},address.ilike.{pattern}")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        ).data
+    except Exception as e:
+        import logging
+        logging.error(f"Error searching properties: {e}")
+        return []
