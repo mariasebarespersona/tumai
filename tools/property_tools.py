@@ -55,11 +55,33 @@ def list_properties(limit: int = 20) -> List[Dict]:
 
 
 def search_properties(query: str, limit: int = 5) -> List[Dict]:
-    """Fuzzy search by name or address (case-insensitive)."""
+    """Fuzzy search by name or address (case-insensitive + typo-tolerant).
+
+    Strategy:
+    1) Direct ilike match using PostgREST
+    2) Word-wise ilike match for significant tokens
+    3) Client-side fuzzy scoring across recent properties (handles minor typos like 'Demos'→'Demo')
+    """
     try:
-        # Supabase PostgREST or() syntax with ilike wildcards
-        pattern = f"*{query}*"
-        return (
+        import logging, unicodedata, re
+        from difflib import SequenceMatcher
+        logger = logging.getLogger(__name__)
+
+        def norm(s: str) -> str:
+            s = s or ""
+            s = ''.join(c for c in unicodedata.normalize('NFKD', s) if unicodedata.category(c) != 'Mn')
+            s = s.lower()
+            s = re.sub(r"[^a-z0-9\s]", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
+
+        query_clean = (query or "").strip()
+        if not query_clean:
+            return []
+
+        # Strategy 1: Direct pattern
+        pattern = f"*{query_clean}*"
+        results = (
             sb.table("properties")
             .select("id,name,address")
             .or_(f"name.ilike.{pattern},address.ilike.{pattern}")
@@ -67,6 +89,63 @@ def search_properties(query: str, limit: int = 5) -> List[Dict]:
             .limit(limit)
             .execute()
         ).data
+        if results:
+            return results
+
+        # Strategy 2: token-based ilike
+        words = query_clean.split()
+        if len(words) > 1:
+            skip_words = {'la', 'el', 'de', 'en', 'a', 'con', 'propiedad', 'casa', 'finca'}
+            for word in words:
+                if word.lower() not in skip_words and len(word) >= 3:
+                    pattern = f"*{word}*"
+                    results = (
+                        sb.table("properties")
+                        .select("id,name,address")
+                        .or_(f"name.ilike.{pattern},address.ilike.{pattern}")
+                        .order("created_at", desc=True)
+                        .limit(limit)
+                        .execute()
+                    ).data
+                    if results:
+                        return results
+
+        # Strategy 3: client-side fuzzy scoring
+        qn = norm(query_clean)
+        digits = re.findall(r"\d+", qn)
+        try:
+            pool = (
+                sb.table("properties")
+                .select("id,name,address")
+                .order("created_at", desc=True)
+                .limit(200)
+                .execute()
+            ).data
+        except Exception:
+            pool = list_properties(limit=200)
+
+        def score(row: Dict) -> float:
+            cand = f"{row.get('name','')} {row.get('address','')}"
+            cn = norm(cand)
+            base = SequenceMatcher(None, qn, cn).ratio()  # 0..1
+            # token overlap bonus
+            qtokens = set(qn.split())
+            ctokens = set(cn.split())
+            if qtokens and ctokens:
+                inter = len(qtokens & ctokens)
+                base += 0.1 * (inter / max(1, len(qtokens)))
+            # digit bonus: if query has a number present in candidate
+            if digits:
+                for d in digits:
+                    if d in cn:
+                        base += 0.1
+                        break
+            return base
+
+        scored = sorted([(score(r), r) for r in (pool or [])], key=lambda x: x[0], reverse=True)
+        top = [r for (s, r) in scored if s >= 0.5][:limit]
+        return top
+
     except Exception as e:
         import logging
         logging.error(f"Error searching properties: {e}")

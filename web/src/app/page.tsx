@@ -168,6 +168,29 @@ export default function ChatPage() {
     </div>
   )), [files, removeFile])
 
+  // Render assistant/user message with inline chart previews (PNG/JPG/WEBP)
+  const renderMessageContent = useCallback((text: string) => {
+    if (!text) return null
+    const imgRegex = /(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s]*)?)/gi
+    const parts = text.split(imgRegex)
+    const nodes: React.ReactNode[] = []
+    for (let i = 0; i < parts.length; i++) {
+      const token = parts[i]
+      if (!token) continue
+      const isImg = /^(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s]*)?)$/i.test(token)
+      if (isImg) {
+        nodes.push(
+          <div key={`img-${i}`} className="mt-3">
+            <img src={token} alt="gráfico" className="max-w-full rounded-xl border border-[color:var(--c-green-200)] shadow" />
+          </div>
+        )
+      } else {
+        nodes.push(<span key={`txt-${i}`}>{token}</span>)
+      }
+    }
+    return <>{nodes}</>
+  }, [])
+
   return (
     <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
       {/* Chat area */}
@@ -200,17 +223,17 @@ export default function ChatPage() {
               </div>
               
               {/* Gestión documentos */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect" title="Al entrar en Números, verás la plantilla + acciones (calcular, what-if, break-even, sensibilidad, gráficos, Excel)">
                 <div className="flex items-start gap-4">
                   <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-sage-400)] to-[color:var(--c-sage-500)] flex items-center justify-center text-2xl nature-shadow">
                     📁
                   </div>
                   <div className="flex-1">
                     <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Gestión de documentos
+                      Gestión de documentos / Números
                     </div>
                     <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      Sube y organiza escrituras y contratos
+                      Sube documentos o entra en el framework de números
                     </div>
                   </div>
                 </div>
@@ -295,7 +318,7 @@ export default function ChatPage() {
                     ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white font-medium'
                     : 'glass border-2 border-[color:var(--c-green-200)] text-[color:var(--c-green-900)]')
                 }>
-                  {m.content}
+                  {m.role === 'assistant' ? renderMessageContent(m.content) : m.content}
                 </div>
               </div>
             ))}

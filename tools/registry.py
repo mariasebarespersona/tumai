@@ -18,6 +18,16 @@ from .docs_tools import (
     purge_all_documents as _purge_all_documents,
 )
 from .numbers_tools import set_number as _set_number, get_numbers as _get_numbers, calc_numbers as _calc_numbers
+from .numbers_agent import (
+    compute_and_log as _numbers_compute_and_log,
+    generate_numbers_excel as _numbers_excel,
+    what_if as _numbers_what_if,
+    sensitivity_grid as _numbers_sensitivity,
+    break_even_precio as _numbers_break_even,
+    chart_waterfall as _numbers_chart_waterfall,
+    chart_cost_stack as _numbers_chart_cost_stack,
+    chart_sensitivity_heatmap as _numbers_chart_sensitivity,
+)
 from .summary_tools import get_summary_spec as _get_summary_spec, upsert_summary_value as _upsert_summary_value, compute_summary as _compute_summary
 from .email_tool import send_email as _send_email
 from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google, process_voice_input as _process_voice_input, create_voice_response as _create_voice_response
@@ -151,6 +161,92 @@ class CalcNumbersInput(BaseModel):
 def calc_numbers_tool(property_id: str) -> List[Dict]:
     """Compute derived metrics using the schema-local calc() function."""
     return _calc_numbers(property_id)
+
+
+# --- Numbers Agent derived computation and Excel export ---
+class NumbersComputeInput(BaseModel):
+    property_id: str
+    triggered_by: str = Field("agent")
+    trigger_type: str = Field("manual")
+
+@tool("numbers_compute")
+def numbers_compute_tool(property_id: str, triggered_by: str = "agent", trigger_type: str = "manual") -> Dict:
+    """Compute derived metrics (impuestos_total, costes_totales, net_profit, roi_pct, etc.) and persist calc_outputs + calc_log. NEVER invents numbers; uses current inputs only."""
+    return _numbers_compute_and_log(property_id, triggered_by, trigger_type)
+
+
+class NumbersExcelInput(BaseModel):
+    property_id: str
+
+@tool("numbers_excel_export")
+def numbers_excel_export_tool(property_id: str) -> Dict:
+    """Generate an Excel (.xlsx) for the current numbers framework (Inputs, Derived, Anomalies) and return {filename, bytes_b64}."""
+    import base64
+    data = _numbers_excel(property_id)
+    return {"filename": "numbers_framework.xlsx", "bytes_b64": base64.b64encode(data).decode("utf-8")}
+
+
+# --- Scenarios ---
+class NumbersWhatIfInput(BaseModel):
+    property_id: str
+    deltas: Dict[str, float]
+    name: Optional[str] = None
+
+@tool("numbers_what_if")
+def numbers_what_if_tool(property_id: str, deltas: Dict[str, float], name: Optional[str] = None) -> Dict:
+    """Compute a what-if scenario over the current numbers (deltas are fractional: -0.1 means -10%). Persist snapshot and return inputs/outputs/anomalies."""
+    return _numbers_what_if(property_id, deltas, name)
+
+
+class NumbersSensitivityInput(BaseModel):
+    property_id: str
+    precio_vec: List[float]
+    costes_vec: List[float]
+
+@tool("numbers_sensitivity")
+def numbers_sensitivity_tool(property_id: str, precio_vec: List[float], costes_vec: List[float]) -> Dict:
+    """Compute a 2D sensitivity grid for net_profit over precio_venta and costes_construccion fractional vectors."""
+    return _numbers_sensitivity(property_id, precio_vec, costes_vec)
+
+
+class NumbersBreakEvenInput(BaseModel):
+    property_id: str
+    tol: Optional[float] = 1.0
+
+@tool("numbers_break_even")
+def numbers_break_even_tool(property_id: str, tol: Optional[float] = 1.0) -> Dict:
+    """Solve for precio_venta such that net_profit ≈ 0. Returns precio_venta and net_profit."""
+    return _numbers_break_even(property_id, tol or 1.0)
+
+
+# --- Charts ---
+class NumbersChartWaterfallInput(BaseModel):
+    property_id: str
+
+@tool("numbers_chart_waterfall")
+def numbers_chart_waterfall_tool(property_id: str) -> Dict:
+    """Generate a waterfall chart (PNG) and return {signed_url}."""
+    return _numbers_chart_waterfall(property_id)
+
+
+class NumbersChartStackInput(BaseModel):
+    property_id: str
+
+@tool("numbers_chart_stack")
+def numbers_chart_stack_tool(property_id: str) -> Dict:
+    """Generate a stacked 100% cost composition chart (PNG) and return {signed_url}."""
+    return _numbers_chart_cost_stack(property_id)
+
+
+class NumbersChartSensitivityInput(BaseModel):
+    property_id: str
+    precio_vec: List[float]
+    costes_vec: List[float]
+
+@tool("numbers_chart_sensitivity")
+def numbers_chart_sensitivity_tool(property_id: str, precio_vec: List[float], costes_vec: List[float]) -> Dict:
+    """Generate a sensitivity heatmap (PNG) using given vectors; return {signed_url}."""
+    return _numbers_chart_sensitivity(property_id, precio_vec, costes_vec)
 
 
 class GetSummarySpecInput(BaseModel):
@@ -361,6 +457,14 @@ TOOLS = [
     set_number_tool,
     get_numbers_tool,
     calc_numbers_tool,
+    numbers_compute_tool,
+    numbers_excel_export_tool,
+    numbers_what_if_tool,
+    numbers_sensitivity_tool,
+    numbers_break_even_tool,
+    numbers_chart_waterfall_tool,
+    numbers_chart_stack_tool,
+    numbers_chart_sensitivity_tool,
     get_summary_spec_tool,
     upsert_summary_value_tool,
     send_email_tool,

@@ -3,7 +3,7 @@ import env_loader  # loads .env first
 import base64, os, uuid, re, unicodedata, json
 from typing import Dict, Any
 from fastapi import FastAPI, UploadFile, Form, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
@@ -13,6 +13,16 @@ from tools.rag_tool import summarize_document as rag_summarize, qa_document as r
 from tools.rag_index import qa_with_citations, index_all_documents
 from tools.email_tool import send_email
 from tools.numbers_tools import get_numbers, set_number, calc_numbers
+from tools.numbers_agent import (
+    compute_and_log as numbers_compute_and_log,
+    generate_numbers_excel,
+    what_if as numbers_what_if,
+    sensitivity_grid as numbers_sensitivity_grid,
+    break_even_precio as numbers_break_even,
+    chart_waterfall as numbers_chart_waterfall,
+    chart_cost_stack as numbers_chart_cost_stack,
+    chart_sensitivity_heatmap as numbers_chart_sensitivity,
+)
 
 agent = build_graph()
 
@@ -175,13 +185,19 @@ def _extract_property_query(user_text: str) -> str | None:
 
 
 def _extract_property_candidate_from_text(user_text: str) -> str | None:
-    """Extract a likely property name when phrased as 'trabajar/usar con/en X'."""
+    """Extract a likely property name when phrased as 'trabajar/usar/metete con/en X'."""
     if not user_text:
         return None
-    # Common Spanish patterns
+    # Common Spanish patterns with expanded verb list
     patterns = [
+        # Original patterns
         r"(?i)(?:trabajar|usar|utilizar)\s+(?:con|en)\s+(?:la\s+propiedad\s+)?(.+)$",
         r"(?i)quiero\s+(?:trabajar|usar|utilizar)\s+(?:con|en)\s+(?:la\s+propiedad\s+)?(.+)$",
+        # New informal patterns
+        r"(?i)(?:metete|meter|vamos|voy|ir|irme|pasamos|pasar)\s+(?:en|a|con)\s+(?:la\s+propiedad\s+)?(.+)$",
+        r"(?i)(?:me\s+voy|nos\s+vamos)\s+(?:a|en)\s+(?:la\s+propiedad\s+)?(.+)$",
+        # Direct "casa/finca + name" extraction
+        r"(?i)(?:metete|meter|vamos|voy|ir|irme|pasamos|pasar|en|a)\s+(?:la\s+)?(?:casa|finca|propiedad)\s+(.+)$",
     ]
     for p in patterns:
         m = re.search(p, user_text)
@@ -200,13 +216,16 @@ def _wants_property_search(text: str) -> bool:
     # Ignore generic plural list requests
     if "propiedades" in t or "properties" in t:
         return False
-    # Work with / switch to a property
-    if re.search(r"\b(trabajar|usar|utilizar|cambiar|switch)\b", t) and (re.search(r"\bcon\b", t) or re.search(r"\ben\b", t) or re.search(r"\ba\b", t)):
+    # Work with / switch to a property - expanded verb list
+    if re.search(r"\b(trabajar|usar|utilizar|cambiar|switch|metete|meter|vamos|voy|ir|irme|pasamos|pasar)\b", t) and (re.search(r"\bcon\b", t) or re.search(r"\ben\b", t) or re.search(r"\ba\b", t)):
         return True
     # "Quiero trabajar en/ con ...", "usar ...", "cambiar a ..."
-    return bool(
-        re.search(r"\b(propiedad|property)\b", t) and re.search(r"(llama|llamada|nombre|direcci[oó]n|address|trabajar|usar|con|en|a|quiero|cambiar)", t)
-    )
+    if re.search(r"\b(propiedad|property)\b", t) and re.search(r"(llama|llamada|nombre|direcci[oó]n|address|trabajar|usar|con|en|a|quiero|cambiar)", t):
+        return True
+    # Direct mention of "casa" or property name with movement verbs
+    if re.search(r"\b(casa|finca|propiedad)\s+(demo|rural|[a-z]+)\s*\d+", t, re.IGNORECASE) and re.search(r"\b(metete|meter|vamos|voy|ir|irme|pasamos|pasar|en|a)\b", t):
+        return True
+    return False
 
 
 def _wants_uploaded_docs(text: str) -> bool:
@@ -352,6 +371,25 @@ def _parse_number_value(text: str) -> float | None:
 def _numbers_match_item(items: list[dict], text: str) -> dict | None:
     """Find the best matching item by label or key tokens in the user text."""
     t = _normalize(text)
+    # 1) Quick pass by synonyms for robust Spanish phrasing
+    synonyms_map = {
+        "impuestos_pct": ["impuestos", "impuesto", "iva", "itp", "iba"],
+        "precio_venta": ["precio de venta", "precio", "venta"],
+        "costes_construccion": ["costes de construccion", "costes de construcción", "construccion", "construcción", "obra"],
+        "terrenos_coste": ["terrenos", "terreno coste", "coste terreno", "suelo"],
+        "project_mgmt_fees": ["project mgmt", "mgmt", "gestion proyecto", "gestión proyecto", "honorarios gestion"],
+        "project_management_coste": ["project management", "gestion", "gestión", "coste gestion", "coste gestión"],
+        "acometidas": ["acometidas"],
+        "total_pagado": ["total pagado", "pagado"],
+        "terreno_urbano": ["terreno urbano", "urbano"],
+        "terreno_rustico": ["terreno rustico", "terreno rústico", "rustico", "rústico"],
+    }
+    key_to_item = {it.get("item_key"): it for it in items}
+    for item_key, syns in synonyms_map.items():
+        if item_key in key_to_item:
+            if any(_normalize(s) in t for s in syns):
+                return key_to_item[item_key]
+
     best = None
     best_score = 0
     for it in items:
@@ -370,13 +408,100 @@ def _numbers_match_item(items: list[dict], text: str) -> dict | None:
             if matched == len(tokens):
                 score += 3
             elif matched >= max(1, len(tokens) - 1):
-                score += 2
+                score += 3  # boost partial match to handle labels with símbolos
             elif matched >= 1:
-                score += 1
+                score += 2
         if score > best_score:
             best_score = score
             best = it
     return best if best_score >= 3 else None
+
+
+# -------- Numbers NL intents (what-if, charts, break-even) --------
+def _key_synonyms() -> dict[str, str]:
+    return {
+        # core vars
+        "precio": "precio_venta",
+        "precio_venta": "precio_venta",
+        "precio de venta": "precio_venta",
+        "venta": "precio_venta",
+        "costes_construccion": "costes_construccion",
+        "coste construccion": "costes_construccion",
+        "construccion": "costes_construccion",
+        "construcción": "costes_construccion",
+    }
+
+
+def _normalize_key_phrase(s: str) -> str | None:
+    t = _normalize(s)
+    syn = _key_synonyms()
+    for k, std in syn.items():
+        if k in t:
+            return std
+    # fallback exact normalized token
+    return syn.get(t)
+
+
+def _wants_numbers_what_if(text: str) -> bool:
+    t = _normalize(text)
+    return any(w in t for w in ["what if", "que pasa si", "qué pasa si", "si ", "escenario", "scenario", "sensitivity", "sensibilidad"]) and ("%" in text or "-" in text or "+" in text)
+
+
+def _parse_percent_changes(text: str) -> dict[str, float]:
+    """Extract deltas like 'precio_venta -10%' or 'costes de construcción +12%' into fractional dict."""
+    out: dict[str, float] = {}
+    t = text
+    import re
+    # Patterns like 'var -10%' or 'var +12%'
+    pat = re.compile(r"([A-Za-z_áéíóúüñ\s]+?)\s*([+-]?\d+(?:[\.,]\d+)?)\s*%", re.IGNORECASE)
+    for m in pat.finditer(t):
+        raw_key = m.group(1).strip()
+        num = m.group(2).replace(",", ".")
+        try:
+            frac = float(num) / 100.0
+        except Exception:
+            continue
+        key = _normalize_key_phrase(raw_key)
+        if key:
+            out[key] = frac
+    # Also allow verbs 'sube/baja X%' after a key mentioned before
+    if not out:
+        # Heuristic: look for 'sube|baja|aumenta|reduce' and the closest known key
+        verbs = re.findall(r"(sube|baja|aumenta|reduce)\s*([+-]?\d+(?:[\.,]\d+)?)\s*%", t, flags=re.IGNORECASE)
+        if verbs:
+            # pick last mentioned known key in text
+            for k in _key_synonyms().keys():
+                if k in _normalize(t):
+                    key = _key_synonyms()[k]
+                    try:
+                        frac = float(verbs[-1][1].replace(",", ".")) / 100.0
+                        if verbs[-1][0].lower() in ["baja", "reduce"]:
+                            frac = -abs(frac)
+                        out[key] = frac
+                        break
+                    except Exception:
+                        pass
+    return out
+
+
+def _wants_numbers_break_even(text: str) -> bool:
+    t = _normalize(text)
+    return any(w in t for w in ["break even", "break-even", "punto de equilibrio", "beneficio cero", "neto cero", "net_profit 0"]) and any(w in t for w in ["precio", "venta"])
+
+
+def _wants_chart_waterfall(text: str) -> bool:
+    t = _normalize(text)
+    return any(w in t for w in ["waterfall", "cascada"]) or ("impacto" in t and "coste" in t)
+
+
+def _wants_chart_stack(text: str) -> bool:
+    t = _normalize(text)
+    return any(w in t for w in ["stacked", "apilado"]) or ("composicion" in t or "composición" in t)
+
+
+def _wants_chart_sensitivity(text: str) -> bool:
+    t = _normalize(text)
+    return any(w in t for w in ["sensibilidad", "heatmap", "matriz"])
 
 
 def _wants_set_number(text: str) -> bool:
@@ -782,6 +907,15 @@ async def ui_chat(
                     print(f"[ERROR] Could not download document: {e}")
             
             try:
+                # If we were waiting to send the Numbers Excel, (re)generate it now
+                if (STATE.get("email_subject") or "").lower().startswith("framework de números (excel)") or (STATE.get("email_content") or "").lower().find("framework de números") >= 0:
+                    try:
+                        pid = STATE.get("property_id")
+                        if pid:
+                            xlsx_bytes = generate_numbers_excel(pid)
+                            attachments.append(("numbers_framework.xlsx", xlsx_bytes))
+                    except Exception:
+                        pass
                 send_email(
                     to=[email_addr],
                     subject=subject,
@@ -795,6 +929,7 @@ async def ui_chat(
                 STATE["email_content"] = None
                 STATE["email_subject"] = None
                 STATE["email_document"] = None
+                STATE["pending_numbers_excel"] = False
                 STATE["last_email_used"] = email_addr
                 save_sessions()
                 return make_response(msg)
@@ -851,6 +986,40 @@ async def ui_chat(
         # Check if user mentions a specific document
         document_ref = _match_document_from_text(pid, user_text) if pid else None
         
+        # If the user asks to send the numbers framework, generate Excel by default
+        if STATE.get("focus") == "numbers" or ("framework" in _normalize(user_text) and ("numbers" in _normalize(user_text) or "numeros" in _normalize(user_text) or "números" in _normalize(user_text))):
+            if not pid:
+                return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+            try:
+                # Generate Excel and email
+                xlsx_bytes = generate_numbers_excel(pid)
+                if email_addr:
+                    try:
+                        # Always attach freshly generated Excel for numbers framework
+                        xlsx_bytes = generate_numbers_excel(pid)
+                        send_email(
+                            to=[email_addr],
+                            subject="Framework de números (Excel)",
+                            html="<html><body><p>Adjunto el framework de números en Excel.</p></body></html>",
+                            attachments=[("numbers_framework.xlsx", xlsx_bytes)]
+                        )
+                        STATE["last_email_used"] = email_addr
+                        save_sessions()
+                        return make_response(f"✅ Enviado el framework de números en Excel a {email_addr}")
+                    except Exception as e:
+                        return make_response(f"❌ Error al enviar el Excel: {e}")
+                else:
+                    # Ask for email, store attachment content in session temporarily (not persisted long-term)
+                    STATE["pending_email"] = True
+                    STATE["email_content"] = "Adjunto: framework de números (Excel)"
+                    STATE["email_subject"] = "Framework de números (Excel)"
+                    STATE["email_document"] = None
+                    # Stash the file bytes in memory for this session turn would require extra infra; fallback to recompute on submit.
+                    save_sessions()
+                    return make_response("¿A qué dirección de email te lo envío? Enviaré un Excel (.xlsx).")
+            except Exception as e:
+                return make_response(f"No he podido generar el Excel: {e}")
+
         # For now, use a simple approach: if there's a document mentioned, offer to send it
         if document_ref:
             if email_addr:
@@ -979,6 +1148,16 @@ async def ui_chat(
             save_sessions()
             return make_response("Por favor, proporciona el nombre y la dirección de la propiedad. Ejemplo: 'nombre: Casa Demo 6 y dirección: Calle Alameda 22'")
     
+    # EARLY EXIT FROM FOCUS MODE: If user wants to change property/context while in focus mode
+    # This allows flexibility to switch tasks mid-flow
+    if STATE.get("focus"):
+        if _wants_property_search(user_text) or _wants_list_properties(user_text) or _wants_create_property(user_text):
+            # User wants to change property/context, exit focus mode
+            STATE["focus"] = None
+            save_sessions()
+            print(f"[DEBUG] Exiting focus mode because user wants to change context: {user_text[:50]}")
+            # Continue processing the property change request below
+    
     # Search/switch to a specific property (takes precedence over create if both present)
     if _wants_property_search(user_text):
         # Clear transient flows
@@ -998,7 +1177,7 @@ async def ui_chat(
                 rows = db_list_properties(limit=10)
                 if rows:
                     lines = [f"- {r.get('name','(sin nombre)')} — {r.get('address','')}" for r in rows]
-                    return make_response("No encontré coincidencias. Estas son las propiedades recientes:\n" + "\n".join(lines))
+                    return make_response("No encontré coincidencias exactas. ¿Quisiste decir alguna de estas?\n" + "\n".join(lines) + "\n\nPuedes responder con el nombre tal cual, por ejemplo: 'Casa Demo 6'.")
                 return make_response("No encontré propiedades que coincidan. Prueba con otro nombre o dirección.")
             if len(hits) == 1:
                 chosen = hits[0]
@@ -1037,7 +1216,21 @@ async def ui_chat(
     if _wants_focus_numbers(user_text) or ("framework" in _normalize(user_text) and ("numbers" in _normalize(user_text) or "numeros" in _normalize(user_text) or "números" in _normalize(user_text))):
         STATE["focus"] = "numbers"
         save_sessions()
-        return make_response("Perfecto, nos centramos en NÚMEROS. Puedes pedirme: 'listar esquema de números', 'calcular resumen', o 'pon X a Y'.")
+        # Mostrar la plantilla inmediatamente + resumen de acciones en español
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        try:
+            items = get_numbers(pid)
+            if not items:
+                return make_response("No hay números configurados aún para esta propiedad.")
+            lines = [f"- {it['group_name']} / {it['item_label']} ({it['item_key']}): {it['amount'] if it['amount'] is not None else '-'}" for it in items[:30]]
+            more_hint = f"\n\n({len(items)} items en total)" if len(items) > 30 else ""
+            acciones = ("\n\nPuedes pedirme: calcular, escenario (por ejemplo: -10% en precio/+12% en construcción), "
+                        "punto de equilibrio, sensibilidad, gráfico en cascada, barras apiladas al 100%, o 'enviarlo por email' (Excel).")
+            return make_response("Esquema de números:\n" + "\n".join(lines) + more_hint + acciones)
+        except Exception as e:
+            return make_response(f"No he podido listar los números: {e}")
 
     # List numbers schema/items
     if STATE.get("focus") == "numbers" and (_wants_list_numbers(user_text) or "esquema" in _normalize(user_text)):
@@ -1050,7 +1243,8 @@ async def ui_chat(
                 return make_response("No hay números configurados aún para esta propiedad.")
             lines = [f"- {it['group_name']} / {it['item_label']} ({it['item_key']}): {it['amount'] if it['amount'] is not None else '-'}" for it in items[:30]]
             more_hint = f"\n\n({len(items)} items en total)" if len(items) > 30 else ""
-            return make_response("Esquema de números:\n" + "\n".join(lines) + more_hint)
+            actions = "\n\nPuedes pedirme: calcular, escenario (por ejemplo: -10% en precio/+12% en construcción), punto de equilibrio, sensibilidad, gráfico en cascada, barras apiladas al 100%, o 'enviarlo por email' (Excel)."
+            return make_response("Esquema de números:\n" + "\n".join(lines) + more_hint + actions)
         except Exception as e:
             return make_response(f"No he podido listar los números: {e}")
 
@@ -1060,8 +1254,14 @@ async def ui_chat(
         if not pid:
             return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
         try:
-            results = calc_numbers(pid)
-            return make_response("✅ Cálculo realizado. Puedes volver a pedir el esquema para ver valores actualizados.")
+            # Use new Numbers Agent compute (persist outputs/logs) in addition to DB calc if present
+            _ = numbers_compute_and_log(pid, triggered_by="user", trigger_type="manual")
+            # Keep legacy calc for compatibility if available
+            try:
+                _ = calc_numbers(pid)
+            except Exception:
+                pass
+            return make_response("✅ Cálculo realizado. He registrado el cálculo y validado anomalías. Puedes volver a pedir el esquema o solicitar gráficos o Excel.")
         except Exception as e:
             return make_response(f"No he podido calcular los números: {e}")
 
@@ -1081,8 +1281,8 @@ async def ui_chat(
         except Exception as e:
             return make_response(f"No he podido revisar los números: {e}")
 
-    # Set/update a number value
-    if STATE.get("focus") == "numbers" and (_wants_set_number(user_text) or _parse_number_value(user_text) is not None):
+    # Set/update a number value (solo con orden explícita: pon/actualiza/...)
+    if STATE.get("focus") == "numbers" and _wants_set_number(user_text):
         pid = STATE.get("property_id")
         if not pid:
             return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
@@ -1096,7 +1296,14 @@ async def ui_chat(
                 return make_response("No he entendido qué valor quieres cambiar. Dime, por ejemplo: 'pon ITP a 12000' " + hint)
             # Persist
             result = set_number(pid, item["item_key"], float(value))
-            return make_response(f"✅ Actualizado {item['item_label']} ({item['item_key']}) a {value}")
+            # Auto-recalculate and log using Numbers Agent (no invented values)
+            try:
+                comp = numbers_compute_and_log(pid, triggered_by="user", trigger_type="set_number")
+                anomalies = comp.get("anomalies") or []
+                warn = ("\n⚠️ Anomalías: " + "; ".join(anomalies)) if anomalies else ""
+            except Exception:
+                warn = ""
+            return make_response(f"✅ Actualizado {item['item_label']} ({item['item_key']}) a {value}{warn}")
         except Exception as e:
             return make_response(f"No he podido actualizar el número: {e}")
     
@@ -1187,7 +1394,61 @@ async def ui_chat(
             print(f"[DEBUG] QA with citations failed: {e}, falling back to agent")
             # Fall through to agent if QA fails
     
-    # If no specific intent matched, use the agent
+    # If no specific intent matched, try Numbers NL router globally (even fuera de números)
+    wants_what_if = _wants_numbers_what_if(user_text)
+    wants_be = _wants_numbers_break_even(user_text)
+    wants_wf = _wants_chart_waterfall(user_text)
+    wants_stack = _wants_chart_stack(user_text)
+    wants_sens = _wants_chart_sensitivity(user_text)
+
+    if STATE.get("focus") == "numbers" or wants_what_if or wants_be or wants_wf or wants_stack or wants_sens:
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        # Garantiza que quedamos en modo números
+        if STATE.get("focus") != "numbers":
+            STATE["focus"] = "numbers"
+            save_sessions()
+        # what-if
+        if wants_what_if:
+            deltas = _parse_percent_changes(user_text)
+            if not deltas:
+                return make_response("No he podido entender los cambios. Dime, por ejemplo: 'precio de venta -10% y construcción +12%'.")
+            try:
+                out = numbers_what_if(pid, deltas, name="what_if_chat")
+                ans = "Escenario calculado. Net profit: {}".format(out.get("outputs", {}).get("net_profit"))
+                return make_response(ans)
+            except Exception as e:
+                return make_response(f"No he podido calcular el escenario: {e}")
+        # break-even
+        if wants_be:
+            try:
+                out_be = numbers_break_even(pid, 1.0)
+                if out_be.get("error"):
+                    return make_response("No hay datos suficientes para calcular el break-even.")
+                return make_response(f"Break-even en precio_venta ≈ {out_be['precio_venta']:.2f} (net_profit {out_be['net_profit']:.2f}).")
+            except Exception as e:
+                return make_response(f"No he podido calcular el break-even: {e}")
+        # charts
+        if wants_wf:
+            out_wf = numbers_chart_waterfall(pid)
+            if out_wf.get("signed_url"):
+                return make_response(f"Waterfall listo: {out_wf['signed_url']}")
+            return make_response("No he podido generar el waterfall.")
+        if wants_stack:
+            out_st = numbers_chart_cost_stack(pid)
+            if out_st.get("signed_url"):
+                return make_response(f"Composición de costes lista: {out_st['signed_url']}")
+            return make_response("No he podido generar el gráfico de composición.")
+        if wants_sens:
+            # default vectors
+            precio_vec = [-0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2]
+            costes_vec = [-0.15, -0.1, -0.05, 0.0, 0.05, 0.1, 0.15]
+            out_sens = numbers_chart_sensitivity(pid, precio_vec, costes_vec)
+            if out_sens.get("signed_url"):
+                return make_response(f"Sensibilidad lista: {out_sens['signed_url']}")
+            return make_response("No he podido generar el heatmap de sensibilidad.")
+
     out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
     
     # Update property_id if the agent changed it (messages are handled by PostgreSQL checkpointer)
@@ -1212,5 +1473,87 @@ async def ui_chat(
     extra = {"transcript": transcript} if transcript else None
     print(f"[DEBUG] Final response extra: {extra}")
     return make_response(answer or "(sin respuesta)", extra)
+# --- Minimal Numbers Agent endpoints for testing and UI integration ---
+@app.post("/numbers/compute")
+async def numbers_compute(property_id: str = Form(...)):
+    try:
+        out = numbers_compute_and_log(property_id, triggered_by="api", trigger_type="manual")
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/numbers/excel")
+async def numbers_excel(property_id: str):
+    try:
+        data = generate_numbers_excel(property_id)
+        return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={
+            "Content-Disposition": "attachment; filename=numbers_framework.xlsx"
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/numbers/what_if")
+async def numbers_whatif(property_id: str = Form(...), deltas_json: str = Form(...), name: str = Form("what_if")):
+    try:
+        import json
+        deltas = json.loads(deltas_json)
+        out = numbers_what_if(property_id, deltas, name)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/numbers/sensitivity")
+async def numbers_sensitivity(property_id: str = Form(...), precio_vec_json: str = Form(...), costes_vec_json: str = Form(...)):
+    try:
+        import json
+        precio_vec = json.loads(precio_vec_json)
+        costes_vec = json.loads(costes_vec_json)
+        out = numbers_sensitivity_grid(property_id, precio_vec, costes_vec)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/numbers/break_even")
+async def numbers_breakeven(property_id: str = Form(...), tol: float = Form(1.0)):
+    try:
+        out = numbers_break_even(property_id, tol)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/numbers/chart/waterfall")
+async def numbers_chart_wf(property_id: str = Form(...)):
+    try:
+        out = numbers_chart_waterfall(property_id)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/numbers/chart/stack")
+async def numbers_chart_stack(property_id: str = Form(...)):
+    try:
+        out = numbers_chart_cost_stack(property_id)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/numbers/chart/sensitivity")
+async def numbers_chart_sens(property_id: str = Form(...), precio_vec_json: str = Form(...), costes_vec_json: str = Form(...)):
+    try:
+        import json
+        precio_vec = json.loads(precio_vec_json)
+        costes_vec = json.loads(costes_vec_json)
+        out = numbers_chart_sensitivity(property_id, precio_vec, costes_vec)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 
