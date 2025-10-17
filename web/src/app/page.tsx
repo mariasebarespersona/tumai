@@ -158,89 +158,142 @@ export default function ChatPage() {
   }, [])
 
   const filePreviews = useMemo(() => files.map((f, i) => (
-    <div key={i} className="flex items-center justify-between gap-2 rounded-md border border-[color:var(--c-green-300)] bg-white/70 px-3 py-2 text-sm">
-      <span className="truncate max-w-[16rem]" title={f.name}>{f.name}</span>
-      <button onClick={() => removeFile(i)} className="rounded-md px-2 py-1 text-[color:var(--c-green-800)] hover:bg-[color:var(--c-green-100)]">Remove</button>
+    <div key={i} className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[color:var(--c-green-300)] glass px-4 py-3 text-sm nature-shadow">
+      <span className="truncate max-w-[16rem] font-medium text-[color:var(--c-green-800)]" title={f.name}>
+        📄 {f.name}
+      </span>
+      <button onClick={() => removeFile(i)} className="rounded-xl px-3 py-1.5 text-[color:var(--c-green-700)] hover:bg-[color:var(--c-green-200)] font-semibold transition-all hover:scale-105">
+        ✕
+      </button>
     </div>
   )), [files, removeFile])
 
   return (
     <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
       {/* Chat area */}
-      <div ref={scrollRef} className="flex-1 overflow-auto rounded-2xl p-6 bg-gradient-to-br from-[color:var(--c-green-50)] to-[color:var(--c-green-100)] shadow-lg border border-[color:var(--c-green-200)]">
+      <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-8 glass nature-shadow-lg scrollbar-thin">
         {messages.length === 0 ? (
           <div className="text-center text-[color:var(--c-green-800)]">
-            <div className="mb-3 text-3xl animate-pulse">🌾</div>
-            <div className="mb-2 text-2xl font-bold bg-gradient-to-r from-[color:var(--c-green-700)] to-[color:var(--c-green-600)] bg-clip-text text-transparent">
+            <div className="mb-4 text-5xl animate-pulse-soft">🌾</div>
+            <div className="mb-3 text-3xl font-bold bg-gradient-to-r from-[color:var(--c-green-700)] to-[color:var(--c-green-600)] bg-clip-text text-transparent">
               ¡Bienvenido a RAMA Country Living!
             </div>
-            <div className="opacity-80 text-base mb-6">Tu asistente inteligente para gestionar propiedades</div>
-            <div className="mt-6 grid grid-cols-2 gap-4">
-              <div className="h-[70px] rounded-2xl bg-gradient-to-br from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] text-left px-4 py-3 shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-default">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">🛠️</span>
-                  <div>
-                    <div className="text-[15px] font-semibold leading-4 text-[color:var(--c-green-800)]">Crear ficha propiedad</div>
-                    <div className="text-[12px] opacity-70 mt-1 text-[color:var(--c-green-600)]">Nueva propiedad</div>
+            <div className="opacity-80 text-lg mb-8 text-[color:var(--c-green-700)]">
+              Tu asistente inteligente para gestionar propiedades rurales
+            </div>
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-5 max-w-4xl mx-auto">
+              {/* Crear ficha propiedad */}
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-400)] to-[color:var(--c-green-500)] flex items-center justify-center text-2xl nature-shadow">
+                    🏡
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
+                      Crear ficha propiedad
+                    </div>
+                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
+                      Añade nuevas propiedades al sistema
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="h-[70px] rounded-2xl bg-gradient-to-br from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] text-left px-4 py-3 shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-default">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">▸</span>
-                  <div>
-                    <div className="text-[15px] font-semibold leading-4 text-[color:var(--c-green-800)]">Gestión documentos</div>
-                    <div className="text-[12px] opacity-70 mt-1 text-[color:var(--c-green-600)]">Subir y organizar</div>
+              
+              {/* Gestión documentos */}
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-sage-400)] to-[color:var(--c-sage-500)] flex items-center justify-center text-2xl nature-shadow">
+                    📁
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
+                      Gestión de documentos
+                    </div>
+                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
+                      Sube y organiza escrituras y contratos
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="h-[70px] rounded-2xl bg-gradient-to-br from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] text-left px-4 py-3 shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-default">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">💬</span>
-                  <div>
-                    <div className="text-[15px] font-semibold leading-4 text-[color:var(--c-green-800)]">Consultas inteligentes</div>
-                    <div className="text-[12px] opacity-70 mt-1 text-[color:var(--c-green-600)]">Preguntas sobre docs</div>
+              
+              {/* Consultas inteligentes */}
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-300)] to-[color:var(--c-green-400)] flex items-center justify-center text-2xl nature-shadow">
+                    🤖
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
+                      Consultas inteligentes
+                    </div>
+                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
+                      Pregunta sobre tus documentos
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="h-[70px] rounded-2xl bg-gradient-to-br from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] text-left px-4 py-3 shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-default">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">✉️</span>
-                  <div>
-                    <div className="text-[15px] font-semibold leading-4 text-[color:var(--c-green-800)]">Email automatizado</div>
-                    <div className="text-[12px] opacity-70 mt-1 text-[color:var(--c-green-600)]">Enviar información</div>
+              
+              {/* Email automatizado */}
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-earth-300)] to-[color:var(--c-earth-400)] flex items-center justify-center text-2xl nature-shadow">
+                    ✉️
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
+                      Email automatizado
+                    </div>
+                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
+                      Envía información por correo
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="h-[70px] rounded-2xl bg-gradient-to-br from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] text-left px-4 py-3 shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-default">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">📊</span>
-                  <div>
-                    <div className="text-[15px] font-semibold leading-4 text-[color:var(--c-green-800)]">Resúmenes automáticos</div>
-                    <div className="text-[12px] opacity-70 mt-1 text-[color:var(--c-green-600)]">Análisis de contratos</div>
+              
+              {/* Resúmenes automáticos */}
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] flex items-center justify-center text-2xl nature-shadow">
+                    📊
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
+                      Resúmenes automáticos
+                    </div>
+                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
+                      Analiza contratos al instante
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="h-[70px] rounded-2xl bg-gradient-to-br from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] text-left px-4 py-3 shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 cursor-default">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">⚠️</span>
-                  <div>
-                    <div className="text-[15px] font-semibold leading-4 text-[color:var(--c-green-800)]">Recordatorios</div>
-                    <div className="text-[12px] opacity-70 mt-1 text-[color:var(--c-green-600)]">Fechas de pago</div>
+              
+              {/* Recordatorios */}
+              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-earth-400)] to-[color:var(--c-earth-500)] flex items-center justify-center text-2xl nature-shadow">
+                    🔔
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
+                      Recordatorios inteligentes
+                    </div>
+                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
+                      No olvides fechas de pago importantes
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {messages.map(m => (
               <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div className={
-                  'max-w-[85%] whitespace-pre-wrap rounded-2xl px-5 py-3 shadow-lg ' +
+                  'max-w-[85%] whitespace-pre-wrap rounded-3xl px-6 py-4 nature-shadow-lg ' +
                   (m.role === 'user'
-                    ? 'bg-gradient-to-r from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white'
-                    : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-900)] border border-[color:var(--c-green-200)]')
+                    ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white font-medium'
+                    : 'glass border-2 border-[color:var(--c-green-200)] text-[color:var(--c-green-900)]')
                 }>
                   {m.content}
                 </div>
@@ -254,27 +307,27 @@ export default function ChatPage() {
       <div
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        className="rounded-2xl border-2 border-dashed border-[color:var(--c-green-300)] bg-gradient-to-r from-[color:var(--c-green-100)] to-[color:var(--c-green-200)] p-4 text-[color:var(--c-green-800)] shadow-md hover:shadow-lg transition-all duration-200"
+        className="rounded-3xl border-2 border-dashed border-[color:var(--c-green-400)] glass-strong p-6 text-[color:var(--c-green-800)] nature-shadow hover:nature-shadow-lg transition-all duration-300 hover:border-[color:var(--c-green-500)]"
       >
         <div className="flex items-center justify-between">
-          <div className="font-semibold text-base flex items-center gap-2">
-            <span className="text-xl">📎</span>
-            Arrastra PDFs aquí o haz click
+          <div className="font-bold text-lg flex items-center gap-3">
+            <span className="text-2xl">📎</span>
+            <span>Arrastra PDFs aquí o haz click</span>
           </div>
-          <label className="cursor-pointer rounded-xl bg-gradient-to-r from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] px-4 py-2 text-white font-medium shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200">
+          <label className="cursor-pointer rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-6 py-3 text-white font-semibold nature-shadow-lg hover:scale-105 transition-all duration-200 shine-effect">
             Elegir archivos
             <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
           </label>
         </div>
         {files.length > 0 && (
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
             {filePreviews}
           </div>
         )}
       </div>
 
       {/* Composer */}
-      <div className="flex items-end gap-3 rounded-2xl p-4 bg-gradient-to-r from-white to-[color:var(--c-green-50)] border border-[color:var(--c-green-200)] shadow-lg">
+      <div className="flex items-end gap-4 rounded-3xl p-5 glass-strong nature-shadow-lg">
         <button
           onMouseDown={startRecording}
           onMouseUp={stopRecording}
@@ -282,12 +335,12 @@ export default function ChatPage() {
           onTouchEnd={stopRecording}
           disabled={isProcessingVoice}
           className={
-            'h-11 w-11 shrink-0 rounded-full border-2 border-[color:var(--c-green-300)] shadow-md transition-all duration-200 ' +
+            'h-14 w-14 shrink-0 rounded-full border-2 border-[color:var(--c-green-400)] nature-shadow transition-all duration-300 ' +
             (isRecording 
-              ? 'bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110' 
+              ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110 animate-pulse' 
               : isProcessingVoice
-              ? 'bg-gradient-to-r from-[color:var(--c-green-400)] to-[color:var(--c-green-500)] text-white animate-pulse'
-              : 'bg-white text-[color:var(--c-green-800)] hover:bg-[color:var(--c-green-100)] hover:scale-105')
+              ? 'bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white animate-pulse'
+              : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-800)] hover:from-[color:var(--c-green-100)] hover:to-[color:var(--c-green-200)] hover:scale-105')
           }
           title={
             isRecording 
@@ -297,16 +350,16 @@ export default function ChatPage() {
               : 'Mantén para grabar voz'
           }
         >
-          <span className="text-lg">
-            {isRecording ? '◉' : isProcessingVoice ? '⏳' : '🎤'}
+          <span className="text-xl">
+            {isRecording ? '⏺' : isProcessingVoice ? '⏳' : '🎤'}
           </span>
         </button>
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Escribe tu mensaje..."
+          placeholder="Escribe tu mensaje sobre propiedades..."
           rows={1}
-          className="min-h-[44px] flex-1 resize-none rounded-xl border-2 border-[color:var(--c-green-300)] bg-white px-4 py-3 text-base outline-none focus:ring-2 focus:ring-[color:var(--c-green-400)] focus:border-[color:var(--c-green-500)] transition-all duration-200"
+          className="min-h-[56px] flex-1 resize-none rounded-2xl border-2 border-[color:var(--c-green-300)] bg-white px-5 py-4 text-base font-medium outline-none focus:ring-2 focus:ring-[color:var(--c-green-500)] focus:border-[color:var(--c-green-500)] transition-all duration-200 placeholder:text-[color:var(--c-green-400)]"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
@@ -317,9 +370,9 @@ export default function ChatPage() {
         <button
           onClick={onSend}
           disabled={uploading}
-          className="h-11 shrink-0 rounded-xl bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-6 text-white font-medium shadow-md hover:shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100"
+          className="h-14 shrink-0 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-8 text-white font-bold nature-shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100 shine-effect"
         >
-          {uploading ? 'Enviando…' : 'Enviar ✈️'}
+          {uploading ? '⏳ Enviando…' : '✈️ Enviar'}
         </button>
       </div>
     </div>

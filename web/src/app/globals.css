@@ -3,16 +3,32 @@
 @tailwind utilities;
 
 :root {
-  --c-green-50: #f3faf2;
-  --c-green-100: #e6f5e4;
-  --c-green-200: #cdebc7;
-  --c-green-300: #a6d99b;
-  --c-green-400: #7cc46e;
-  --c-green-500: #59b24e;
-  --c-green-600: #3f8e38;
-  --c-green-700: #2f6d2b;
-  --c-green-800: #235224;
-  --c-green-900: #1b3e1c;
+  /* Paleta verde campo natural */
+  --c-green-50: #f7fdf5;
+  --c-green-100: #e8f7e4;
+  --c-green-200: #d4eece;
+  --c-green-300: #b3dfaa;
+  --c-green-400: #8fcb7f;
+  --c-green-500: #6eb55e;
+  --c-green-600: #4f9542;
+  --c-green-700: #3d7435;
+  --c-green-800: #2e5828;
+  --c-green-900: #1f3d1e;
+  
+  /* Tonos tierra complementarios */
+  --c-earth-50: #fdfbf7;
+  --c-earth-100: #f9f5ed;
+  --c-earth-200: #f1e8d9;
+  --c-earth-300: #e3d4bd;
+  --c-earth-400: #d4c0a1;
+  --c-earth-500: #c5ac85;
+  --c-earth-600: #a8916f;
+  
+  /* Acentos campo */
+  --c-sage-400: #9caf88;
+  --c-sage-500: #7a9165;
+  --c-olive-500: #808000;
+  --c-wheat-300: #f5deb3;
 }
 
 html, body {
@@ -20,32 +36,143 @@ html, body {
 }
 
 body {
-  @apply bg-[color:var(--c-green-50)] text-[color:var(--c-green-900)] antialiased;
+  @apply antialiased;
+  background: linear-gradient(
+    135deg,
+    #f7fdf5 0%,
+    #e8f7e4 25%,
+    #d4eece 50%,
+    #e8f7e4 75%,
+    #f7fdf5 100%
+  );
+  background-attachment: fixed;
+  color: var(--c-green-900);
 }
 
 .country-gradient {
-  background: linear-gradient(180deg, var(--c-green-100), var(--c-green-50));
+  background: linear-gradient(
+    180deg,
+    rgba(232, 247, 228, 0.8) 0%,
+    rgba(247, 253, 245, 0.6) 100%
+  );
+}
+
+.country-pattern {
+  background-image: 
+    radial-gradient(circle at 20% 50%, rgba(179, 223, 170, 0.1) 0%, transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(156, 175, 136, 0.1) 0%, transparent 50%);
 }
 
 .glass {
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: saturate(120%) blur(10px);
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: saturate(130%) blur(12px);
+  border: 1px solid rgba(179, 223, 170, 0.3);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: saturate(140%) blur(16px);
+  border: 1px solid rgba(179, 223, 170, 0.4);
+}
+
+.field-card {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(232, 247, 228, 0.85) 100%
+  );
+  backdrop-filter: blur(10px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.field-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 12px 24px -6px rgba(79, 149, 66, 0.25);
+}
+
+.nature-shadow {
+  box-shadow: 
+    0 4px 6px -1px rgba(79, 149, 66, 0.1),
+    0 2px 4px -1px rgba(79, 149, 66, 0.06);
+}
+
+.nature-shadow-lg {
+  box-shadow: 
+    0 10px 15px -3px rgba(79, 149, 66, 0.15),
+    0 4px 6px -2px rgba(79, 149, 66, 0.1);
 }
 
 .scrollbar-thin {
   scrollbar-width: thin;
+  scrollbar-color: var(--c-green-400) transparent;
 }
 
 .scrollbar-thin::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: var(--c-green-300);
-  border-radius: 8px;
+  background: linear-gradient(
+    180deg,
+    var(--c-green-400) 0%,
+    var(--c-green-500) 100%
+  );
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    var(--c-green-500) 0%,
+    var(--c-green-600) 100%
+  );
+  background-clip: padding-box;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
-  background-color: transparent;
+  background-color: rgba(212, 238, 206, 0.3);
+  border-radius: 10px;
+}
+
+/* Animación de pulso suave */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Efecto de brillo sutil */
+.shine-effect {
+  position: relative;
+  overflow: hidden;
+}
+
+.shine-effect::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  transition: left 0.5s;
+}
+
+.shine-effect:hover::before {
+  left: 100%;
 }
