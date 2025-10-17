@@ -168,20 +168,38 @@ export default function ChatPage() {
     </div>
   )), [files, removeFile])
 
-  // Render assistant/user message with inline chart previews (PNG/JPG/WEBP)
+  // Render assistant/user message with inline chart previews (PNG/JPG/WEBP) and download buttons for docs
   const renderMessageContent = useCallback((text: string) => {
     if (!text) return null
-    const imgRegex = /(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s]*)?)/gi
-    const parts = text.split(imgRegex)
+    const fileRegex = /(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp|pptx|xlsx|pdf|docx)(?:\?[^\s]*)?)/gi
+    const parts = text.split(fileRegex)
     const nodes: React.ReactNode[] = []
     for (let i = 0; i < parts.length; i++) {
       const token = parts[i]
       if (!token) continue
       const isImg = /^(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s]*)?)$/i.test(token)
+      const isDoc = /^(https?:\/\/[^\s]+?\.(?:pptx|xlsx|pdf|docx)(?:\?[^\s]*)?)$/i.test(token)
       if (isImg) {
         nodes.push(
           <div key={`img-${i}`} className="mt-3">
             <img src={token} alt="gráfico" className="max-w-full rounded-xl border border-[color:var(--c-green-200)] shadow" />
+          </div>
+        )
+      } else if (isDoc) {
+        const ext = token.match(/\.(pptx|xlsx|pdf|docx)/i)?.[1]?.toUpperCase() || 'FILE'
+        const filename = token.match(/\/([^/?]+\.(pptx|xlsx|pdf|docx))/i)?.[1] || `archivo.${ext.toLowerCase()}`
+        nodes.push(
+          <div key={`doc-${i}`} className="mt-3 inline-block">
+            <a 
+              href={token} 
+              download={filename}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white font-semibold hover:scale-105 transition-all nature-shadow hover:shadow-xl"
+            >
+              <span>📄</span>
+              <span>Descargar {ext}</span>
+            </a>
           </div>
         )
       } else {

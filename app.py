@@ -8,10 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
 from tools.property_tools import search_properties as db_search_properties
-from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists
+from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists, seed_mock_documents
 from tools.rag_tool import summarize_document as rag_summarize, qa_document as rag_qa, qa_payment_schedule as rag_qa_pay
 from tools.rag_index import qa_with_citations, index_all_documents
 from tools.email_tool import send_email
+from tools.summary_ppt import build_summary_ppt
+from tools.property_tools import get_property as db_get_property
+from tools.supabase_client import sb, BUCKET
 from tools.numbers_tools import get_numbers, set_number, calc_numbers
 from tools.numbers_agent import (
     compute_and_log as numbers_compute_and_log,
@@ -1072,6 +1075,41 @@ async def ui_chat(
                 return make_response("Por supuesto. ¿A qué dirección de email te lo envío?")
         else:
             return make_response("¿Qué información te gustaría que te enviara por email? Especifica el documento o la información.")
+    
+    # Build summary PowerPoint on explicit request
+    if re.search(r"\b(ficha\s+resumen\s+propiedad|resumen\s+en\s+ppt|powerpoint|pptx)\b", _normalize(user_text)):
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        try:
+            # Fetch property info if available
+            prop = None
+            try:
+                prop = db_get_property(pid)
+            except Exception:
+                prop = None
+            name = (prop or {}).get("name") if isinstance(prop, dict) else None
+            address = (prop or {}).get("address") if isinstance(prop, dict) else None
+            data = build_summary_ppt(pid, name, address, format="pdf")
+            # Upload to storage and share URL
+            import time
+            key = f"summaries/{pid}/summary_{int(time.time())}.pdf"
+            sb.storage.from_(BUCKET).upload(key, data, {"content-type": "application/pdf", "upsert": "true"})
+            url = sb.storage.from_(BUCKET).create_signed_url(key, 3600)["signedURL"]
+            return make_response(f"Resumen (PDF) listo: {url}\nSi quieres te lo envío por email en este momento.")
+        except Exception as e:
+            return make_response(f"No he podido generar la ficha resumen: {e}")
+
+    # Seed mock documents on request (simple trigger phrase)
+    if _normalize(user_text) in ["sembrar docs mock", "crear docs mock", "mock documentos", "rellena docs mock", "genera documentos mock"] or re.search(r"\b(mock|falsos|simulados)\b.*\b(documentos|docs)\b", _normalize(user_text)):
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad trabajamos? Dime el nombre o el UUID.")
+        try:
+            res = seed_mock_documents(pid, index_after=True)
+            return make_response(f"✅ Documentos mock creados: {res.get('seeded', 0)}. {(len(res.get('errors', [])))} errores.")
+        except Exception as e:
+            return make_response(f"No he podido crear los documentos mock: {e}")
     
     # List all properties
     if _wants_list_properties(user_text):

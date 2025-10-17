@@ -14,6 +14,7 @@ from .docs_tools import (
     list_docs as _list_docs,
     signed_url_for as _signed_url_for,
     slot_exists as _slot_exists,
+    seed_mock_documents as _seed_mock_documents,
     purge_property_documents as _purge_property_documents,
     purge_all_documents as _purge_all_documents,
 )
@@ -29,6 +30,7 @@ from .numbers_agent import (
     chart_sensitivity_heatmap as _numbers_chart_sensitivity,
 )
 from .summary_tools import get_summary_spec as _get_summary_spec, upsert_summary_value as _upsert_summary_value, compute_summary as _compute_summary
+from .summary_ppt import build_summary_ppt as _build_summary_ppt
 from .email_tool import send_email as _send_email
 from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google, process_voice_input as _process_voice_input, create_voice_response as _create_voice_response
 from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document, qa_payment_schedule as _qa_payment_schedule
@@ -116,6 +118,17 @@ class SlotExistsInput(BaseModel):
 def slot_exists_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
     """Check if a document slot exists in the per-property documents framework (and list available names)."""
     return _slot_exists(property_id, document_group, document_subgroup, document_name)
+
+
+# --- seed mock docs for prototyping ---
+class SeedMockDocsInput(BaseModel):
+    property_id: str
+    index_after: bool = True
+
+@tool("seed_mock_documents")
+def seed_mock_documents_tool(property_id: str, index_after: bool = True) -> Dict:
+    """Create placeholder text files for all missing documents of a property. For prototyping only (marks metadata mock=True)."""
+    return _seed_mock_documents(property_id, index_after)
 
 
 # --- Purge documents ---
@@ -290,6 +303,21 @@ class ComputeSummaryInput(BaseModel):
 def compute_summary_tool(property_id: str, only_items: Optional[List[str]] = None) -> Dict:
     """Compute summary_values per summary_spec: pulls from documents & numbers, evaluates formulas, upserts results."""
     return _compute_summary(property_id, only_items)
+
+
+# --- Summary PowerPoint ---
+class BuildSummaryPPTInput(BaseModel):
+    property_id: str
+    property_name: Optional[str] = None
+    address: Optional[str] = None
+
+@tool("build_summary_ppt")
+def build_summary_ppt_tool(property_id: str, property_name: Optional[str] = None, address: Optional[str] = None, format: str = "pdf") -> Dict:
+    """Build a summary presentation (PDF or PPTX) with fixed slides (índice, fotos demo CC, executive summary, mapa placeholder, tabla números, waterfall, fechas). Returns {filename, bytes_b64}. Nunca inventa datos: usa números y docs existentes, y fotos demo no asociadas a la propiedad. Default format: PDF for direct viewing."""
+    import base64
+    data = _build_summary_ppt(property_id, property_name, address, format=format)
+    ext = "pdf" if format.lower() == "pdf" else "pptx"
+    return {"filename": f"resumen_propiedad.{ext}", "bytes_b64": base64.b64encode(data).decode("utf-8")}
 
 # --- Google voice tools ---
 class TranscribeAudioInput(BaseModel):

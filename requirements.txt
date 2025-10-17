@@ -27,3 +27,6 @@ schedule
 python-dateutil
 plotly>=5.20.0
 kaleido==0.2.1
+python-pptx>=0.6.23
+Pillow>=10.0.0
+reportlab>=4.0.0

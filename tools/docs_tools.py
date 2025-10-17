@@ -345,3 +345,41 @@ def purge_all_documents() -> dict:
         total_removed += res.get("removed_files", 0)
         total_cleared += res.get("cleared_rows", 0)
     return {"properties": len(props or []), "removed_files": total_removed, "cleared_rows": total_cleared}
+
+
+# -------- utilities to seed mock documents for prototyping --------------------
+def seed_mock_documents(property_id: str, index_after: bool = True) -> dict:
+    """Create lightweight placeholder text files for every document row without a file.
+    The placeholders make it possible to prototype summary framework without real docs.
+    """
+    import re
+    seeded = 0
+    errors: List[str] = []
+    rows = list_docs(property_id)
+    for r in rows:
+        if r.get("storage_key"):
+            continue
+        group = r.get("document_group", "")
+        subgroup = r.get("document_subgroup", "") or ""
+        name = r.get("document_name", "Documento")
+        # Build a safe filename
+        base = re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_") or "doc"
+        filename = f"mock_{base}.txt"
+        content = (
+            f"DOCUMENTO SIMULADO PARA PRUEBAS\n\n"
+            f"Propiedad: {property_id}\nGrupo: {group}\nSubgrupo: {subgroup}\nNombre: {name}\n\n"
+            "Este archivo es un placeholder generado automáticamente para permitir el prototipado del framework de resumen.\n"
+        ).encode("utf-8")
+        try:
+            upload_and_link(property_id, content, filename, group, subgroup, name, metadata={"mock": True})
+            # Optionally index for RAG
+            if index_after:
+                try:
+                    from .rag_index import index_document
+                    index_document(property_id, group, subgroup, name)
+                except Exception:
+                    pass
+            seeded += 1
+        except Exception as e:
+            errors.append(f"{group}/{subgroup}/{name}: {e}")
+    return {"seeded": seeded, "errors": errors}
