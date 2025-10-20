@@ -41,13 +41,15 @@ def find_property(name: str, address: str) -> Optional[Dict]:
 
 def list_properties(limit: int = 20) -> List[Dict]:
     try:
-        return (
+        rows = (
             sb.table("properties")
             .select("*")
             .order("created_at", desc=True)
             .limit(limit)
             .execute()
         ).data
+        # Filter out soft-deleted entries (prefixed name)
+        return [r for r in (rows or []) if not str(r.get("name","")) .startswith("__DELETED__ ")]
     except Exception as e:
         import logging
         logging.error(f"Error listing properties: {e}")
@@ -90,7 +92,9 @@ def search_properties(query: str, limit: int = 5) -> List[Dict]:
             .execute()
         ).data
         if results:
-            return results
+            results = [r for r in results if not str(r.get("name","")) .startswith("__DELETED__ ")]
+            if results:
+                return results
 
         # Strategy 2: token-based ilike
         words = query_clean.split()
@@ -108,7 +112,9 @@ def search_properties(query: str, limit: int = 5) -> List[Dict]:
                         .execute()
                     ).data
                     if results:
-                        return results
+                        results = [r for r in results if not str(r.get("name","")) .startswith("__DELETED__ ")]
+                        if results:
+                            return results
 
         # Strategy 3: client-side fuzzy scoring
         qn = norm(query_clean)
@@ -144,9 +150,52 @@ def search_properties(query: str, limit: int = 5) -> List[Dict]:
 
         scored = sorted([(score(r), r) for r in (pool or [])], key=lambda x: x[0], reverse=True)
         top = [r for (s, r) in scored if s >= 0.5][:limit]
+        top = [r for r in top if not str(r.get("name","")) .startswith("__DELETED__ ")]
         return top
 
     except Exception as e:
         import logging
         logging.error(f"Error searching properties: {e}")
         return []
+
+
+# ---- Destructive operations ----
+def delete_property(property_id: str, purge_docs_first: bool = True) -> Dict:
+    """Soft-delete a property by UUID (safe for limited DB privileges).
+
+    Steps:
+    - Optionally purge uploaded documents (storage + links)
+    - Rename property to prefix '__DELETED__ ' to hide in listings/searches
+    - Return {deleted: True}
+    """
+    try:
+        # Purge files first (best-effort)
+        if purge_docs_first:
+            try:
+                from .docs_tools import purge_property_documents
+                purge_property_documents(property_id)
+            except Exception:
+                pass
+
+        # Fetch current name for traceability
+        row = (
+            sb.table("properties").select("id,name,address").eq("id", property_id).limit(1).execute()
+        ).data
+        cur_name = (row[0]["name"] if row else "") or "(sin nombre)"
+        # Prefix the name to mark as deleted; keep id hint
+        new_name = f"__DELETED__ {cur_name}"
+        try:
+            sb.table("properties").update({"name": new_name}).eq("id", property_id).execute()
+        except Exception as e:
+            # If update fails, fallback to hard delete (may fail due to schema owner)
+            try:
+                sb.table("properties").delete().eq("id", property_id).execute()
+            except Exception as e2:
+                import logging
+                logging.error(f"Error deleting property {property_id}: {e2}")
+                return {"deleted": False, "error": str(e2)}
+        return {"deleted": True}
+    except Exception as e:
+        import logging
+        logging.error(f"Error soft-deleting property {property_id}: {e}")
+        return {"deleted": False, "error": str(e)}

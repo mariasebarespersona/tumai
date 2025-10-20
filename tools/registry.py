@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 from .property_tools import add_property as _add_property, list_frameworks as _list_frameworks
 from .property_tools import get_property as _get_property, find_property as _find_property, list_properties as _list_properties
 from .property_tools import search_properties as _search_properties
+from .property_tools import delete_property as _delete_property
 from .docs_tools import (
     propose_slot as _propose_slot,
     upload_and_link as _upload_and_link,
@@ -55,6 +56,16 @@ class ListFrameworksInput(BaseModel):
 def list_frameworks_tool(property_id: str) -> Dict:
     """Return schema names for the property's three frameworks."""
     return _list_frameworks(property_id)
+
+
+class DeletePropertyInput(BaseModel):
+    property_id: str = Field(..., description="UUID of the property to delete")
+    purge_docs_first: bool = Field(True, description="Whether to purge uploaded documents before deletion")
+
+@tool("delete_property")
+def delete_property_tool(property_id: str, purge_docs_first: bool = True) -> Dict:
+    """Delete a property by UUID. Optionally purge its uploaded documents first."""
+    return _delete_property(property_id, purge_docs_first)
 
 
 class ProposeDocInput(BaseModel):
@@ -478,6 +489,7 @@ def rag_index_all_documents_tool(property_id: str) -> Dict:
 TOOLS = [
     add_property_tool,
     list_frameworks_tool,
+    delete_property_tool,
     propose_doc_slot_tool,
     upload_and_link_tool,
     list_docs_tool,

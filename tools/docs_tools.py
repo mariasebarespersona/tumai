@@ -198,6 +198,7 @@ def list_docs(property_id: str) -> List[Dict]:
     
     logger.info(f"📋 Listing documents for property: {property_id}")
     schema = docs_schema(property_id)
+    logger.info(f"🔍 Using schema: {schema}")
     try:
         sb.postgrest.schema = schema
         rows = (sb.table("documents")
@@ -205,7 +206,10 @@ def list_docs(property_id: str) -> List[Dict]:
                 .eq("property_id", property_id)
                 .order("document_group,document_subgroup,document_name")
                 .execute()).data
-        logger.info(f"✅ Found {len(rows)} documents via direct query")
+        logger.info(f"✅ Found {len(rows)} documents via direct query in schema {schema}")
+        # DEBUG: log how many have storage_key
+        with_storage = [r for r in rows if r.get('storage_key') and str(r.get('storage_key')).strip()]
+        logger.info(f"📊 {len(with_storage)} of {len(rows)} documents have storage_key")
         return rows
     except Exception as e:
         logger.warning(f"⚠️ Direct query failed, trying RPC: {e}")
