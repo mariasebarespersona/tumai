@@ -608,20 +608,25 @@ def _match_document_from_text(pid: str, text: str, state: dict = None):
         ]
         if any(re.search(p, t) for p in this_that_patterns):
             last_doc = state["last_uploaded_doc"]
+            print(f"[DEBUG] Detected 'ese/este documento', looking for: {last_doc}")
             # Verify the document actually exists and is uploaded
             try:
                 rows = list_docs(pid)
+                print(f"[DEBUG] Found {len(rows)} total docs in property {pid}")
                 for r in rows:
                     if (r.get("document_name") == last_doc["document_name"] and
                         r.get("document_group") == last_doc["document_group"] and
                         r.get("storage_key")):  # Must be uploaded
+                        print(f"[DEBUG] Matched document: {r.get('document_name')}")
                         return {
                             "document_group": r.get("document_group", ""),
                             "document_subgroup": r.get("document_subgroup", ""),
                             "document_name": r.get("document_name", ""),
                             "storage_key": r.get("storage_key", ""),
                         }
-            except Exception:
+                print(f"[DEBUG] Could not find matching document in list")
+            except Exception as e:
+                print(f"[DEBUG] Exception in last_uploaded_doc lookup: {e}")
                 pass  # Fall through to normal matching
     
     # Normal document matching by name
@@ -1356,6 +1361,16 @@ async def ui_chat(
             if uploaded:
                 lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in uploaded[:10]]
                 more_hint = f"\n\n({len(uploaded)} documentos en total)" if len(uploaded) > 10 else ""
+                
+                # Save reference to last document if there's only one, for "ese documento" references
+                if len(uploaded) == 1:
+                    STATE["last_uploaded_doc"] = {
+                        "document_group": uploaded[0].get("document_group", ""),
+                        "document_subgroup": uploaded[0].get("document_subgroup", ""),
+                        "document_name": uploaded[0].get("document_name", ""),
+                    }
+                    save_sessions()
+                
                 return make_response("Documentos ya subidos:\n" + "\n".join(lines) + more_hint)
             return make_response("Aún no hay documentos subidos para esta propiedad.")
         except Exception as e:
@@ -1524,6 +1539,30 @@ async def ui_chat(
     if is_summarize_request and pid:
         # User wants a summary of a document
         doc_ref = _match_document_from_text(pid, user_text, STATE)
+        
+        # Fallback: if no doc found but user said "ese/este documento" and we have a last doc reference, use it
+        if not doc_ref:
+            t_norm = _normalize(user_text)
+            generic_refs = ["ese documento", "este documento", "el documento", "ese doc", "este doc"]
+            if any(ref in t_norm for ref in generic_refs) and STATE.get("last_uploaded_doc"):
+                # Try to find the last_uploaded_doc in the database
+                try:
+                    rows = list_docs(pid)
+                    last_doc = STATE["last_uploaded_doc"]
+                    for r in rows:
+                        if (r.get("document_name") == last_doc["document_name"] and
+                            r.get("document_group") == last_doc["document_group"] and
+                            r.get("storage_key")):
+                            doc_ref = {
+                                "document_group": r.get("document_group", ""),
+                                "document_subgroup": r.get("document_subgroup", ""),
+                                "document_name": r.get("document_name", ""),
+                                "storage_key": r.get("storage_key", ""),
+                            }
+                            break
+                except Exception as e:
+                    print(f"[DEBUG] Could not retrieve last_uploaded_doc: {e}")
+        
         if doc_ref:
             try:
                 result = rag_summarize(
@@ -1541,6 +1580,22 @@ async def ui_chat(
             except Exception as e:
                 print(f"[DEBUG] Summarize failed: {e}, falling back to agent")
                 # Fall through to agent if summarize fails
+        else:
+            # No document found - provide helpful message
+            try:
+                rows = list_docs(pid)
+                uploaded = [r for r in rows if r.get('storage_key')]
+                if uploaded:
+                    doc_names = [r.get('document_name', '') for r in uploaded[:5]]
+                    return make_response(
+                        f"No he podido identificar qué documento quieres resumir. "
+                        f"Documentos disponibles: {', '.join(doc_names)}. "
+                        f"Por favor, especifica cuál quieres resumir."
+                    )
+                else:
+                    return make_response("No hay documentos subidos aún para esta propiedad. ¿Quieres subir uno?")
+            except Exception:
+                pass  # Fall through to agent
     
     # Document question/RAG - Priority: any question about documents (but not summarize)
     question_words = ["qué", "que", "cual", "cuál", "cuando", "cuándo", "donde", "dónde", 
