@@ -247,9 +247,21 @@ def _wants_property_search(text: str) -> bool:
     """Detecta cuando el usuario quiere EXPLÍCITAMENTE cambiar de propiedad.
     Dejamos que el agente maneje menciones simples como 'casa'."""
     t = _normalize(text)
+    
     # Ignore generic plural list requests
     if "propiedades" in t or "properties" in t:
         return False
+    
+    # EXCLUDE if user is talking about frameworks/plantillas - they want to work WITH the property, not switch
+    framework_words = ["numeros", "números", "numbers", "documento", "documentos", "documents", 
+                       "plantilla", "template", "framework", "resumen", "summary"]
+    if any(w in t for w in framework_words):
+        return False
+    
+    # EXCLUDE if they say "de esta propiedad" or "de la propiedad" - they're referencing current property
+    if re.search(r"\b(de\s+)?(esta|la)\s+propiedad\b", t):
+        return False
+    
     # Only detect EXPLICIT property switching commands with clear verbs
     if re.search(r"\b(trabajar|usar|utilizar|cambiar|switch)\b", t) and re.search(r"\b(propiedad|property|con|en)\b", t):
         return True
