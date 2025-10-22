@@ -311,6 +311,34 @@ def _wants_email(text: str) -> bool:
     return False
 
 
+def _wants_focus_documents(text: str) -> bool:
+    t = _normalize(text)
+    
+    # Exclude if there are action words - these are specific requests, not mode switching
+    action_words = ["resume", "resumen", "resumir", "resumeme", "summarize", "summary",
+                    "que pone", "qué pone", "que dice", "qué dice", "lee", "leer", "read",
+                    "busca", "buscar", "encuentra", "encontrar", "search", "find",
+                    "envia", "envía", "enviame", "envíame", "send", "email", "correo",
+                    "borra", "borrar", "elimina", "eliminar", "delete", "remove",
+                    "sube", "subir", "upload", "adjunta", "adjuntar", "attach"]
+    if any(w in t for w in action_words):
+        return False
+    
+    # Exclude if it's a question about documents (has question words)
+    question_words = ["qué", "que", "cual", "cuál", "cuando", "cuándo", "donde", "dónde", 
+                      "cómo", "como", "por qué", "porque", "cuanto", "cuánto"]
+    if any(w in t for w in question_words):
+        return False
+    
+    # Detect if user wants to work with documents (mode switching)
+    patterns = [
+        r"^\s*(documento|documentos|documents|document)\s*$",  # Just "documentos" alone
+        r"\bframework\s+de\s+(los\s+)?documentos\b",
+        r"\b(enfocar|centrar|trabajar|empezar|iniciar|start|vamos)\s+(en|con|a)?\s*(los\s+)?(documento|documentos|documents|document)\b",
+    ]
+    return any(re.search(p, t) for p in patterns)
+
+
 def _wants_focus_numbers(text: str) -> bool:
     t = _normalize(text)
     # If it's a concrete action, don't treat it as pure focus
@@ -567,13 +595,41 @@ def _wants_same_email(text: str) -> bool:
     return any(ind in t for ind in same_indicators)
 
 
-def _match_document_from_text(pid: str, text: str):
-    """Match document name from text."""
+def _match_document_from_text(pid: str, text: str, state: dict = None):
+    """Match document name from text. If user says 'este/ese documento', use last uploaded doc."""
+    t = _normalize(text)
+    
+    # Check for "este/ese/this/that documento" - use last uploaded document
+    if state and state.get("last_uploaded_doc"):
+        this_that_patterns = [
+            r"\b(este|ese|esta|esa|this|that)\s+(documento|document)",
+            r"\b(el|the)\s+ultimo\s+(documento|document)",
+            r"\b(el|the)\s+(documento|document)\s+(que|that)\s+(subi|subí|uploaded?)"
+        ]
+        if any(re.search(p, t) for p in this_that_patterns):
+            last_doc = state["last_uploaded_doc"]
+            # Verify the document actually exists and is uploaded
+            try:
+                rows = list_docs(pid)
+                for r in rows:
+                    if (r.get("document_name") == last_doc["document_name"] and
+                        r.get("document_group") == last_doc["document_group"] and
+                        r.get("storage_key")):  # Must be uploaded
+                        return {
+                            "document_group": r.get("document_group", ""),
+                            "document_subgroup": r.get("document_subgroup", ""),
+                            "document_name": r.get("document_name", ""),
+                            "storage_key": r.get("storage_key", ""),
+                        }
+            except Exception:
+                pass  # Fall through to normal matching
+    
+    # Normal document matching by name
     try:
         rows = list_docs(pid)
     except Exception:
         return None
-    t = _normalize(text)
+    
     stopwords = ["de", "del", "de la", "el", "la", "los", "las", "un", "una", "sobre", "para"]
     t_clean = t
     for sw in stopwords:
@@ -898,6 +954,14 @@ async def ui_chat(
                 except Exception as e:
                     logger.warning(f"⚠️ Could not auto-index document (non-critical): {e}")
                 
+                # Save reference to last uploaded document for "este documento" references
+                STATE["last_uploaded_doc"] = {
+                    "document_group": proposal["document_group"],
+                    "document_subgroup": proposal.get("document_subgroup", ""),
+                    "document_name": proposal["document_name"],
+                }
+                save_sessions()
+                
                 return make_response(f"✅ Subido '{proposal['document_name']}'.")
             except Exception as e:
                 STATE["pending_proposal"] = None
@@ -1034,7 +1098,7 @@ async def ui_chat(
                 return make_response("No hay ninguna respuesta anterior para enviar. ¿Qué información te gustaría que te enviara?")
         
         # Check if user mentions a specific document
-        document_ref = _match_document_from_text(pid, user_text) if pid else None
+        document_ref = _match_document_from_text(pid, user_text, STATE) if pid else None
         
         # If the user asks to send the numbers framework, generate Excel by default
         if STATE.get("focus") == "numbers" or ("framework" in _normalize(user_text) and ("numbers" in _normalize(user_text) or "numeros" in _normalize(user_text) or "números" in _normalize(user_text))):
@@ -1297,6 +1361,50 @@ async def ui_chat(
         except Exception as e:
             return make_response(f"No he podido consultar los documentos: {e}")
 
+    # Focus documents mode
+    if _wants_focus_documents(user_text):
+        STATE["focus"] = "documents"
+        save_sessions()
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        try:
+            rows = list_docs(pid)
+            uploaded = [r for r in rows if r.get('storage_key')]
+            missing = [r for r in rows if not r.get('storage_key')]
+            
+            response = "📄 **Framework de Documentos**\n\n"
+            
+            if uploaded:
+                response += f"✅ **Documentos subidos** ({len(uploaded)}):\n"
+                lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in uploaded[:10]]
+                response += "\n".join(lines)
+                if len(uploaded) > 10:
+                    response += f"\n... y {len(uploaded) - 10} más"
+                response += "\n\n"
+            
+            if missing:
+                response += f"⏳ **Documentos pendientes** ({len(missing)}):\n"
+                lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in missing[:10]]
+                response += "\n".join(lines)
+                if len(missing) > 10:
+                    response += f"\n... y {len(missing) - 10} más"
+                response += "\n\n"
+            
+            if not uploaded and not missing:
+                response += "No hay documentos configurados para esta propiedad.\n\n"
+            
+            response += "**Puedes pedirme:**\n"
+            response += "- Subir un documento (adjunta el archivo)\n"
+            response += "- Ver documentos subidos o pendientes\n"
+            response += "- Resumir un documento específico\n"
+            response += "- Hacer preguntas sobre los documentos\n"
+            response += "- Enviar un documento por email"
+            
+            return make_response(response)
+        except Exception as e:
+            return make_response(f"No he podido listar los documentos: {e}")
+    
     # Focus numbers mode (also accept direct mentions like "numbers framework")
     if _wants_focus_numbers(user_text) or ("framework" in _normalize(user_text) and ("numbers" in _normalize(user_text) or "numeros" in _normalize(user_text) or "números" in _normalize(user_text))):
         STATE["focus"] = "numbers"
@@ -1415,7 +1523,7 @@ async def ui_chat(
     pid = STATE.get("property_id")
     if is_summarize_request and pid:
         # User wants a summary of a document
-        doc_ref = _match_document_from_text(pid, user_text)
+        doc_ref = _match_document_from_text(pid, user_text, STATE)
         if doc_ref:
             try:
                 result = rag_summarize(
@@ -1450,7 +1558,7 @@ async def ui_chat(
     
     if is_question and pid:
         # Prioritize document mentioned in current text
-        doc_ref = _match_document_from_text(pid, user_text)
+        doc_ref = _match_document_from_text(pid, user_text, STATE)
         try:
             if doc_ref:
                 # Search in specific document
