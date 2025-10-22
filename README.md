@@ -284,7 +284,7 @@ This pattern ensures:
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/rama-agentic-ai.git
+git clone  https://github.com/mariasebarespersona/tumai.git
 cd rama-agentic-ai
 ```
 
