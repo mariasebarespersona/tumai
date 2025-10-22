@@ -284,7 +284,7 @@ This pattern ensures:
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/rama-agentic-ai.git
+git clone  https://github.com/mariasebarespersona/tumai.git
 cd rama-agentic-ai
 ```
 
@@ -779,41 +779,9 @@ Design principles:
 
 ---
 
-## 🤝 Contributing
 
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
 
----
 
-## 📄 License
-
-[Specify your license here - e.g., MIT, Apache 2.0, or proprietary]
-
----
-
-## 🙏 Acknowledgments
-
-- **LangGraph** for the powerful agent orchestration framework
-- **Supabase** for seamless PostgreSQL + Storage + Auth
-- **OpenAI** for GPT-4o and embeddings
-- **Unsplash** for beautiful countryside photos (demo use)
-- **Mapbox** for static maps API
-
----
-
-## 📞 Support
-
-For questions or issues:
-- **GitHub Issues**: [Your repo URL]/issues
-- **Email**: support@ramacountryliving.com
-- **Docs**: See `/docs` folder for detailed technical documentation
-
----
 
 <div align="center">
 
