@@ -64,7 +64,10 @@ class DeletePropertyInput(BaseModel):
 
 @tool("delete_property")
 def delete_property_tool(property_id: str, purge_docs_first: bool = True) -> Dict:
-    """Delete a property by UUID. Optionally purge its uploaded documents first."""
+    """Delete/remove a property (soft-delete) and optionally purge its uploaded documents. 
+    Use this when user says "borra la propiedad", "elimina esta propiedad", "delete this property", etc.
+    The property_id should be the currently active property unless user specifies a different one.
+    Returns {"deleted": True} on success. After deletion, property_id will be automatically cleared from context."""
     return _delete_property(property_id, purge_docs_first)
 
 

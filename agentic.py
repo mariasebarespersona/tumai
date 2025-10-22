@@ -32,10 +32,11 @@ OBJETIVO GLOBAL (checklist de producto)
 5) RAG en documentos: resumir (`summarize_document`), responder preguntas (`qa_document` / `rag_qa_with_citations`), pagos/fechas con `qa_payment_schedule`.
 6) Email: enviar por correo documentos (URL firmada), frameworks (listados tabulares) o fragmentos de información.
 7) Guiar sobre documentos pendientes: detectar y comunicar qué falta y los siguientes pasos para completarlo.
-8) Numbers framework: mostrar la tabla, decir qué valores faltan y permitir que el usuario dicte “pon <item> a <valor>” para escribir en su celda (`set_number`).
+8) Numbers framework: mostrar la tabla, decir qué valores faltan y permitir que el usuario dicte "pon <item> a <valor>" para escribir en su celda (`set_number`).
 9) Calcular totales cuando el usuario lo pida o tras varias actualizaciones (`calc_numbers`) y reflejarlos en la tabla.
-10) Permitir “mostrar” o “enviar por email” el numbers framework completo.
+10) Permitir "mostrar" o "enviar por email" el numbers framework completo.
 11) Cuando documentos y números estén completos, comunicarlo y ofrecer/generar `compute_summary` para la ficha resumen.
+12) **BORRAR PROPIEDADES**: Cuando el usuario pida borrar/eliminar una propiedad, USA `delete_property` directamente con el property_id actual. NO uses `search_properties` para confirmar - simplemente pide confirmación en lenguaje natural y luego borra.
 
 PRINCIPIOS
 - No inventes datos ni resultados; usa herramientas siempre.
@@ -50,7 +51,7 @@ CONTEXTO Y PROPIEDAD ACTIVA
 - Tras fijar/crear, recuerda: “plantillas por completar: documentos y números”.
 
 HERRAMIENTAS (nombres exactos)
-- Propiedades: `add_property`, `list_frameworks`, `list_properties`, `find_property`, `search_properties`, `get_property`.
+- Propiedades: `add_property`, `list_frameworks`, `list_properties`, `find_property`, `search_properties`, `get_property`, `delete_property`.
 - Documentos: `propose_doc_slot`, `slot_exists`, `upload_and_link`, `list_docs`, `signed_url_for`, `summarize_document`, `qa_document`, `qa_payment_schedule`.
 - RAG: `rag_index_document`, `rag_index_all_documents`, `rag_qa_with_citations`.
 - Números: `get_numbers`, `set_number`, `calc_numbers`.
@@ -200,6 +201,7 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
     Also captures add_property results to set property_id and inform about frameworks.
     Additionally, if `search_properties` returns un único candidato, fija `property_id` automáticamente; si devuelve varios,
     añade un mensaje para que el usuario elija.
+    Handles delete_property to clear property_id from state.
     """
     updates = {}
     messages = state.get("messages", [])
@@ -229,6 +231,17 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                         }
                 except Exception:
                     pass
+            if msg.name == "delete_property":
+                # When a property is deleted, clear the property_id from state
+                try:
+                    import json
+                    data = json.loads(msg.content) if isinstance(msg.content, str) else msg.content
+                    if data.get("deleted"):
+                        updates["property_id"] = None
+                        updates["last_doc_ref"] = None
+                except Exception:
+                    pass
+                break
             if msg.name == "add_property":
                 try:
                     import json
@@ -254,7 +267,19 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                 try:
                     import json
                     hits = json.loads(msg.content) if isinstance(msg.content, str) else msg.content
-                    if isinstance(hits, list) and len(hits) == 1 and hits[0].get("id"):
+                    
+                    # Check if user is trying to delete/remove - DON'T auto-select in that case
+                    delete_context = False
+                    for m in reversed(messages):
+                        if isinstance(m, HumanMessage):
+                            content = m.content if isinstance(m.content, str) else str(m.content or "")
+                            content_lower = content.lower()
+                            delete_words = ["borra", "borrar", "elimina", "eliminar", "delete", "remove"]
+                            if any(w in content_lower for w in delete_words):
+                                delete_context = True
+                            break
+                    
+                    if isinstance(hits, list) and len(hits) == 1 and hits[0].get("id") and not delete_context:
                         pid = hits[0]["id"]
                         updates["property_id"] = pid
                         frameworks = _derive_framework_names(pid)
@@ -269,6 +294,7 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                         updates["messages"] = [
                             AIMessage(content="He encontrado estas propiedades:\n" + "\n".join(lines) + "\n\nResponde con el número para continuar.")
                         ]
+                    # If delete_context=True and 1 result, let agent handle it (don't auto-select)
                 except Exception:
                     pass
                 break
@@ -352,6 +378,13 @@ def build_graph():
                 timeout=30,
                 max_idle=300,
                 max_lifetime=3600,
+                kwargs={
+                    "keepalives": 1,
+                    "keepalives_idle": 30,
+                    "keepalives_interval": 10,
+                    "keepalives_count": 5,
+                },
+                check=ConnectionPool.check_connection,
             )
             
             # Create PostgresSaver with the pool

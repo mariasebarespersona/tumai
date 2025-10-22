@@ -151,27 +151,56 @@ def _extract_name_address(user_text: str):
         return None, None
     s = user_text.strip()
 
-    def first_match(patterns):
-        for p in patterns:
-            m = re.search(p, s, flags=re.IGNORECASE)
-            if m:
-                val = m.group(1).strip()
-                val = re.sub(r"(?i)\b(and|y)\b\s*$", "", val).strip()
-                return val
-        return None
+    # Try to split by explicit dirección/address keyword first
+    addr_split = re.split(r'\b(direcci[oó]n|address)\b', s, maxsplit=1, flags=re.IGNORECASE)
+    
+    name = None
+    address = None
+    
+    if len(addr_split) >= 3:
+        # Found dirección/address: everything before is name, everything after is address
+        before = addr_split[0].strip()
+        after = addr_split[2].strip()
+        
+        # Extract name from before (remove "nombre:" prefix if present)
+        name_match = re.search(r'\bnombre\s*[:\-,]?\s*(.+)', before, flags=re.IGNORECASE)
+        if name_match:
+            name = name_match.group(1).strip()
+        else:
+            # No "nombre:" prefix, take everything before dirección
+            name = before
+        
+        # Clean up trailing connectors/punctuation from name
+        name = re.sub(r'[,;:\s]+$', '', name).strip()
+        
+        # Extract address from after (remove ":" or other prefix punctuation)
+        address = re.sub(r'^[\s,;:\-]+', '', after).strip()
+        address = re.sub(r'[,;\.]+$', '', address).strip()
+    else:
+        # No explicit dirección/address keyword - try original patterns
+        def first_match(patterns):
+            for p in patterns:
+                m = re.search(p, s, flags=re.IGNORECASE)
+                if m:
+                    val = m.group(1).strip()
+                    val = re.sub(r"(?i)\b(and|y)\b\s*$", "", val).strip()
+                    return val
+            return None
 
-    stop = r"(?=\s*(?:,|;|\.|$|\by\b|\band\b|\baddress\b|\bdirecci[oó]n\b))"
-    name_patterns = [
-        rf"\bname\s*[:\-]?\s*(.+?){stop}",
-        rf"\bnombre\s*[:\-]?\s*(.+?){stop}",
-        rf"se\s+llama\s+(.+?){stop}",
-    ]
-    addr_patterns = [
-        r"\baddress\s*(?:es)?\s*[:\-]?\s*(.+?)(?=\s*(?:,|;|\.|$))",
-        r"\bdirecci[oó]n\s*(?:es)?\s*[:\-]?\s*(.+?)(?=\s*(?:,|;|\.|$))",
-    ]
-    name = first_match(name_patterns)
-    address = first_match(addr_patterns)
+        # More permissive stop pattern: only stop at dirección/address keywords, not commas
+        stop = r"(?=\s*(?:\by\b|\band\b|\baddress\b|\bdirecci[oó]n\b|$))"
+        name_patterns = [
+            rf"\bname\s*[:\-]?\s*(.+?){stop}",
+            rf"\bnombre\s*[:\-]?\s*(.+?){stop}",
+            rf"se\s+llama\s+(.+?){stop}",
+        ]
+        addr_patterns = [
+            r"\baddress\s*(?:es)?\s*[:\-]?\s*(.+?)$",
+            r"\bdirecci[oó]n\s*(?:es)?\s*[:\-]?\s*(.+?)$",
+        ]
+        name = first_match(name_patterns)
+        address = first_match(addr_patterns)
+    
     return name, address
 
 
@@ -215,18 +244,17 @@ def _extract_property_candidate_from_text(user_text: str) -> str | None:
 
 
 def _wants_property_search(text: str) -> bool:
+    """Detecta cuando el usuario quiere EXPLÍCITAMENTE cambiar de propiedad.
+    Dejamos que el agente maneje menciones simples como 'casa'."""
     t = _normalize(text)
     # Ignore generic plural list requests
     if "propiedades" in t or "properties" in t:
         return False
-    # Work with / switch to a property - expanded verb list
-    if re.search(r"\b(trabajar|usar|utilizar|cambiar|switch|metete|meter|vamos|voy|ir|irme|pasamos|pasar)\b", t) and (re.search(r"\bcon\b", t) or re.search(r"\ben\b", t) or re.search(r"\ba\b", t)):
+    # Only detect EXPLICIT property switching commands with clear verbs
+    if re.search(r"\b(trabajar|usar|utilizar|cambiar|switch)\b", t) and re.search(r"\b(propiedad|property|con|en)\b", t):
         return True
-    # "Quiero trabajar en/ con ...", "usar ...", "cambiar a ..."
-    if re.search(r"\b(propiedad|property)\b", t) and re.search(r"(llama|llamada|nombre|direcci[oó]n|address|trabajar|usar|con|en|a|quiero|cambiar)", t):
-        return True
-    # Direct mention of "casa" or property name with movement verbs
-    if re.search(r"\b(casa|finca|propiedad)\s+(demo|rural|[a-z]+)\s*\d+", t, re.IGNORECASE) and re.search(r"\b(metete|meter|vamos|voy|ir|irme|pasamos|pasar|en|a)\b", t):
+    # "metete en/a X", "vamos a X" with explicit property mention
+    if re.search(r"\b(metete|meter|vamos|voy)\b", t) and re.search(r"\b(propiedad|property|casa|finca)\b", t):
         return True
     return False
 
@@ -600,13 +628,32 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     
     print(f"[MEMORY DEBUG] Invoking agent with thread_id={session_id}, input={text[:50]}")
     
-    # The checkpointer will automatically load and save the conversation history
-    result = agent.invoke(state, config={"configurable": {"thread_id": session_id}})
-    
-    msg_count = len(result.get("messages", []))
-    print(f"[MEMORY DEBUG] Result has {msg_count} messages in history")
-    
-    return result
+    # Retry logic for transient connection errors
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            # The checkpointer will automatically load and save the conversation history
+            result = agent.invoke(state, config={"configurable": {"thread_id": session_id}})
+            
+            msg_count = len(result.get("messages", []))
+            print(f"[MEMORY DEBUG] Result has {msg_count} messages in history")
+            
+            return result
+        except Exception as e:
+            error_str = str(e)
+            # Check if it's a transient connection error
+            if "server closed the connection" in error_str or "connection" in error_str.lower():
+                if attempt < max_retries - 1:
+                    print(f"[WARNING] Connection error on attempt {attempt + 1}, retrying...")
+                    import time
+                    time.sleep(0.5)  # Brief delay before retry
+                    continue
+                else:
+                    print(f"[ERROR] Connection failed after {max_retries} attempts")
+                    raise
+            else:
+                # Non-connection error, raise immediately
+                raise
 
 
 # Minimal HTTP app to support the Next.js frontend
@@ -1392,7 +1439,14 @@ async def ui_chat(
                       "cómo", "como", "por qué", "porque", "cuanto", "cuánto", "cuanta", "cuánta",
                       "quien", "quién", "lee el", "que pone", "qué pone", "que dice", "qué dice",
                       "dime", "explicame", "explícame", "di", "día", "dia"]
-    is_question = any(w in qnorm for w in question_words) and not is_summarize_request
+    
+    # Excluir si hay palabras de acción que no son preguntas
+    action_words = ["borra", "borrar", "elimina", "eliminar", "delete", "remove", "crea", "crear",
+                    "add", "añadir", "anadir", "agrega", "agregar", "sube", "subir", "upload",
+                    "pon", "poner", "set", "actualiza", "actualizar", "calcula", "calcular"]
+    has_action = any(w in qnorm for w in action_words)
+    
+    is_question = any(w in qnorm for w in question_words) and not is_summarize_request and not has_action
     
     if is_question and pid:
         # Prioritize document mentioned in current text
