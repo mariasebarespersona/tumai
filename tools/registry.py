@@ -8,7 +8,7 @@ from langchain_core.tools import tool
 from .property_tools import add_property as _add_property, list_frameworks as _list_frameworks
 from .property_tools import get_property as _get_property, find_property as _find_property, list_properties as _list_properties
 from .property_tools import search_properties as _search_properties
-from .property_tools import delete_property as _delete_property
+from .property_tools import delete_property as _delete_property, delete_properties as _delete_properties
 from .docs_tools import (
     propose_slot as _propose_slot,
     upload_and_link as _upload_and_link,
@@ -36,6 +36,17 @@ from .email_tool import send_email as _send_email
 from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google, process_voice_input as _process_voice_input, create_voice_response as _create_voice_response
 from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document, qa_payment_schedule as _qa_payment_schedule
 from .rag_index import index_document as _index_document, qa_with_citations as _qa_with_citations, index_all_documents as _index_all_documents
+# ---------- Set current property (LLM-controlled) ----------
+class SetCurrentPropertyInput(BaseModel):
+    property_id: str = Field(..., description="UUID of the property to set as current")
+
+@tool("set_current_property")
+def set_current_property_tool(property_id: str) -> Dict:
+    """Fix the current working property explicitly. LLM must call this after selecting a property. Returns {property_id, property_name}."""
+    row = _get_property(property_id)
+    if not row:
+        return {"error": "property_not_found", "property_id": property_id}
+    return {"property_id": row.get("id"), "property_name": row.get("name")}
 
 # ---------- Schemas ----------
 
@@ -69,6 +80,19 @@ def delete_property_tool(property_id: str, purge_docs_first: bool = True) -> Dic
     The property_id should be the currently active property unless user specifies a different one.
     Returns {"deleted": True} on success. After deletion, property_id will be automatically cleared from context."""
     return _delete_property(property_id, purge_docs_first)
+
+
+class DeletePropertiesInput(BaseModel):
+    property_ids: List[str] = Field(..., description="List of property UUIDs to delete")
+    purge_docs_first: bool = True
+
+@tool("delete_properties")
+def delete_properties_tool(property_ids: List[str], purge_docs_first: bool = True) -> Dict:
+    """Delete multiple properties (soft-delete) in sequence. Returns per-id results and total deleted.
+    Use when the user asks to remove several properties at once, e.g. "borra Casa Demo 2 y Casa Demo 3".
+    The LLM should resolve names to ids first using `search_properties` or a prior list.
+    """
+    return _delete_properties(property_ids, purge_docs_first)
 
 
 class ProposeDocInput(BaseModel):
@@ -106,7 +130,8 @@ class ListDocsInput(BaseModel):
 
 @tool("list_docs")
 def list_docs_tool(property_id: str) -> List[Dict]:
-    """List all rows in the documents framework for this property."""
+    """List all document rows for this property. Each row has: document_group, document_subgroup, document_name, storage_key, metadata. 
+    IMPORTANT: Check storage_key to determine status - if storage_key has value → document is UPLOADED, if empty/null → PENDING."""
     return _list_docs(property_id)
 
 
@@ -493,6 +518,7 @@ TOOLS = [
     add_property_tool,
     list_frameworks_tool,
     delete_property_tool,
+    delete_properties_tool,
     propose_doc_slot_tool,
     upload_and_link_tool,
     list_docs_tool,
@@ -517,6 +543,7 @@ TOOLS = [
     process_voice_input_tool,      # NEW - Enhanced voice processing
     create_voice_response_tool,    # NEW - Enhanced voice response
     get_property_tool,             # NEW
+    set_current_property_tool,     # NEW
     find_property_tool,            # NEW
     list_properties_tool,          # NEW
     search_properties_tool,        # NEW

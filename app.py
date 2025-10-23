@@ -323,6 +323,42 @@ def _wants_email(text: str) -> bool:
     return False
 
 
+def _wants_to_change_property(text: str) -> bool:
+    """Detect if user explicitly wants to change/switch to a different property.
+    
+    Only returns True for EXPLICIT change requests like:
+    - "cambia a Casa Demo 10"
+    - "trabaja con Santiuste"
+    - "sal de esta propiedad"
+    - "quiero trabajar en otra propiedad"
+    - "usar la propiedad X"
+    
+    Returns False for:
+    - Questions about properties ("qué propiedades hay?")
+    - Listing properties ("lista propiedades")
+    - Any other context where property name is mentioned but not to CHANGE
+    """
+    t = _normalize(text)
+    
+    # Explicit change/switch verbs
+    change_patterns = [
+        r"\b(cambia|cambiar|cambiate)\s+(a|para|con)\b",  # "cambia a X"
+        r"\b(trabaja|trabajar|trabajo|trabajar)\s+(con|en|sobre|en la)\b",  # "trabaja con X"
+        r"\b(usa|usar|utiliza|utilizar|usame)\s+(la\s+)?(propiedad|casa)\b",  # "usa la propiedad X"
+        r"\b(sal|salir|salte|salir|salirte|salirse)\s+(de|de esta|de la)\s+(propiedad|casa)\b",  # "sal de esta propiedad"
+        r"\b(quiero|querria|deseo)\s+(trabajar|operar|ver)\s+(en|con|sobre|la)\s+(otra|diferente|nueva)\s+(propiedad|casa)\b",  # "quiero trabajar en otra propiedad"
+        r"\b(selecciona|seleccionar|elige|elegir|escoge|escoger)\s+(la\s+)?(propiedad|casa)\b",  # "selecciona la propiedad X"
+        r"\b(metete|meterse|entra|entrar)\s+(en|a)\s+(la\s+)?(propiedad|casa)\b",  # "metete en la propiedad X"
+        r"\b(ahora|vamos)\s+(a|con|en)\s+(la\s+)?(propiedad|casa)\b",  # "ahora con la propiedad X"
+    ]
+    
+    for pattern in change_patterns:
+        if re.search(pattern, t):
+            return True
+    
+    return False
+
+
 def _wants_focus_documents(text: str) -> bool:
     t = _normalize(text)
     
@@ -706,10 +742,24 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     for attempt in range(max_retries):
         try:
             # The checkpointer will automatically load and save the conversation history
-            result = agent.invoke(state, config={"configurable": {"thread_id": session_id}})
+            config = {"configurable": {"thread_id": session_id}}
+            result = agent.invoke(state, config=config)
             
             msg_count = len(result.get("messages", []))
             print(f"[MEMORY DEBUG] Result has {msg_count} messages in history")
+            print(f"[MEMORY DEBUG] Result property_id from agent: {result.get('property_id')}")
+            
+            # CRITICAL FIX: Read the FINAL state from checkpointer after agent execution
+            # The post_tool hook updates property_id in the state, so we need to read it back
+            try:
+                final_state = agent.get_state(config)
+                if final_state and final_state.values.get("property_id"):
+                    result["property_id"] = final_state.values["property_id"]
+                    print(f"[MEMORY DEBUG] ✅ Retrieved property_id from final state: {result['property_id']}")
+                else:
+                    print(f"[MEMORY DEBUG] ⚠️  Final state has no property_id: {final_state}")
+            except Exception as e:
+                print(f"[MEMORY DEBUG] ❌ Could not read final state: {e}")
             
             return result
         except Exception as e:
@@ -763,7 +813,23 @@ async def ui_chat(
         print(f"[DEBUG] No audio file received")
     
     def make_response(answer: str, extra: dict | None = None):
-        resp = {"answer": answer, "property_id": STATE.get("property_id")}
+        current_pid = STATE.get("property_id")
+        print(f"[DEBUG make_response] Current property_id in STATE: {current_pid}")
+        resp = {"answer": answer, "property_id": current_pid}
+        
+        # Include property_name if we have property_id
+        if current_pid:
+            try:
+                from tools.property_tools import get_property
+                prop_info = get_property(current_pid)
+                print(f"[DEBUG make_response] get_property returned: {prop_info}")
+                if prop_info:
+                    resp["property_name"] = prop_info["name"]
+                    print(f"[DEBUG make_response] Setting property_name to: {prop_info['name']}")
+            except Exception as e:
+                print(f"[DEBUG make_response] Error getting property: {e}")
+                pass
+        
         # Always include transcript if available
         if transcript:
             resp["transcript"] = transcript
@@ -823,7 +889,25 @@ async def ui_chat(
             return make_response(f"Error procesando el audio: {str(e)}")
     
     # Debug logging
-    print(f"[DEBUG] session_id: {session_id}, property_id: {STATE.get('property_id')}, text: {user_text[:50]}")
+    print(f"[DEBUG] session_id: {session_id}, property_id: {STATE.get('property_id')}, text: {user_text[:50] if user_text else '(empty)'}")
+    
+    # Handle sync request (empty message from frontend to get current state)
+    if not user_text.strip() and len(files) == 0 and not audio:
+        current_pid = STATE.get('property_id')
+        print(f"[DEBUG] Sync request - returning current property_id: {current_pid}")
+        
+        # Get property name if we have a property_id
+        property_name = None
+        if current_pid:
+            try:
+                from tools.property_tools import get_property
+                prop_info = get_property(current_pid)
+                property_name = prop_info['name'] if prop_info else None
+            except:
+                pass
+        
+        response_text = f"Trabajando en: {property_name}" if property_name else ""
+        return make_response(response_text, extra=None)
     
     # If client passes property_id explicitly, pin it for this session
     if property_id:
@@ -831,27 +915,15 @@ async def ui_chat(
         save_sessions()
         print(f"[DEBUG] property_id provided by client: {property_id}")
     
-    # Extract UUID if mentioned
+    # Extract UUID if mentioned WITH explicit intent to change property
     mentioned_pid = _extract_uuid(user_text)
-    if mentioned_pid:
+    if mentioned_pid and _wants_to_change_property(user_text):
         STATE["property_id"] = mentioned_pid
         save_sessions()
         print(f"[DEBUG] Set property_id to {mentioned_pid}")
     
-    # Check if user is just mentioning a property name (like "Casa demo 4") at the start of message
-    # and try to auto-select it if it matches
-    if not STATE.get("property_id") and len(user_text.split()) <= 5:
-        # Short message, might be just a property name
-        try:
-            hits = db_search_properties(user_text, limit=3)
-            if hits and len(hits) == 1:
-                # Only one match, auto-select it
-                chosen = hits[0]
-                STATE["property_id"] = chosen["id"]
-                save_sessions()
-                print(f"[DEBUG] Auto-selected property: {chosen['name']} ({chosen['id']})")
-        except:
-            pass  # Silently fail if search doesn't work
+    # REMOVED: Auto-selection of property by name
+    # Property ID now ONLY changes with explicit user intent (see _wants_to_change_property)
 
     # If user referenced a filename but no file bytes arrived (e.g., UI sent only text like "📎 foo.pdf"), propose slot anyway
     if len(files) == 0 and ("📎" in user_text or re.search(r"[\w\-\.]+\.pdf", user_text, flags=re.IGNORECASE)):
@@ -926,6 +998,22 @@ async def ui_chat(
                 import base64
                 file_bytes = base64.b64decode(file_b64)
                 
+                # Log the upload attempt with property name for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                
+                # Get property name for confirmation
+                try:
+                    from tools.property_tools import get_property
+                    prop_info = get_property(pid)
+                    prop_name = prop_info['name'] if prop_info else 'Unknown'
+                except:
+                    prop_name = 'Unknown'
+                
+                logger.info(f"📤 Attempting upload: {filename}")
+                logger.info(f"📤 Property: {prop_name} (ID: {pid})")
+                logger.info(f"📤 Target: {proposal['document_group']} / {proposal.get('document_subgroup', '')} / {proposal['document_name']}")
+                
                 out = upload_and_link(
                     pid,
                     file_bytes,
@@ -939,9 +1027,7 @@ async def ui_chat(
                 save_sessions()
                 
                 # Verify document was saved by reading it back
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"✅ Document uploaded: {proposal['document_name']}")
+                logger.info(f"✅ Document uploaded: {proposal['document_name']} to property {pid}")
                 
                 # Read back to verify
                 try:
@@ -979,7 +1065,8 @@ async def ui_chat(
                 }
                 save_sessions()
                 
-                return make_response(f"✅ Subido '{proposal['document_name']}'.")
+                # Confirm with property name so user knows where it was uploaded
+                return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'.")
             except Exception as e:
                 STATE["pending_proposal"] = None
                 save_sessions()
@@ -989,6 +1076,37 @@ async def ui_chat(
             save_sessions()
             return make_response("De acuerdo. Dime el grupo/subgrupo/nombre exacto o vuelve a adjuntar el archivo con una pista (por ejemplo 'Contrato arquitecto').")
     
+    # -------------------------------------------------------------
+    # New: Delegate all remaining intent handling to the Agent
+    # We no longer run regex-based routers in this API layer.
+    # The Agent (LangGraph) is responsible for understanding the
+    # user's request and calling the appropriate tools.
+    # -------------------------------------------------------------
+    out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
+    
+    # Update property_id if the agent changed it (messages are handled by PostgreSQL checkpointer)
+    if out.get("property_id") and out["property_id"] != STATE.get("property_id"):
+        STATE["property_id"] = out["property_id"]
+        save_sessions()
+    
+    answer = out.get("answer") or out.get("content") or ""
+    if not answer and out.get("messages"):
+        msgs = out["messages"]
+        for msg in reversed(msgs):
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+            else:
+                content = getattr(msg, "content", "")
+            if content and not getattr(msg, "tool_calls", None):
+                answer = str(content)
+                break
+    
+    # Include transcript if this was a voice input
+    print(f"[DEBUG] Final transcript value: {transcript}")
+    extra = {"transcript": transcript} if transcript else None
+    print(f"[DEBUG] Final response extra: {extra}")
+    return make_response(answer or "(sin respuesta)", extra)
+
     # Handle email requests - check if we're waiting for email first
     # BUT: if user is clearly asking for something else (like selecting a property), cancel pending email
     if STATE.get("pending_email") and not _wants_property_search(user_text) and not _wants_list_properties(user_text):
@@ -1719,9 +1837,32 @@ async def ui_chat(
     out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
     
     # Update property_id if the agent changed it (messages are handled by PostgreSQL checkpointer)
-    if out.get("property_id") and out["property_id"] != STATE.get("property_id"):
-        STATE["property_id"] = out["property_id"]
-        save_sessions()
+    print(f"[DEBUG] Before update - STATE property_id: {STATE.get('property_id')}")
+    print(f"[DEBUG] After run_turn - out property_id: {out.get('property_id')}")
+    
+    # CRITICAL: Read the final state from the LangGraph checkpointer to get the updated property_id
+    try:
+        final_state = agent.get_state({"configurable": {"thread_id": session_id}})
+        if final_state and final_state.values.get("property_id"):
+            final_prop_id = final_state.values["property_id"]
+            print(f"[DEBUG] ✅ Found property_id in final state: {final_prop_id}")
+            if final_prop_id != STATE.get("property_id"):
+                print(f"[DEBUG] Property changed! Updating STATE from {STATE.get('property_id')} to {final_prop_id}")
+                STATE["property_id"] = final_prop_id
+                save_sessions()
+                # Also update the out dict so make_response uses it
+                out["property_id"] = final_prop_id
+        else:
+            print(f"[DEBUG] ⚠️  No property_id in final state")
+    except Exception as e:
+        print(f"[DEBUG] ❌ Error reading final state: {e}")
+        # Fallback to old logic
+        if out.get("property_id") and out["property_id"] != STATE.get("property_id"):
+            print(f"[DEBUG] Property changed! Updating STATE from {STATE.get('property_id')} to {out['property_id']}")
+            STATE["property_id"] = out["property_id"]
+            save_sessions()
+    
+    print(f"[DEBUG] Final STATE property_id before make_response: {STATE.get('property_id')}")
     
     answer = out.get("answer") or out.get("content") or ""
     if not answer and out.get("messages"):

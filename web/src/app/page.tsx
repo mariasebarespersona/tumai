@@ -16,9 +16,64 @@ export default function ChatPage() {
   const [files, setFiles] = useState<File[]>([])
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessingVoice, setIsProcessingVoice] = useState(false)
+  const [propertyId, setPropertyId] = useState<string | null>(null) // Track current property_id
+  const [propertyName, setPropertyName] = useState<string | null>(null) // Track property name for display
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  // Sync with backend on mount - send a ping to get current property_id
+  useEffect(() => {
+    const syncWithBackend = async () => {
+      console.log('[SYNC] Starting sync with backend...')
+      try {
+        const form = new FormData()
+        form.append('text', '') // Empty message to sync
+        form.append('session_id', 'web-ui')
+        
+        const resp = await fetch('/api/chat', { method: 'POST', body: form })
+        const data = await resp.json()
+        console.log('[SYNC] Backend response:', data)
+        
+        // Backend will send back its current property_id and property_name
+        if (data.property_id) {
+          setPropertyId(data.property_id)
+          console.log('[SYNC] Backend property_id:', data.property_id)
+          
+          if (data.property_name) {
+            setPropertyName(data.property_name)
+            console.log('[SYNC] Backend property_name:', data.property_name)
+          }
+        } else {
+          // No property in backend - clear localStorage to avoid confusion
+          console.log('[SYNC] No property in backend - clearing stored property')
+          localStorage.removeItem('property_id')
+          localStorage.removeItem('property_name')
+          setPropertyId(null)
+          setPropertyName(null)
+        }
+      } catch (e) {
+        console.error('[SYNC] Failed to sync with backend:', e)
+        // Fallback to localStorage
+        const savedPropertyId = localStorage.getItem('property_id')
+        const savedPropertyName = localStorage.getItem('property_name')
+        if (savedPropertyId) setPropertyId(savedPropertyId)
+        if (savedPropertyName) setPropertyName(savedPropertyName)
+      }
+    }
+    
+    syncWithBackend()
+  }, [])
+
+  // Save property to localStorage when it changes
+  useEffect(() => {
+    if (propertyId) {
+      localStorage.setItem('property_id', propertyId)
+    }
+    if (propertyName) {
+      localStorage.setItem('property_name', propertyName)
+    }
+  }, [propertyId, propertyName])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -39,6 +94,10 @@ export default function ChatPage() {
     const form = new FormData()
     form.append('text', userMessage.content)
     form.append('session_id', 'web-ui')
+    // Include property_id if we have one
+    if (propertyId) {
+      form.append('property_id', propertyId)
+    }
     for (const f of files) form.append('files', f)
     setUploading(true)
     try {
@@ -47,13 +106,23 @@ export default function ChatPage() {
       if (!resp.ok) throw new Error(data?.error || 'Request failed')
       const answer = String(data?.answer ?? '')
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
+      
+      // Update property_id if backend sent it back
+      if (data.property_id) {
+        setPropertyId(data.property_id)
+        // Use property_name from backend directly
+        if (data.property_name) {
+          setPropertyName(data.property_name)
+        }
+      }
+      
       setFiles([])
     } catch (e: any) {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Error: ${e?.message || String(e)}` }])
     } finally {
       setUploading(false)
     }
-  }, [input, files])
+  }, [input, files, propertyId])
 
   const startRecording = useCallback(async () => {
     if (isRecording) return
@@ -108,6 +177,10 @@ export default function ChatPage() {
       form.append('audio', audioBlob, `voice-input.${fileExtension}`)
       form.append('text', '') // Empty text for voice input
       form.append('session_id', 'web-ui')
+      // Include property_id if we have one
+      if (propertyId) {
+        form.append('property_id', propertyId)
+      }
 
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -138,6 +211,15 @@ export default function ChatPage() {
           content: data.answer 
         }
         setMessages(prev => [...prev, aiMessage])
+        
+        // Update property_id if backend sent it back
+        if (data.property_id) {
+          setPropertyId(data.property_id)
+          // Use property_name from backend directly
+          if (data.property_name) {
+            setPropertyName(data.property_name)
+          }
+        }
       }
 
     } catch (error) {
@@ -151,7 +233,7 @@ export default function ChatPage() {
     } finally {
       setIsProcessingVoice(false)
     }
-  }, [])
+  }, [propertyId])
 
   const removeFile = useCallback((idx: number) => {
     setFiles(prev => prev.filter((_, i) => i !== idx))
@@ -211,6 +293,13 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
+      {/* Property indicator */}
+      {propertyName && (
+        <div className="rounded-2xl bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-5 py-3 text-white font-semibold nature-shadow-lg flex items-center gap-3">
+          <span className="text-xl">🏡</span>
+          <span>Propiedad actual: {propertyName}</span>
+        </div>
+      )}
       {/* Chat area */}
       <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-8 glass nature-shadow-lg scrollbar-thin">
         {messages.length === 0 ? (

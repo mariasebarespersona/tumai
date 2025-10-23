@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       answer: data?.answer ?? data?.content ?? "(sin respuesta)",
       property_id: data?.property_id,
+      property_name: data?.property_name, // Include property name from backend
       transcript: data?.transcript,
       audio_response: data?.audio_response, // For voice responses
     });

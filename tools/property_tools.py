@@ -199,3 +199,25 @@ def delete_property(property_id: str, purge_docs_first: bool = True) -> Dict:
         import logging
         logging.error(f"Error soft-deleting property {property_id}: {e}")
         return {"deleted": False, "error": str(e)}
+
+
+def delete_properties(property_ids: List[str], purge_docs_first: bool = True) -> Dict:
+    """Delete multiple properties (soft-delete) in sequence and return a per-id result.
+
+    This function is resilient: it attempts all deletions and reports individual outcomes.
+    It reuses delete_property for each id.
+    Returns: {"results": [{"property_id": id, "deleted": bool, "error": optional}],
+              "num_deleted": int}
+    """
+    results: List[Dict] = []
+    num_deleted = 0
+    for pid in (property_ids or []):
+        try:
+            out = delete_property(pid, purge_docs_first=purge_docs_first)
+            ok = bool(out.get("deleted"))
+            if ok:
+                num_deleted += 1
+            results.append({"property_id": pid, "deleted": ok, **({"error": out.get("error")} if out.get("error") else {})})
+        except Exception as e:
+            results.append({"property_id": pid, "deleted": False, "error": str(e)})
+    return {"results": results, "num_deleted": num_deleted}
