@@ -1,0 +1,56 @@
+{
+  "intent": "send_content_by_email",
+  "scenarios": [
+    {
+      "user": "Mándame la plantilla de Números por email",
+      "steps": [
+        {
+          "tool": "get_numbers",
+          "args": {"property_id": "<current>"},
+          "reason": "Obtener los datos actuales"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": ["<user_email>"],
+            "subject": "Plantilla de Números - <property_name>",
+            "html": "<formatted_table_with_numbers>"
+          },
+          "reason": "Enviar por email, NO mostrar solo en chat"
+        }
+      ],
+      "response": "✅ Te he enviado la plantilla de Números por email."
+    },
+    {
+      "user": "Envíame el documento de escritura por correo",
+      "steps": [
+        {
+          "tool": "list_docs",
+          "args": {"property_id": "<current>"},
+          "reason": "Verificar que existe el documento"
+        },
+        {
+          "tool": "signed_url_for",
+          "args": {
+            "property_id": "<current>",
+            "document_group": "Compra",
+            "document_name": "Escritura notarial"
+          },
+          "reason": "Obtener URL firmada del documento"
+        },
+        {
+          "tool": "send_email",
+          "args": {
+            "to": ["<user_email>"],
+            "subject": "Documento: Escritura notarial",
+            "html": "<link_to_document>"
+          },
+          "reason": "Enviar enlace por email"
+        }
+      ],
+      "response": "✅ Te he enviado el enlace al documento por email."
+    }
+  ],
+  "critical_rule": "SIEMPRE usa send_email cuando el usuario pida 'por email/correo/mándame'. NO te limites a mostrar en el chat."
+}
+

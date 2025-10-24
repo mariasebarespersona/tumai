@@ -1,0 +1,15 @@
+{
+  "intent": "list_documents",
+  "property_id": "<uuid_property>",
+  "tool": {
+    "name": "list_docs",
+    "args": {"property_id": "<uuid_property>"}
+  },
+  "post": {
+    "classification_rule": "storage_key != '' => SUBIDO; else PENDIENTE",
+    "render": {
+      "prefix_with_property_name": true,
+      "sections": ["subidos", "pendientes"]
+    }
+  }
+}

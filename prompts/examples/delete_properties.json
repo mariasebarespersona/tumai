@@ -1,0 +1,16 @@
+{
+  "intent": "delete_multiple_properties",
+  "names": ["Casa Demo 2", "Casa Demo 3"],
+  "resolution": {
+    "search_calls": [
+      {"query": "Casa Demo 2"},
+      {"query": "Casa Demo 3"}
+    ],
+    "ids": ["<uuid_demo2>", "<uuid_demo3>"]
+  },
+  "confirm": true,
+  "tool": {
+    "name": "delete_properties",
+    "args": {"property_ids": ["<uuid_demo2>", "<uuid_demo3>"], "purge_docs_first": true}
+  }
+}

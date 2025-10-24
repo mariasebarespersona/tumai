@@ -20,6 +20,23 @@ The system acts as a tireless assistant that helps users organize documentation,
 
 ---
 
+## 🔄 What's new (Oct 2025)
+
+- Prompt-as-code (modular): `prompts/core.md` + `prompts/policies/*` + `prompts/contracts/*` + `prompts/examples/*`.
+- LLM decide 100% la orquestación; el backend solo aplica el estado devuelto por `set_current_property`.
+- Checkers en runtime:
+  - Verify-before-deny (obliga `list_docs` antes de negar)
+  - List-integrity (reconstruye Subidos/Pendientes por `storage_key`)
+- Respuestas tipadas: `AgentReply` (Pydantic) para respuestas finales consistentes.
+- Flujos restaurados:
+  - Al entrar en propiedad: mensaje estándar “Documentos y Números” (sin listar docs).
+  - Atajos: “plantilla de Documentos/Números” llama `list_docs`/`get_numbers` directamente.
+- Estabilidad: corrección de `GraphRecursionError` y simplificación del grafo post-tools.
+- Borrado múltiple: `delete_properties([ids])` con resolución de nombres → ids (vía `search_properties`).
+- Rendimiento y 429: menos rondas por turno y reintentos con backoff configurados en el cliente LLM.
+
+---
+
 ## ✨ Key Features
 
 ### 🏡 Property Management
@@ -147,6 +164,42 @@ Generates beautiful, investor-ready PDF summaries with:
 - **User-friendly error messages**: Never shows technical errors to users
 - **Retry logic**: Handles temporary network issues transparently
 - **Data validation**: Prevents invalid inputs before they reach the database
+
+---
+
+## 🧩 Prompt as code
+
+`SYSTEM_PROMPT` se compone en runtime desde:
+- `prompts/core.md` (rol, objetivo, límites)
+- `prompts/policies/safety.md` (seguridad y estilo)
+- `prompts/policies/tone.md` (tono)
+- `prompts/policies/properties.md` (reglas de orquestación de propiedades)
+
+Ventajas: versionado, auditoría clara y cambios atómicos por política.
+
+---
+
+## ✅ Runtime Checkers
+
+- **Verify-before-deny**: si la respuesta niega existencia de documentos sin `list_docs` reciente, se fuerza `list_docs` y se rehace la salida.
+- **List-integrity**: tras `list_docs`, se renderiza “Subidos/Pendientes” por `storage_key`.
+- **Numbers rendering**: tras `get_numbers`, se muestra una lista estable `item: valor`.
+
+---
+
+## 🛠 Stability fixes
+
+- Eliminados bucles que provocaban `GraphRecursionError`:
+  - Post-tools → vuelve a `assistant` una vez; `assistant` decide tool/end.
+  - Render directo tras `list_docs`/`get_numbers` para evitar rondas extra.
+
+---
+
+## 🚦 Rate-Limits (429) & Performance
+
+- Menos rondas por turno: render directo tras tools y guards que fuerzan la tool correcta.
+- Retries con backoff en el cliente LLM.
+- (Opcional) Planner con modelo ligero y respuesta final con modelo grande.
 
 ---
 
@@ -341,17 +394,17 @@ For Numbers Agent tables (calc_outputs, calc_log, etc.), see `DATABASE_DDL_GUIDE
 
 6. **Run the application**
 
-Terminal 1 (Backend):
+Terminal 1 (Backend - FastAPI):
 ```bash
-python launch.py
-# FastAPI server starts at http://localhost:8888
+python -m uvicorn app:app --reload --host 127.0.0.1 --port 7901
+# FastAPI server at http://127.0.0.1:7901
 ```
 
-Terminal 2 (Frontend):
+Terminal 2 (Frontend - Next.js):
 ```bash
 cd web
 npm run dev
-# Next.js app starts at http://localhost:3000
+# Next.js app at http://localhost:3000
 ```
 
 ---

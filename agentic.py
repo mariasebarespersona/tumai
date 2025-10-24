@@ -79,6 +79,14 @@ REGLA #2: NO INVENTES NI OFREZCAS COSAS NO PEDIDAS
 4. Si una herramienta devuelve datos, PRESENTA SOLO lo que el usuario pidió.
 5. NO seas proactivo ofreciendo cosas extra. Sé REACTIVO: responde EXACTAMENTE lo pedido.
 
+**⚡ EXCEPCIÓN: ENVÍO POR EMAIL ⚡**
+Si el usuario dice "manda/envia/mándame/enviame X por email/correo":
+1. **ACCIÓN**: Usa SIEMPRE la herramienta `send_email` con el contenido solicitado
+2. **NO** solo muestres la información en el chat
+3. Primero obtén los datos (ej: `get_numbers`, `list_docs`, `signed_url_for`)
+4. Luego envía por email con `send_email(to=[...], subject="...", html="...")`
+5. Responde: "✅ Te he enviado [X] por email"
+
 **EJEMPLOS:**
 ❌ Usuario: "resume el documento" → Tú: "Aquí está el resumen... ¿quieres el PDF?" 
    ✅ Correcto: "Aquí está el resumen: [resumen]" (y PARA ahí)
@@ -590,6 +598,7 @@ class AgentState(TypedDict):
     proposal: NotRequired[Dict[str, Any]]
     last_doc_ref: NotRequired[Dict[str, Any]]
     input: NotRequired[str]
+    last_llm_timestamp: NotRequired[float]  # Para throttling entre llamadas LLM
 
 def prepare_input(state: AgentState):
     """Convert input text to HumanMessage if present."""
@@ -635,7 +644,12 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     if messages and isinstance(messages[-1], AIMessage) and getattr(messages[-1], "tool_calls", None):
         return {"messages": []}
 
-    llm = ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(TOOLS)
+    # Throttle: esperar mínimo 500ms entre llamadas LLM para evitar rate limits
+    import time
+    last_llm_ts = state.get("last_llm_timestamp", 0)
+    now = time.time()
+    if now - last_llm_ts < 0.5:  # 500ms mínimo entre llamadas
+        time.sleep(0.5 - (now - last_llm_ts))
     
     # system + conversación completa (sin filtrar) + contexto
     msgs: List[Any] = [SystemMessage(content=SYSTEM_PROMPT)]
@@ -646,27 +660,139 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         msgs.append(SystemMessage(content=f"Si el usuario dice 'ese documento', interpreta {ldr} como el objetivo por defecto."))
     msgs += messages
 
-    ai = llm.invoke(msgs)
-    return {"messages": [ai]}
+    # Estrategia de dos modelos:
+    # - Si venimos de herramientas (último mensaje es ToolMessage), usamos gpt-4o para respuesta final
+    # - Si es planificación (último mensaje es HumanMessage), usamos gpt-4o-mini para tool calls
+    if messages and isinstance(messages[-1], ToolMessage):
+        # Respuesta final: usar gpt-4o sin tool binding (respuesta de texto)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60)
+        ai = llm.invoke(msgs)
+    else:
+        # Planificación: usar gpt-4o-mini con tools (más rápido, mayor rate limit)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60).bind_tools(TOOLS)
+        ai = llm.invoke(msgs)
+    
+    return {"messages": [ai], "last_llm_timestamp": time.time()}
 
-# --------------- Post-tool hook --------------------
 # --------------- Post-tool hook --------------------
 def post_tool(state: AgentState) -> Dict[str, Any]:
-    """Apply ONLY state-level changes mandated by tools. The LLM decides everything else.
+    """Apply state changes and render direct responses when possible to reduce LLM calls.
 
     Responsibilities:
-    - set_current_property: persist property_id into state so the backend can read it.
+    - set_current_property: persist property_id
+    - Direct rendering for common queries (list_docs, get_numbers, list_properties) to skip LLM
     """
     messages = state.get("messages", [])
+    
+    # Buscar el último ToolMessage
+    last_tool_msg = None
     for msg in reversed(messages):
-        if isinstance(msg, ToolMessage) and msg.name == "set_current_property":
-            try:
-                import json
-                payload = json.loads(msg.content) if isinstance(msg.content, str) else msg.content
-                pid = (payload or {}).get("property_id")
-                return {"property_id": pid} if pid else None
-            except Exception:
-                return None
+        if isinstance(msg, ToolMessage):
+            last_tool_msg = msg
+            break
+    
+    if not last_tool_msg:
+        return None
+    
+    import json
+    
+    # 1. set_current_property: actualizar property_id en estado
+    if last_tool_msg.name == "set_current_property":
+        try:
+            payload = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            pid = (payload or {}).get("property_id")
+            if pid:
+                # Renderizado directo: mencionar propiedad activa
+                try:
+                    from tools.property_tools import get_property
+                    prop_info = get_property(pid)
+                    prop_name = (prop_info or {}).get("name", "esta propiedad")
+                except:
+                    prop_name = "esta propiedad"
+                return {
+                    "property_id": pid,
+                    "messages": [AIMessage(content=f"Ya estamos trabajando con la propiedad \"{prop_name}\". Tienes 2 plantillas por completar: Documentos y Números. ¿Por dónde te gustaría empezar?")]
+                }
+        except Exception:
+            pass
+    
+    # 2. list_docs: renderizado directo de documentos subidos vs pendientes
+    if last_tool_msg.name == "list_docs":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            docs = data if isinstance(data, list) else []
+            
+            uploaded = []
+            pending = []
+            for doc in docs:
+                group = doc.get("document_group", "")
+                subgroup = doc.get("document_subgroup", "")
+                name = doc.get("document_name", "")
+                storage_key = doc.get("storage_key")
+                
+                item = f"- {group} / {subgroup}: {name}" if subgroup else f"- {group}: {name}"
+                
+                if storage_key and str(storage_key).strip():
+                    uploaded.append(item)
+                else:
+                    pending.append(item)
+            
+            # Obtener nombre de propiedad
+            prop_name = None
+            if state.get("property_id"):
+                try:
+                    from tools.property_tools import get_property
+                    prop_info = get_property(state["property_id"])
+                    prop_name = (prop_info or {}).get("name")
+                except:
+                    pass
+            
+            header = f"Para la propiedad \"{prop_name}\":" if prop_name else "Documentos encontrados:"
+            content = (
+                f"{header}\n\n"
+                f"📄 Documentos subidos:\n" + ("\n".join(uploaded) or "(ninguno)") + "\n\n"
+                f"⏳ Documentos pendientes:\n" + ("\n".join(pending) or "(ninguno)")
+            )
+            
+            return {"messages": [AIMessage(content=content)]}
+        except Exception:
+            pass
+    
+    # 3. get_numbers: renderizado directo de plantilla de números
+    if last_tool_msg.name == "get_numbers":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            items = data if isinstance(data, list) else []
+            
+            lines = []
+            for item in items:
+                key = item.get("item_key") or item.get("key", "item")
+                val = item.get("amount")
+                if val is None:
+                    val = item.get("value")
+                lines.append(f"- {key}: {val}")
+            
+            content = "Aquí tienes la plantilla de Números (valores actuales):\n" + ("\n".join(lines) if lines else "(vacío)")
+            return {"messages": [AIMessage(content=content)]}
+        except Exception:
+            pass
+    
+    # 4. list_properties: renderizado directo de lista de propiedades
+    if last_tool_msg.name == "list_properties":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            props = data if isinstance(data, list) else []
+            
+            if not props:
+                content = "No hay propiedades en la base de datos."
+            else:
+                lines = [f"{i+1}. {p.get('name', 'Sin nombre')} - {p.get('address', 'Sin dirección')}" for i, p in enumerate(props)]
+                content = f"Propiedades encontradas ({len(props)}):\n" + "\n".join(lines)
+            
+            return {"messages": [AIMessage(content=content)]}
+        except Exception:
+            pass
+    
     return None
 
 # --------------- Should we call a tool? ------------
@@ -681,10 +807,25 @@ def should_call_tool(state: AgentState) -> Literal["tools", "end"]:
 
 # --------------- Should we continue looping? ------------
 def should_continue(state: AgentState) -> Literal["assistant", "end"]:
-    """After executing tools, decide whether to call assistant again or end."""
+    """After executing tools, decide whether to call assistant again or end.
+    
+    Si post_tool ya generó una respuesta directa (último mensaje es AIMessage),
+    terminamos ahí. Si no, volvemos a assistant para que el LLM responda.
+    """
     messages = state.get("messages", [])
-    if messages and isinstance(messages[-1], ToolMessage):
+    if not messages:
+        return "end"
+    
+    last = messages[-1]
+    
+    # Si el último mensaje es AIMessage, post_tool ya generó la respuesta → END
+    if isinstance(last, AIMessage):
+        return "end"
+    
+    # Si el último mensaje es ToolMessage, necesitamos que assistant responda
+    if isinstance(last, ToolMessage):
         return "assistant"
+    
     return "end"
 
 # --------------- Build graph -----------------------

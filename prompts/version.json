@@ -1,0 +1,11 @@
+{
+  "version": "2025.10.23-1",
+  "components": {
+    "core": "core.md",
+    "policies": [
+      "policies/safety.md",
+      "policies/tone.md"
+    ]
+  }
+}
+

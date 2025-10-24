@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ListDocsRow",
+  "type": "object",
+  "required": ["document_group", "document_name"],
+  "properties": {
+    "document_group": {"type": "string", "minLength": 1},
+    "document_subgroup": {"type": "string"},
+    "document_name": {"type": "string", "minLength": 1},
+    "storage_key": {"type": ["string", "null"]},
+    "metadata": {"type": ["object", "null"]}
+  }
+}
+
