@@ -45,6 +45,12 @@ The system acts as a tireless assistant that helps users organize documentation,
 - **Automatic framework provisioning**: Each property gets pre-configured templates for documents, numbers, and summaries
 - **Property context retention**: The agent remembers which property you're working on and maintains state across sessions
 
+### 🔔 Recordatorios Inteligentes (NEW!)
+- **Extracción automática de fechas**: El agente lee documentos y extrae fechas de pago automáticamente
+- **Recordatorios programados**: Crea recordatorios que se envían automáticamente por email en la fecha indicada
+- **Gestión completa**: Lista, cancela y modifica recordatorios fácilmente
+- **Integración con documentos**: Vincula recordatorios a documentos específicos para contexto completo
+
 ### 📄 Document Framework
 - **Structured document organization**: Documents organized by group/subgroup/name taxonomy
 - **Guided upload workflow**: The agent proposes appropriate slots based on your input

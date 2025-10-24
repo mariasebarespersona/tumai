@@ -36,6 +36,7 @@ from .email_tool import send_email as _send_email
 from .voice_tool import transcribe_google_wav as _transcribe_google_wav, tts_google as _tts_google, process_voice_input as _process_voice_input, create_voice_response as _create_voice_response
 from .rag_tool import summarize_document as _summarize_document, qa_document as _qa_document, qa_payment_schedule as _qa_payment_schedule
 from .rag_index import index_document as _index_document, qa_with_citations as _qa_with_citations, index_all_documents as _index_all_documents
+from .reminders_tools import create_reminder as _create_reminder, extract_payment_date_from_document as _extract_payment_date, list_reminders as _list_reminders, cancel_reminder as _cancel_reminder
 # ---------- Set current property (LLM-controlled) ----------
 class SetCurrentPropertyInput(BaseModel):
     property_id: str = Field(..., description="UUID of the property to set as current")
@@ -388,6 +389,51 @@ def build_summary_ppt_tool(property_id: str, property_name: Optional[str] = None
             "error": f"Storage upload failed: {str(e)}"
         }
 
+# --- Reminders ---
+class CreateReminderInput(BaseModel):
+    property_id: str = Field(..., description="UUID de la propiedad")
+    title: str = Field(..., description="Título del recordatorio (ej: 'Pago a arquitecto')")
+    description: str = Field(..., description="Descripción detallada del recordatorio")
+    reminder_date: str = Field(..., description="Fecha del recordatorio en formato DD/MM/YYYY o texto natural (ej: 'día 5', '15 de diciembre')")
+    recipient_email: Optional[str] = Field(None, description="Email del destinatario (opcional)")
+    document_reference: Optional[Dict] = Field(None, description="Referencia al documento relacionado")
+    recurrence: Optional[str] = Field(None, description="Tipo de recurrencia: 'monthly' (mensual), 'yearly' (anual), o None para único")
+    recurrence_count: Optional[int] = Field(None, description="Número de ocurrencias (default: 12 para monthly, 1 para None)")
+
+@tool("create_reminder")
+def create_reminder_tool(property_id: str, title: str, description: str, reminder_date: str, recipient_email: Optional[str] = None, document_reference: Optional[Dict] = None, recurrence: Optional[str] = None, recurrence_count: Optional[int] = None) -> Dict:
+    """Crea un recordatorio (o múltiples si es recurrente). Si el usuario dice 'cada mes', usa recurrence='monthly' y recurrence_count=12. Si dice 'cada año', usa recurrence='yearly'. Para recordatorios únicos, deja recurrence=None."""
+    return _create_reminder(property_id, title, description, reminder_date, recipient_email, document_reference, recurrence=recurrence, recurrence_count=recurrence_count)
+
+class ExtractPaymentDateInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str
+    document_name: str
+    payment_concept: str = Field(..., description="Concepto del pago a buscar (ej: 'pago al arquitecto')")
+
+@tool("extract_payment_date")
+def extract_payment_date_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str, payment_concept: str) -> Dict:
+    """Extrae la fecha de pago de un documento específico usando análisis de contenido."""
+    return _extract_payment_date(property_id, document_group, document_subgroup, document_name, payment_concept)
+
+class ListRemindersInput(BaseModel):
+    property_id: str
+    status: Optional[str] = Field(None, description="Filtrar por estado: pending, sent, cancelled")
+
+@tool("list_reminders")
+def list_reminders_tool(property_id: str, status: Optional[str] = None) -> List[Dict]:
+    """Lista todos los recordatorios de una propiedad. Muestra título, fecha, y estado."""
+    return _list_reminders(property_id, status)
+
+class CancelReminderInput(BaseModel):
+    reminder_id: str = Field(..., description="UUID del recordatorio a cancelar")
+
+@tool("cancel_reminder")
+def cancel_reminder_tool(reminder_id: str) -> Dict:
+    """Cancela un recordatorio existente."""
+    return _cancel_reminder(reminder_id)
+
 # --- Google voice tools ---
 class TranscribeAudioInput(BaseModel):
     bytes_b64: str
@@ -587,4 +633,8 @@ TOOLS = [
     slot_exists_tool,              # NEW
     purge_property_documents_tool, # NEW
     purge_all_documents_tool,      # NEW
+    create_reminder_tool,          # NEW - Recordatorios
+    extract_payment_date_tool,     # NEW - Extrae fechas de documentos
+    list_reminders_tool,           # NEW - Lista recordatorios
+    cancel_reminder_tool,          # NEW - Cancela recordatorios
 ]

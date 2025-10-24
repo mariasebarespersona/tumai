@@ -2,6 +2,8 @@
 from __future__ import annotations
 import env_loader 
 import os
+import logging
+import time
 from typing import TypedDict, List, Dict, Any, Literal
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -10,6 +12,8 @@ from langchain_openai import ChatOpenAI
 
 from tools.registry import TOOLS  # <-- decorated tools live here
 from tools.property_tools import list_frameworks as _derive_framework_names
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 Eres **PropertyAgent** para RAMA Country Living. Tu objetivo es guiar al usuario hasta completar 3 plantillas por propiedad: **documentos**, **números** y **resumen de la propiedad**, trabajando siempre con herramientas.
@@ -145,6 +149,7 @@ HERRAMIENTAS (nombres exactos)
 - Números: `get_numbers`, `set_number`, `calc_numbers`.
 - Resumen: `get_summary_spec`, `compute_summary`, `upsert_summary_value`, `build_summary_ppt`.
 - Comunicación/Voz: `send_email`, `transcribe_audio`, `synthesize_speech`, `process_voice_input`, `create_voice_response`.
+- **Recordatorios**: `create_reminder`, `extract_payment_date`, `list_reminders`, `cancel_reminder`.
 
 FLUJO: DOCUMENTOS
 - Todos los documentos son por propiedad. Nunca mezcles documentos entre propiedades: cada llamada a herramientas de documentos debe usar el `property_id` activo y devolver resultados solo de esa propiedad.
@@ -182,6 +187,24 @@ FLUJO: VOZ
 - Si el usuario solicita una respuesta de voz, usa `create_voice_response` para generar audio de tu respuesta.
 - Siempre confirma que has entendido correctamente el mensaje vocal antes de proceder.
 - Si la transcripción no es clara, pide al usuario que repita o aclare.
+
+FLUJO: RECORDATORIOS (NUEVO)
+- **DETECTAR RECURRENCIA**: Si el usuario dice "cada mes", "mensual", "todos los meses" → usa `recurrence="monthly"` en `create_reminder` con `recurrence_count=12` (default).
+- **🚨 OBLIGATORIO: EXTRACCIÓN DE FECHAS DE DOCUMENTOS 🚨**
+  * Si el usuario dice "el día que haya que pagar X" o "cuando haya que pagar X":
+    1. **PASO 1**: Llama `list_docs` para encontrar el documento relevante (ej: si menciona "arquitecto", busca "Contrato arquitecto" o documento con "arquitecto" en el nombre).
+    2. **PASO 2 (CRÍTICO)**: Llama `extract_payment_date` con:
+       - property_id: (property_id actual)
+       - document_group, document_subgroup, document_name: (del documento encontrado)
+       - payment_concept: (ej: "pago al arquitecto", "honorarios", etc.)
+    3. **PASO 3**: La herramienta `extract_payment_date` hace RAG/QA sobre el documento para encontrar la fecha exacta.
+    4. **PASO 4**: Usa la fecha extraída como `reminder_date` en `create_reminder`.
+    5. **SI NO ENCUENTRA FECHA**: Pregunta al usuario en lugar de inventar.
+- **EJEMPLOS OBLIGATORIOS**:
+  * ❌ **MAL**: "Mandame un recordatorio cada mes para pagar al arquitecto" → crear recordatorio con fecha inventada (día 11)
+  * ✅ **BIEN**: "Mandame un recordatorio cada mes para pagar al arquitecto" → list_docs → extract_payment_date("pago al arquitecto") → create_reminder con fecha extraída (día 5)
+  * ✅ **BIEN**: "Recuérdame el día 5 de cada mes" → NO necesita extract_payment_date, usar reminder_date="día 5" directamente
+- **CONFIRMACIÓN**: Tras crear, confirma cuántos recordatorios se crearon, las fechas (muestra primeras 3 y últimas 3 si son muchos), y menciona que se enviarán automáticamente por email.
 
 FALLBACK Y DESAMBIGUACIÓN (CRÍTICO)
 - Si NO entiendes con certeza la intención del usuario, **no respondas de forma inventada**: pide 1–2 aclaraciones específicas (p. ej., "¿Quieres ver los documentos pendientes o subir uno nuevo?").
@@ -651,18 +674,62 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     if now - last_llm_ts < 0.5:  # 500ms mínimo entre llamadas
         time.sleep(0.5 - (now - last_llm_ts))
     
-    # system + conversación completa (sin filtrar) + contexto
+    # system + conversación (FILTRADA para evitar rate limits) + contexto
     msgs: List[Any] = [SystemMessage(content=SYSTEM_PROMPT)]
     if state.get("property_id"):
         msgs.append(SystemMessage(content=f"Contexto: property_id activa = {state['property_id']}. Asume esta propiedad hasta que el usuario la cambie explícitamente."))
     if state.get("last_doc_ref"):
         ldr = state["last_doc_ref"]
         msgs.append(SystemMessage(content=f"Si el usuario dice 'ese documento', interpreta {ldr} como el objetivo por defecto."))
-    msgs += messages
+    
+    # Limitar historial a los últimos 15 mensajes para evitar rate limits
+    # Mantener siempre el último HumanMessage y sus ToolMessages asociados
+    if len(messages) > 15:
+        # Buscar el último HumanMessage
+        last_human_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], HumanMessage):
+                last_human_idx = i
+                break
+        
+        if last_human_idx is not None and last_human_idx > 15:
+            # Tomar los últimos 15 mensajes, pero asegurarse de incluir el último HumanMessage completo
+            filtered = messages[max(0, last_human_idx - 14):]
+        else:
+            filtered = messages[-15:]
+        
+        msgs += filtered
+    else:
+        msgs += messages
 
-    # Guarda explícita: ficha resumen propiedad
+    # Guardas explícitas para flujos complejos
     if messages and isinstance(messages[-1], HumanMessage):
         last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
+        
+        # Guarda 1: Recordatorios mensuales con extracción de fecha de documento
+        if all(kw in last_user_text for kw in ("recordatorio", "cada mes")) and "dia que haya que pagar" in last_user_text:
+            if state.get("property_id"):
+                # Detectar concepto de pago
+                if "arquitecto" in last_user_text:
+                    payment_concept = "pago al arquitecto"
+                    doc_name_hint = "arquitecto"
+                elif "honorarios" in last_user_text:
+                    payment_concept = "honorarios"
+                    doc_name_hint = "honorarios"
+                else:
+                    payment_concept = "pago"
+                    doc_name_hint = "contrato"
+                
+                # FORZAR list_docs - NO dejar que el LLM decida
+                logger.info(f"[assistant] Guarda recordatorio activada - forzando list_docs")
+                forced_call = AIMessage(content="", tool_calls=[{
+                    "name": "list_docs",
+                    "args": {"property_id": state["property_id"]},
+                    "id": "guard_reminder_list_docs"
+                }])
+                return {"messages": [forced_call], "last_llm_timestamp": time.time()}
+        
+        # Guarda 2: ficha resumen propiedad
         if any(k in last_user_text for k in ("ficha resumen", "resumen propiedad", "genera resumen", "generar resumen", "crear resumen", "resumen pdf")):
             if state.get("property_id"):
                 # Obtener info de la propiedad
@@ -698,8 +765,8 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     else:
         # Planificación: usar gpt-4o-mini con tools (más rápido, mayor rate limit)
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60).bind_tools(TOOLS)
-        ai = llm.invoke(msgs)
-    
+    ai = llm.invoke(msgs)
+
     return {"messages": [ai], "last_llm_timestamp": time.time()}
 
 # --------------- Post-tool hook --------------------
@@ -750,6 +817,55 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
             data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
             docs = data if isinstance(data, list) else []
             
+            # CRÍTICO: Detectar si venimos de un flujo de recordatorio
+            # Si el penúltimo mensaje del usuario menciona "recordatorio" y "cada mes"
+            user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+            logger.info(f"[post_tool list_docs] Detectando flujo... user_msgs count: {len(user_msgs)}")
+            if user_msgs:
+                last_user_text = (user_msgs[-1].content or "").lower() if isinstance(user_msgs[-1].content, str) else ""
+                logger.info(f"[post_tool list_docs] last_user_text: {last_user_text[:100]}")
+                if "recordatorio" in last_user_text and "cada mes" in last_user_text and "dia que haya que pagar" in last_user_text:
+                    logger.info(f"[post_tool list_docs] ✅ FLUJO RECORDATORIO DETECTADO!")
+                    # Estamos en flujo de recordatorio - NO renderizar, continuar con extract_payment_date
+                    
+                    # Detectar concepto de pago
+                    if "arquitecto" in last_user_text:
+                        payment_concept = "pago al arquitecto"
+                        doc_name_hint = "arquitecto"
+                    elif "honorarios" in last_user_text:
+                        payment_concept = "honorarios"
+                        doc_name_hint = "honorarios"
+                    else:
+                        payment_concept = "pago"
+                        doc_name_hint = "contrato"
+                    
+                    # Buscar documento relacionado
+                    target_doc = None
+                    for doc in docs:
+                        name = doc.get("document_name", "").lower()
+                        group = doc.get("document_group", "").lower()
+                        if doc_name_hint in name or doc_name_hint in group:
+                            if doc.get("storage_key"):  # Solo documentos subidos
+                                target_doc = doc
+                                break
+                    
+                    if target_doc:
+                        # Forzar extract_payment_date
+                        logger.info(f"[post_tool] Flujo recordatorio detectado - forzando extract_payment_date con documento: {target_doc.get('document_name')}")
+                        forced_extract = AIMessage(content="", tool_calls=[{
+                            "name": "extract_payment_date",
+                            "args": {
+                                "property_id": state.get("property_id"),
+                                "document_group": target_doc.get("document_group"),
+                                "document_subgroup": target_doc.get("document_subgroup", ""),
+                                "document_name": target_doc.get("document_name"),
+                                "payment_concept": payment_concept
+                            },
+                            "id": "post_tool_extract_date_1"
+                        }])
+                        return {"messages": [forced_extract]}
+            
+            # Renderizado normal si NO es flujo de recordatorio
             uploaded = []
             pending = []
             for doc in docs:
@@ -821,7 +937,97 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
         except Exception:
             pass
     
-    # 5. build_summary_ppt: renderizado directo del enlace de descarga
+    # 4.5. extract_payment_date: si encuentra fecha, automáticamente crear recordatorio
+    if last_tool_msg.name == "extract_payment_date":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            
+            if data.get("date_found"):
+                # Extrajo fecha exitosamente - continuar con create_reminder
+                extracted_date = data.get("date_formatted") or data.get("date")
+                
+                # Detectar si el usuario pidió recurrencia mensual
+                user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+                if user_msgs:
+                    last_user_text = (user_msgs[-1].content or "").lower() if isinstance(user_msgs[-1].content, str) else ""
+                    wants_monthly = "cada mes" in last_user_text or "mensual" in last_user_text
+                    
+                    # Detectar concepto de pago para el título
+                    if "arquitecto" in last_user_text:
+                        title = "Pago al arquitecto"
+                        description = "Recordatorio mensual de pago al arquitecto según contrato"
+                    elif "honorarios" in last_user_text:
+                        title = "Pago de honorarios"
+                        description = "Recordatorio mensual de pago de honorarios"
+                    else:
+                        title = "Pago programado"
+                        description = "Recordatorio de pago según documento"
+                    
+                    if wants_monthly:
+                        # Forzar create_reminder con recurrencia mensual
+                        logger.info(f"[post_tool] Fecha extraída: {extracted_date} - creando recordatorio mensual")
+                        forced_reminder = AIMessage(content="", tool_calls=[{
+                            "name": "create_reminder",
+                            "args": {
+                                "property_id": state.get("property_id"),
+                                "title": title,
+                                "description": description,
+                                "reminder_date": extracted_date,
+                                "recurrence": "monthly",
+                                "recurrence_count": 12,
+                                "document_reference": data.get("document_reference", {})
+                            },
+                            "id": "post_tool_create_reminder_1"
+                        }])
+                        return {"messages": [forced_reminder]}
+            else:
+                # No encontró fecha - preguntar al usuario
+                content = f"⚠️ No pude encontrar una fecha específica en el documento.\n\n{data.get('message', '')}\n\n¿Podrías decirme en qué día del mes debería programar el recordatorio? (ej: 'día 5', '15 de cada mes')"
+                return {"messages": [AIMessage(content=content)]}
+        except Exception as e:
+            logger.error(f"[post_tool] Error procesando extract_payment_date: {e}")
+            pass
+    
+    # 5. create_reminder: manejar errores de setup y renderizar resultados
+    if last_tool_msg.name == "create_reminder":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            
+            if data.get("setup_required"):
+                content = """⚠️ **Sistema de Recordatorios no configurado**
+
+Para activar los recordatorios (toma 1 minuto):
+
+1. Abre: https://supabase.com/dashboard/project/tqqvgaiueheiqtqmbpjh/sql
+2. Copia el contenido del archivo: `CREAR_TABLA_REMINDERS.sql`
+3. Pégalo en el SQL Editor
+4. Click en "RUN"
+5. ¡Listo! Vuelve a intentar crear el recordatorio
+
+El archivo SQL está en la raíz del proyecto y contiene todo lo necesario."""
+                return {"messages": [AIMessage(content=content)]}
+            elif "error" in data:
+                content = f"❌ Error al crear recordatorio: {data.get('error')}"
+                return {"messages": [AIMessage(content=content)]}
+            elif data.get("status") == "created":
+                # Renderizar resultado exitoso
+                msg = data.get("message", "Recordatorio(s) creado(s)")
+                count = data.get("count", 1)
+                
+                if count > 1:
+                    # Mostrar primeros 3 y últimos 3 recordatorios
+                    reminders = data.get("reminders", [])
+                    preview = reminders[:3] + (["..."] if len(reminders) > 6 else []) + reminders[-3:]
+                    dates_list = "\n".join([f"  - {r['date']}" if isinstance(r, dict) else f"  - {r}" for r in preview])
+                    content = f"{msg}\n\nFechas:\n{dates_list}\n\n✉️ Se enviarán automáticamente por email en cada fecha."
+                else:
+                    content = f"{msg}\n\n✉️ Se enviará automáticamente por email en la fecha indicada."
+                
+                return {"messages": [AIMessage(content=content)]}
+        except Exception:
+            pass
+    
+    # 6. build_summary_ppt: renderizado directo del enlace de descarga
     if last_tool_msg.name == "build_summary_ppt":
         try:
             data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
@@ -855,8 +1061,9 @@ def should_call_tool(state: AgentState) -> Literal["tools", "end"]:
 def should_continue(state: AgentState) -> Literal["assistant", "end"]:
     """After executing tools, decide whether to call assistant again or end.
     
-    Si post_tool ya generó una respuesta directa (último mensaje es AIMessage),
-    terminamos ahí. Si no, volvemos a assistant para que el LLM responda.
+    Si post_tool ya generó una respuesta directa (último mensaje es AIMessage sin tool_calls),
+    terminamos ahí. Si tiene tool_calls, necesitamos ejecutar tools de nuevo.
+    Si es ToolMessage, volvemos a assistant para que responda.
     """
     messages = state.get("messages", [])
     if not messages:
@@ -864,12 +1071,19 @@ def should_continue(state: AgentState) -> Literal["assistant", "end"]:
     
     last = messages[-1]
     
-    # Si el último mensaje es AIMessage, post_tool ya generó la respuesta → END
+    # Si el último mensaje es AIMessage CON tool_calls, necesitamos ejecutar tools → assistant
+    if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
+        logger.info("[should_continue] AIMessage con tool_calls → volviendo a assistant para ejecutar tools")
+        return "assistant"
+    
+    # Si el último mensaje es AIMessage SIN tool_calls, post_tool ya generó respuesta final → END
     if isinstance(last, AIMessage):
+        logger.info("[should_continue] AIMessage sin tool_calls → END")
         return "end"
     
     # Si el último mensaje es ToolMessage, necesitamos que assistant responda
     if isinstance(last, ToolMessage):
+        logger.info("[should_continue] ToolMessage → volviendo a assistant")
         return "assistant"
     
     return "end"

@@ -1,0 +1,56 @@
+{
+  "intent": "create_monthly_reminder_from_document",
+  "user_query": "Mandame un recordatorio el dia que haya que pagar al arquitecto cada mes",
+  "context": {
+    "property_id": "<current_property_id>",
+    "uploaded_documents": ["Contrato arquitecto"]
+  },
+  "workflow": {
+    "step_1": {
+      "detect_keywords": ["cada mes", "mensual", "todos los meses"],
+      "action": "Si detectas estas palabras, usa recurrence='monthly' en create_reminder"
+    },
+    "step_2": {
+      "detect_document_reference": ["pagar al arquitecto", "contrato", "documento"],
+      "action": "Si menciona un concepto de pago, busca el documento relacionado y extrae la fecha"
+    },
+    "step_3": {
+      "tool_calls": [
+        {
+          "name": "list_docs",
+          "args": {"property_id": "<current_property_id>"},
+          "reasoning": "Buscar documentos subidos que mencionen 'arquitecto' o 'contrato'"
+        },
+        {
+          "name": "extract_payment_date",
+          "args": {
+            "property_id": "<current_property_id>",
+            "document_group": "Administrativos",
+            "document_subgroup": "Contratos",
+            "document_name": "Contrato arquitecto",
+            "payment_concept": "pago al arquitecto"
+          },
+          "reasoning": "Extraer la fecha exacta del documento"
+        },
+        {
+          "name": "create_reminder",
+          "args": {
+            "property_id": "<current_property_id>",
+            "title": "Pago al arquitecto",
+            "description": "Recordatorio mensual de pago al arquitecto según contrato",
+            "reminder_date": "día 5",
+            "recurrence": "monthly",
+            "recurrence_count": 12,
+            "document_reference": {
+              "document_group": "Administrativos",
+              "document_subgroup": "Contratos",
+              "document_name": "Contrato arquitecto"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expected_response": "✅ 12 recordatorios creados: 'Pago al arquitecto' desde 5 de enero de 2025 hasta 5 de diciembre de 2025 (monthly)\n\nFechas:\n  - 5 de enero de 2025\n  - 5 de febrero de 2025\n  - 5 de marzo de 2025\n  ...\n  - 5 de octubre de 2025\n  - 5 de noviembre de 2025\n  - 5 de diciembre de 2025\n\n✉️ Se enviarán automáticamente por email en cada fecha."
+}
+
