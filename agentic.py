@@ -660,6 +660,34 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         msgs.append(SystemMessage(content=f"Si el usuario dice 'ese documento', interpreta {ldr} como el objetivo por defecto."))
     msgs += messages
 
+    # Guarda explícita: ficha resumen propiedad
+    if messages and isinstance(messages[-1], HumanMessage):
+        last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
+        if any(k in last_user_text for k in ("ficha resumen", "resumen propiedad", "genera resumen", "generar resumen", "crear resumen", "resumen pdf")):
+            if state.get("property_id"):
+                # Obtener info de la propiedad
+                try:
+                    from tools.property_tools import get_property
+                    prop_info = get_property(state["property_id"])
+                    prop_name = (prop_info or {}).get("name")
+                    prop_address = (prop_info or {}).get("address")
+                except:
+                    prop_name = None
+                    prop_address = None
+                
+                # Forzar llamada a build_summary_ppt
+                forced_call = AIMessage(content="", tool_calls=[{
+                    "name": "build_summary_ppt",
+                    "args": {
+                        "property_id": state["property_id"],
+                        "property_name": prop_name,
+                        "address": prop_address,
+                        "format": "pdf"
+                    },
+                    "id": "manual_build_summary_1"
+                }])
+                return {"messages": [forced_call], "last_llm_timestamp": time.time()}
+
     # Estrategia de dos modelos:
     # - Si venimos de herramientas (último mensaje es ToolMessage), usamos gpt-4o para respuesta final
     # - Si es planificación (último mensaje es HumanMessage), usamos gpt-4o-mini para tool calls
@@ -790,6 +818,24 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                 content = f"Propiedades encontradas ({len(props)}):\n" + "\n".join(lines)
             
             return {"messages": [AIMessage(content=content)]}
+        except Exception:
+            pass
+    
+    # 5. build_summary_ppt: renderizado directo del enlace de descarga
+    if last_tool_msg.name == "build_summary_ppt":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            
+            if "signed_url" in data:
+                filename = data.get("filename", "resumen_propiedad.pdf")
+                url = data["signed_url"]
+                size_kb = data.get("size_bytes", 0) / 1024
+                
+                content = f"✅ Ficha resumen generada exitosamente.\n\n📄 {filename} ({size_kb:.1f} KB)\n\n{url}\n\nPuedes descargar el PDF desde el enlace anterior."
+                return {"messages": [AIMessage(content=content)]}
+            elif "error" in data:
+                content = f"⚠️ Hubo un problema al subir la ficha a Storage, pero se generó correctamente. Error: {data['error']}"
+                return {"messages": [AIMessage(content=content)]}
         except Exception:
             pass
     

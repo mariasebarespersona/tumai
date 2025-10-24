@@ -352,11 +352,41 @@ class BuildSummaryPPTInput(BaseModel):
 
 @tool("build_summary_ppt")
 def build_summary_ppt_tool(property_id: str, property_name: Optional[str] = None, address: Optional[str] = None, format: str = "pdf") -> Dict:
-    """Build a summary presentation (PDF or PPTX) with fixed slides (índice, fotos demo CC, executive summary, mapa placeholder, tabla números, waterfall, fechas). Returns {filename, bytes_b64}. Nunca inventa datos: usa números y docs existentes, y fotos demo no asociadas a la propiedad. Default format: PDF for direct viewing."""
+    """Build a summary presentation (PDF or PPTX) with fixed slides and upload to Supabase Storage. Returns {filename, signed_url} for download. Nunca inventa datos: usa números y docs existentes. Default format: PDF."""
     import base64
+    from .supabase_client import sb
+    
     data = _build_summary_ppt(property_id, property_name, address, format=format)
     ext = "pdf" if format.lower() == "pdf" else "pptx"
-    return {"filename": f"resumen_propiedad.{ext}", "bytes_b64": base64.b64encode(data).decode("utf-8")}
+    filename = f"resumen_propiedad_{property_id[:8]}.{ext}"
+    
+    # Upload to Supabase Storage
+    from .supabase_client import BUCKET
+    bucket = BUCKET
+    storage_key = f"summaries/{property_id}/{filename}"
+    content_type = "application/pdf" if ext == "pdf" else "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    
+    try:
+        # Upload with upsert to overwrite if exists
+        sb.storage.from_(bucket).upload(storage_key, data, {"content-type": content_type, "upsert": "true"})
+        
+        # Generate signed URL (24 hours)
+        signed = sb.storage.from_(bucket).create_signed_url(storage_key, 86400)
+        signed_url = signed.get("signedURL")
+        
+        return {
+            "filename": filename,
+            "signed_url": signed_url,
+            "storage_key": storage_key,
+            "size_bytes": len(data)
+        }
+    except Exception as e:
+        # Fallback: return base64 if storage fails
+        return {
+            "filename": filename,
+            "bytes_b64": base64.b64encode(data).decode("utf-8"),
+            "error": f"Storage upload failed: {str(e)}"
+        }
 
 # --- Google voice tools ---
 class TranscribeAudioInput(BaseModel):
@@ -538,6 +568,7 @@ TOOLS = [
     upsert_summary_value_tool,
     send_email_tool,
     compute_summary_tool,          # NEW
+    build_summary_ppt_tool,        # NEW - Generate PDF summary
     transcribe_audio_tool,         # NEW
     synthesize_speech_tool,
     process_voice_input_tool,      # NEW - Enhanced voice processing

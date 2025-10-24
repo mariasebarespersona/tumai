@@ -177,8 +177,17 @@ def build_summary_ppt(property_id: str, property_name: str | None = None, addres
     _numbers_table(prs, nums)
 
     # Gráfico en cascada: generamos/obtenemos url firmada y la insertamos
-    wf = chart_waterfall(property_id)
-    _waterfall_slide(prs, wf.get("signed_url"))
+    try:
+        wf = chart_waterfall(property_id)
+        _waterfall_slide(prs, wf.get("signed_url"))
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to generate waterfall chart: {e}")
+        # Add slide anyway with error message
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        slide.shapes.title.text = "Gráfico en cascada"
+        tx = slide.shapes.add_textbox(Inches(0.6), Inches(1.8), Inches(9), Inches(1))
+        tx.text_frame.text = "Gráfico no disponible (generar manualmente si es necesario)"
 
     # Fechas clave (placeholder): el agente NO inventa; dejamos sección para completar
     slide = prs.slides.add_slide(prs.slide_layouts[5])
@@ -194,12 +203,12 @@ def build_summary_ppt(property_id: str, property_name: str | None = None, addres
     if format.lower() == "pdf":
         try:
             from reportlab.lib.pagesizes import A4
-            from reportlab.lib.units import inch, cm
+            from reportlab.lib.units import inch
             from reportlab.pdfgen import canvas
             from reportlab.lib import colors
             from reportlab.platypus import Table, TableStyle
-            from reportlab.lib.utils import ImageReader
-            from PIL import Image
+            import logging
+            logger = logging.getLogger(__name__)
             
             pdf_buf = io.BytesIO()
             c = canvas.Canvas(pdf_buf, pagesize=A4)
@@ -235,33 +244,9 @@ def build_summary_ppt(property_id: str, property_name: str | None = None, addres
             
             c.showPage()
             
-            # === PAGE 2: PHOTOS ===
-            c.setFillColor(bg_light)
-            c.rect(0, 0, width, height, fill=True, stroke=False)
-            c.setFillColor(green_dark)
-            c.setFont("Helvetica-Bold", 24)
-            c.drawString(inch, height - inch, "Fotos de la Propiedad")
-            
-            # Demo photos from Unsplash (countryside houses)
-            photo_urls = [
-                "https://images.unsplash.com/photo-1600607687920-4ce8c559d8df?w=400",
-                "https://images.unsplash.com/photo-1542626991-cbc4e32524cc?w=400",
-            ]
-            y_photo = height - 2.5*inch
-            for idx, url in enumerate(photo_urls):
-                try:
-                    resp = requests.get(url, timeout=10)
-                    img = Image.open(io.BytesIO(resp.content))
-                    img_reader = ImageReader(io.BytesIO(resp.content))
-                    x_pos = inch + (idx * 3.5*inch)
-                    c.drawImage(img_reader, x_pos, y_photo, width=3*inch, height=2.5*inch, preserveAspectRatio=True, mask='auto')
-                except Exception:
-                    pass
-            
-            c.setFont("Helvetica-Oblique", 10)
-            c.setFillColor(colors.grey)
-            c.drawString(inch, y_photo - 0.3*inch, "(Fotos demo de referencia – no son de la propiedad real)")
-            c.showPage()
+            # === PAGE 2: PHOTOS (SKIP - reduced version) ===
+            # Skipping photos page to avoid external API dependencies
+            logger.info("Skipping photos page for faster generation")
             
             # === PAGE 3: EXECUTIVE SUMMARY ===
             c.setFillColor(bg_light)
@@ -271,16 +256,20 @@ def build_summary_ppt(property_id: str, property_name: str | None = None, addres
             c.drawString(inch, height - inch, "Executive Summary")
             
             # AI-generated summary (call LLM for brief intro)
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-            summary_prompt = f"""Genera un resumen ejecutivo breve (máximo 3 frases) para esta propiedad rural:
+            try:
+                from langchain_openai import ChatOpenAI
+                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, timeout=30)
+                summary_prompt = f"""Genera un resumen ejecutivo breve (máximo 3 frases) para esta propiedad rural:
 Nombre: {title}
 Dirección: {address or 'No especificada'}
 Precio de venta: {key_numbers.get('precio_venta', 'No disponible')}
 Net profit estimado: {key_numbers.get('net_profit', 'No disponible')}
 
 El resumen debe ser profesional, atractivo y basado solo en los datos proporcionados (sin inventar). Si falta algún dato, no lo menciones."""
-            ai_summary = llm.invoke(summary_prompt).content
+                ai_summary = llm.invoke(summary_prompt).content
+            except Exception as e:
+                logger.warning(f"Failed to generate AI summary: {e}")
+                ai_summary = f"Propiedad rural en {address or 'ubicación por especificar'}. Precio de venta: {key_numbers.get('precio_venta', 'Por determinar')}. Análisis financiero disponible en la sección de números."
             
             y = height - 1.8*inch
             c.setFont("Helvetica", 12)
@@ -344,28 +333,19 @@ El resumen debe ser profesional, atractivo y basado solo en los datos proporcion
             
             c.showPage()
             
-            # === PAGE 4: MAP ===
+            # === PAGE 4: MAP (SIMPLIFIED) ===
             c.setFillColor(bg_light)
             c.rect(0, 0, width, height, fill=True, stroke=False)
             c.setFillColor(green_dark)
             c.setFont("Helvetica-Bold", 24)
             c.drawString(inch, height - inch, "Ubicación")
             
-            # Static map from OpenStreetMap
-            if address:
-                import urllib.parse
-                map_query = urllib.parse.quote(address + ", Madrid")
-                # Use static map API (Mapbox or similar - free tier)
-                map_url = f"https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/pin-s+3d7435(-3.7038,40.4168)/-3.7038,40.4168,13,0/600x400@2x?access_token=pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw"
-                try:
-                    map_resp = requests.get(map_url, timeout=10)
-                    map_img = ImageReader(io.BytesIO(map_resp.content))
-                    c.drawImage(map_img, inch, height - 6*inch, width=6*inch, height=4*inch, preserveAspectRatio=True, mask='auto')
-                except Exception:
-                    c.setFont("Helvetica", 12)
-                    c.setFillColor(colors.black)
-                    c.drawString(inch, height - 2*inch, f"Dirección: {address}")
-                    c.drawString(inch, height - 2.4*inch, "Mapa: Madrid, España")
+            c.setFont("Helvetica", 14)
+            c.setFillColor(colors.black)
+            c.drawString(inch, height - 2*inch, f"Dirección: {address or 'No especificada'}")
+            c.setFont("Helvetica-Oblique", 11)
+            c.setFillColor(colors.grey)
+            c.drawString(inch, height - 2.5*inch, "(Mapa integrado próximamente)")
             
             c.showPage()
             

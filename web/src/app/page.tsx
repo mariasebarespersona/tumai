@@ -253,8 +253,20 @@ export default function ChatPage() {
   // Render assistant/user message with inline chart previews (PNG/JPG/WEBP) and download buttons for docs
   const renderMessageContent = useCallback((text: string) => {
     if (!text) return null
+    
+    // Primero, extraer links markdown [text](url) y convertirlos a URLs directas para imágenes
+    let processedText = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s)]*)?)\)/gi, (match, linkText, url) => {
+      // Si es un link markdown a imagen, reemplazar con la URL directa para que sea detectada después
+      return `\n${url}\n`
+    })
+    
+    // También reemplazar links markdown a documentos
+    processedText = processedText.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+?\.(?:pptx|xlsx|pdf|docx)(?:\?[^\s)]*)?)\)/gi, (match, linkText, url) => {
+      return `\n${url}\n`
+    })
+    
     const fileRegex = /(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp|pptx|xlsx|pdf|docx)(?:\?[^\s]*)?)/gi
-    const parts = text.split(fileRegex)
+    const parts = processedText.split(fileRegex)
     const nodes: React.ReactNode[] = []
     for (let i = 0; i < parts.length; i++) {
       const token = parts[i]
@@ -263,8 +275,8 @@ export default function ChatPage() {
       const isDoc = /^(https?:\/\/[^\s]+?\.(?:pptx|xlsx|pdf|docx)(?:\?[^\s]*)?)$/i.test(token)
       if (isImg) {
         nodes.push(
-          <div key={`img-${i}`} className="mt-3">
-            <img src={token} alt="gráfico" className="max-w-full rounded-xl border border-[color:var(--c-green-200)] shadow" />
+          <div key={`img-${i}`} className="mt-3 mb-3">
+            <img src={token} alt="gráfico" className="max-w-full max-h-[500px] rounded-xl border border-[color:var(--c-green-200)] shadow-lg" />
           </div>
         )
       } else if (isDoc) {
