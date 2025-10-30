@@ -683,24 +683,76 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         msgs.append(SystemMessage(content=f"Si el usuario dice 'ese documento', interpreta {ldr} como el objetivo por defecto."))
     
     # Limitar historial a los últimos 15 mensajes para evitar rate limits
-    # Mantener siempre el último HumanMessage y sus ToolMessages asociados
+    # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos
     if len(messages) > 15:
-        # Buscar el último HumanMessage
-        last_human_idx = None
-        for i in range(len(messages) - 1, -1, -1):
-            if isinstance(messages[i], HumanMessage):
-                last_human_idx = i
-                break
+        filtered = messages[-15:]
         
-        if last_human_idx is not None and last_human_idx > 15:
-            # Tomar los últimos 15 mensajes, pero asegurarse de incluir el último HumanMessage completo
-            filtered = messages[max(0, last_human_idx - 14):]
-        else:
-            filtered = messages[-15:]
+        # Verificar si el primer mensaje es un ToolMessage
+        # Si lo es, necesitamos incluir el AIMessage con tool_calls que lo precede
+        if filtered and isinstance(filtered[0], ToolMessage):
+            # Buscar hacia atrás el AIMessage con tool_calls que generó este ToolMessage
+            tool_call_id = getattr(filtered[0], "tool_call_id", None)
+            if tool_call_id:
+                # Buscar en los mensajes anteriores
+                for i in range(len(messages) - 16, -1, -1):
+                    msg = messages[i]
+                    if isinstance(msg, AIMessage):
+                        tool_calls = getattr(msg, "tool_calls", [])
+                        if any(tc.get("id") == tool_call_id for tc in tool_calls):
+                            # Encontramos el AIMessage, incluir desde ahí
+                            start_idx = i
+                            filtered = messages[start_idx:]
+                            break
         
         msgs += filtered
     else:
         msgs += messages
+    
+    # CRÍTICO: Limpiar mensajes huérfanos - validar que cada AIMessage con tool_calls
+    # tenga sus correspondientes ToolMessages
+    cleaned_msgs = []
+    for i, msg in enumerate(msgs):
+        if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None):
+            # Este AIMessage tiene tool_calls, verificar si hay respuestas
+            tool_call_ids = {tc.get("id") for tc in msg.tool_calls if tc.get("id")}
+            
+            # Buscar ToolMessages que respondan a estos tool_calls
+            answered_ids = set()
+            for j in range(i + 1, len(msgs)):
+                if isinstance(msgs[j], ToolMessage):
+                    tc_id = getattr(msgs[j], "tool_call_id", None)
+                    if tc_id in tool_call_ids:
+                        answered_ids.add(tc_id)
+                elif isinstance(msgs[j], AIMessage):
+                    # Siguiente AIMessage, dejar de buscar
+                    break
+            
+            # Si faltan respuestas, SKIP este AIMessage y sus ToolMessages asociados
+            if tool_call_ids != answered_ids:
+                logger.warning(f"[assistant] Skipping orphaned AIMessage with unanswered tool_calls: {tool_call_ids - answered_ids}")
+                # Saltar este mensaje y cualquier ToolMessage asociado
+                continue
+        
+        # Si es ToolMessage, verificar si su AIMessage padre está en cleaned_msgs
+        if isinstance(msg, ToolMessage):
+            tc_id = getattr(msg, "tool_call_id", None)
+            if tc_id:
+                # Buscar hacia atrás el AIMessage con este tool_call_id en cleaned_msgs
+                found_parent = False
+                for parent_msg in reversed(cleaned_msgs):
+                    if isinstance(parent_msg, AIMessage):
+                        parent_tcs = getattr(parent_msg, "tool_calls", [])
+                        if any(tc.get("id") == tc_id for tc in parent_tcs):
+                            found_parent = True
+                            break
+                
+                if not found_parent:
+                    logger.warning(f"[assistant] Skipping orphaned ToolMessage with id: {tc_id}")
+                    continue
+        
+        cleaned_msgs.append(msg)
+    
+    msgs = msgs[:2] + cleaned_msgs  # Mantener System messages al inicio
 
     # Guardas explícitas para flujos complejos
     if messages and isinstance(messages[-1], HumanMessage):
@@ -765,7 +817,7 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     else:
         # Planificación: usar gpt-4o-mini con tools (más rápido, mayor rate limit)
         llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60).bind_tools(TOOLS)
-    ai = llm.invoke(msgs)
+        ai = llm.invoke(msgs)
 
     return {"messages": [ai], "last_llm_timestamp": time.time()}
 
@@ -1058,8 +1110,8 @@ def should_call_tool(state: AgentState) -> Literal["tools", "end"]:
     return "end"
 
 # --------------- Should we continue looping? ------------
-def should_continue(state: AgentState) -> Literal["assistant", "end"]:
-    """After executing tools, decide whether to call assistant again or end.
+def should_continue(state: AgentState) -> Literal["tools", "assistant", "end"]:
+    """After executing tools, decide whether to call tools again, assistant, or end.
     
     Si post_tool ya generó una respuesta directa (último mensaje es AIMessage sin tool_calls),
     terminamos ahí. Si tiene tool_calls, necesitamos ejecutar tools de nuevo.
@@ -1071,10 +1123,11 @@ def should_continue(state: AgentState) -> Literal["assistant", "end"]:
     
     last = messages[-1]
     
-    # Si el último mensaje es AIMessage CON tool_calls, necesitamos ejecutar tools → assistant
+    # Si el último mensaje es AIMessage CON tool_calls, necesitamos ejecutar tools directamente
+    # (esto ocurre cuando post_tool fuerza un tool call)
     if isinstance(last, AIMessage) and getattr(last, "tool_calls", None):
-        logger.info("[should_continue] AIMessage con tool_calls → volviendo a assistant para ejecutar tools")
-        return "assistant"
+        logger.info("[should_continue] AIMessage con tool_calls → ejecutando tools directamente")
+        return "tools"
     
     # Si el último mensaje es AIMessage SIN tool_calls, post_tool ya generó respuesta final → END
     if isinstance(last, AIMessage):
@@ -1112,11 +1165,11 @@ def build_graph():
     # After tools: run post_tool hook
     graph.add_edge("tools", "post_tool")
     
-    # After post_tool: loop back to assistant to see results and continue or end
+    # After post_tool: can route to tools (for forced calls), assistant (for responses), or end
     graph.add_conditional_edges(
         "post_tool",
         should_continue,
-        {"assistant": "assistant", "end": END}
+        {"tools": "tools", "assistant": "assistant", "end": END}
     )
 
     # Compile with PostgreSQL checkpointer for persistent memory

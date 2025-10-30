@@ -14,26 +14,41 @@
 
 ## 🌟 Overview
 
-RAMA Agentic AI is a sophisticated property management system built with LangGraph and powered by GPT-4o. It provides an intelligent conversational interface for managing rural property investments through three comprehensive frameworks: **Documents**, **Numbers**, and **Summary**.
+RAMA Agentic AI is a conversational assistant for real estate companies, built with LangGraph and powered by GPT‑4o. Its goal is to make it effortless to complete the three core templates for every property — **Documents**, **Numbers**, and **Summary** — while automating many day‑to‑day property management tasks.
 
-The system acts as a tireless assistant that helps users organize documentation, perform complex financial calculations, generate visual reports, and maintain complete transparency across the entire property lifecycle.
+It helps teams organize documentation, perform financial calculations, generate professional reports, and maintain complete transparency across the entire property lifecycle — all through natural language.
 
 ---
 
 ## 🔄 What's new (Oct 2025)
 
 - Prompt-as-code (modular): `prompts/core.md` + `prompts/policies/*` + `prompts/contracts/*` + `prompts/examples/*`.
-- LLM decide 100% la orquestación; el backend solo aplica el estado devuelto por `set_current_property`.
-- Checkers en runtime:
-  - Verify-before-deny (obliga `list_docs` antes de negar)
-  - List-integrity (reconstruye Subidos/Pendientes por `storage_key`)
-- Respuestas tipadas: `AgentReply` (Pydantic) para respuestas finales consistentes.
-- Flujos restaurados:
-  - Al entrar en propiedad: mensaje estándar “Documentos y Números” (sin listar docs).
-  - Atajos: “plantilla de Documentos/Números” llama `list_docs`/`get_numbers` directamente.
-- Estabilidad: corrección de `GraphRecursionError` y simplificación del grafo post-tools.
-- Borrado múltiple: `delete_properties([ids])` con resolución de nombres → ids (vía `search_properties`).
-- Rendimiento y 429: menos rondas por turno y reintentos con backoff configurados en el cliente LLM.
+- LLM orchestrates 100% of the flow; the backend only applies the state returned by `set_current_property`.
+- Runtime checkers:
+  - Verify-before-deny (forces `list_docs` before denying)
+  - List-integrity (rebuilds Uploaded/Pending by `storage_key`)
+- Typed responses: `AgentReply` (Pydantic) for consistent final messages.
+- Restored flows:
+  - On entering a property: standard message “Documents and Numbers” (no auto‑listing of docs)
+  - Shortcuts: “Documents/Numbers template” calls `list_docs`/`get_numbers` directly
+- Stability: fixed `GraphRecursionError` and simplified the post‑tools graph.
+- Bulk delete: `delete_properties([ids])` with name → id resolution via `search_properties`.
+- Performance and 429: fewer rounds per turn and client‑side backoff retries in the LLM client.
+
+---
+
+## 🧭 Suggested Conversation Flow
+
+- "Show me the list of properties"
+- "Switch to property <Property Name>"
+- "Show me which documents I've already uploaded"
+- "I want to upload this document" (then drag-and-drop in the UI)
+- "Summarize the document <Document Name>"
+- "Send me this document by email to you@example.com"
+- "I want to complete the Numbers template"
+- "Set <item_key> to 1000.0"
+- "Send me the Numbers template by email"
+- "I want to add and work on a new property"
 
 ---
 
@@ -45,11 +60,11 @@ The system acts as a tireless assistant that helps users organize documentation,
 - **Automatic framework provisioning**: Each property gets pre-configured templates for documents, numbers, and summaries
 - **Property context retention**: The agent remembers which property you're working on and maintains state across sessions
 
-### 🔔 Recordatorios Inteligentes (NEW!)
-- **Extracción automática de fechas**: El agente lee documentos y extrae fechas de pago automáticamente
-- **Recordatorios programados**: Crea recordatorios que se envían automáticamente por email en la fecha indicada
-- **Gestión completa**: Lista, cancela y modifica recordatorios fácilmente
-- **Integración con documentos**: Vincula recordatorios a documentos específicos para contexto completo
+### 🔔 Smart Reminders (NEW!)
+- **Automatic date extraction**: The agent reads documents and extracts payment dates automatically
+- **Scheduled reminders**: Create reminders that are emailed automatically on the configured date(s)
+- **Full management**: List, cancel, and modify reminders easily
+- **Document integration**: Link reminders to specific documents for full context
 
 ### 📄 Document Framework
 - **Structured document organization**: Documents organized by group/subgroup/name taxonomy
@@ -175,37 +190,37 @@ Generates beautiful, investor-ready PDF summaries with:
 
 ## 🧩 Prompt as code
 
-`SYSTEM_PROMPT` se compone en runtime desde:
-- `prompts/core.md` (rol, objetivo, límites)
-- `prompts/policies/safety.md` (seguridad y estilo)
-- `prompts/policies/tone.md` (tono)
-- `prompts/policies/properties.md` (reglas de orquestación de propiedades)
+`SYSTEM_PROMPT` is composed at runtime from:
+- `prompts/core.md` (role, objective, constraints)
+- `prompts/policies/safety.md` (safety and style)
+- `prompts/policies/tone.md` (tone)
+- `prompts/policies/properties.md` (property orchestration rules)
 
-Ventajas: versionado, auditoría clara y cambios atómicos por política.
+Benefits: versioning, clear auditability, and atomic policy changes.
 
 ---
 
 ## ✅ Runtime Checkers
 
-- **Verify-before-deny**: si la respuesta niega existencia de documentos sin `list_docs` reciente, se fuerza `list_docs` y se rehace la salida.
-- **List-integrity**: tras `list_docs`, se renderiza “Subidos/Pendientes” por `storage_key`.
-- **Numbers rendering**: tras `get_numbers`, se muestra una lista estable `item: valor`.
+- **Verify-before-deny**: if a response denies the existence of documents without a recent `list_docs`, force `list_docs` and rebuild the output.
+- **List-integrity**: after `list_docs`, render “Uploaded/Pending” based on `storage_key`.
+- **Numbers rendering**: after `get_numbers`, render a stable list `item: value`.
 
 ---
 
 ## 🛠 Stability fixes
 
-- Eliminados bucles que provocaban `GraphRecursionError`:
-  - Post-tools → vuelve a `assistant` una vez; `assistant` decide tool/end.
-  - Render directo tras `list_docs`/`get_numbers` para evitar rondas extra.
+- Removed loops that caused `GraphRecursionError`:
+  - Post-tools → return to `assistant` once; `assistant` decides tool/end.
+  - Direct rendering after `list_docs`/`get_numbers` to avoid extra rounds.
 
 ---
 
 ## 🚦 Rate-Limits (429) & Performance
 
-- Menos rondas por turno: render directo tras tools y guards que fuerzan la tool correcta.
-- Retries con backoff en el cliente LLM.
-- (Opcional) Planner con modelo ligero y respuesta final con modelo grande.
+- Fewer rounds per turn: direct rendering after tools and guards that force the correct tool.
+- Retries with backoff in the LLM client.
+- (Optional) Planner with a lightweight model and final response with a larger model.
 
 ---
 
@@ -421,25 +436,25 @@ npm run dev
 
 **Option 1: Natural language**
 ```
-User: "Crear una propiedad llamada Casa Rural Demo en Calle Alameda 22"
-Agent: ✅ Propiedad creada con id: xxx. Frameworks: Documentos, Números, Resumen.
+User: "Create a property named Rural House Demo at Calle Alameda 22"
+Agent: ✅ Property created with id: xxx. Frameworks: Documents, Numbers, Summary.
 ```
 
 **Option 2: Direct command**
 ```
-User: "nueva propiedad"
-Agent: ¿Cómo quieres llamar a la propiedad?
-User: "Casa del Campo"
-Agent: ¿Cuál es la dirección?
+User: "new property"
+Agent: What would you like to name the property?
+User: "Country House"
+Agent: What's the address?
 User: "Calle Verde 15, Segovia"
 ```
 
 ### Switching Properties
 
 ```
-User: "trabajar con Casa Demo 6"
-Agent: Trabajaremos con Casa Demo 6 — Calle Alameda 22. 
-       Plantillas pendientes: Documentos, Números.
+User: "work with Casa Demo 6"
+Agent: We'll work with Casa Demo 6 — Calle Alameda 22. 
+       Pending templates: Documents, Numbers.
 ```
 
 The agent uses fuzzy matching - "Casa Demos 6", "casa demo6", etc. all work.
@@ -448,34 +463,34 @@ The agent uses fuzzy matching - "Casa Demos 6", "casa demo6", etc. all work.
 
 #### Upload a document
 ```
-User: "subir escritura de la casa"
-Agent: [Proposes slot: Compra / Escrituras / Escritura notarial]
-       ¿Es correcto?
-User: "sí"
-Agent: [File upload prompt appears in UI]
+User: "upload the title deed"
+Agent: [Proposes slot: Purchase / Deeds / Notarial deed]
+       Is that correct?
+User: "yes"
+Agent: [File upload prompt appears in the UI]
 ```
 
 #### List documents
 ```
-User: "listar documentos"
+User: "list documents"
 Agent: [Shows table with uploaded ✓ and pending documents]
 ```
 
 #### Summarize a document
 ```
-User: "resume el contrato del arquitecto"
+User: "summarize the architect contract"
 Agent: [AI-generated summary using RAG]
 ```
 
 #### Ask questions about documents
 ```
-User: "¿cuánto cuesta la licencia de obras?"
+User: "how much does the building permit cost?"
 Agent: [Searches indexed documents and answers with citations]
 ```
 
 #### Payment schedule extraction
 ```
-User: "¿cuándo tengo que pagar al arquitecto?"
+User: "when do I have to pay the architect?"
 Agent: [Extracts dates and amounts from contract]
 ```
 
@@ -483,67 +498,67 @@ Agent: [Extracts dates and amounts from contract]
 
 #### View numbers template
 ```
-User: "números"
+User: "numbers"
 Agent: [Shows full template with groups/items/values]
-       Puedes pedirme: calcular, escenario, punto de equilibrio, 
-       sensibilidad, gráfico en cascada, barras apiladas, 
-       o enviarlo por email (Excel).
+       You can ask me to: calculate, run a scenario, break-even, 
+       sensitivity, waterfall chart, 100% stacked bars, 
+       or send it by email (Excel).
 ```
 
 #### Set values
 ```
-User: "pon precio de venta a 250000"
-Agent: ✅ Actualizado Precio de venta a 250000.0
+User: "set sale_price to 250000"
+Agent: ✅ Sale price updated to 250000.0
        [Auto-recalculates derived metrics]
 
-User: "pon impuestos a 0.21"
-Agent: ✅ Actualizado Impuestos (%) a 0.21
+User: "set taxes to 0.21"
+Agent: ✅ Taxes (%) updated to 0.21
 ```
 
 Accepts formats: `250000`, `250.000`, `250,000`, `0.21`, `21%`
 
 #### Calculate derived metrics
 ```
-User: "calcular"
+User: "calculate"
 Agent: Net profit: €45,230
        ROI: 18.5%
        Gross margin: €98,450
-       ⚠️ Anomalías: total_pagado > precio_venta
+       ⚠️ Anomalies: total_paid > sale_price
 ```
 
 #### What-if scenario
 ```
-User: "escenario: -10% en precio y +12% en construcción"
-Agent: Escenario calculado. Net profit: €32,100
+User: "scenario: -10% on price and +12% on construction"
+Agent: Scenario calculated. Net profit: €32,100
        [Saves snapshot for comparison]
 ```
 
 #### Break-even analysis
 ```
-User: "punto de equilibrio de precio"
-Agent: Break-even en precio_venta ≈ €185,430.50 (net_profit 0.00)
+User: "price break-even"
+Agent: Break-even at sale_price ≈ €185,430.50 (net_profit 0.00)
 ```
 
 #### Sensitivity analysis
 ```
-User: "sensibilidad (precio vs construcción)"
+User: "sensitivity (price vs construction)"
 Agent: [Generates 2D heatmap]
-       Sensibilidad lista: https://...sensitivity.png
+       Sensitivity ready: https://...sensitivity.png
 ```
 
 #### Charts
 ```
-User: "gráfico en cascada"
+User: "waterfall chart"
 Agent: [Waterfall chart appears inline in chat]
 
-User: "barras apiladas al 100%"
+User: "100% stacked bars"
 Agent: [Cost composition stacked bar chart]
 ```
 
 #### Export to Excel
 ```
-User: "envíalo por email a investor@example.com"
-Agent: Email enviado con archivo adjunto: numbers_framework.xlsx
+User: "send it by email to investor@example.com"
+Agent: Email sent with attachment: numbers_framework.xlsx
 ```
 
 The Excel includes: Inputs, Derived Metrics, Anomalies, Recent Scenarios, Sensitivity Grid.
@@ -551,9 +566,9 @@ The Excel includes: Inputs, Derived Metrics, Anomalies, Recent Scenarios, Sensit
 ### Summary Framework
 
 ```
-User: "ficha resumen propiedad"
+User: "property summary report"
 Agent: [Generates professional PDF]
-       Resumen (PDF) listo: https://...summary_xxx.pdf
+       Summary (PDF) ready: https://...summary_xxx.pdf
        [Download button appears in UI]
 ```
 
@@ -568,17 +583,17 @@ The PDF includes:
 
 Then:
 ```
-User: "envíalo por email a stakeholder@example.com"
-Agent: Email enviado con PDF adjunto.
+User: "send it by email to stakeholder@example.com"
+Agent: Email sent with PDF attached.
 ```
 
 ### Email & Communication
 
 The agent understands various email requests:
 ```
-"mandame la plantilla de números por email"
-"enviame el resumen a mi@correo.com"
-"enviar escritura por correo electrónico"
+"send me the numbers template by email"
+"send the summary to me@example.com"
+"send the deed by email"
 ```
 
 It will:
@@ -592,15 +607,15 @@ It will:
 Upload an audio file via the UI:
 ```
 Agent: [Transcribes audio]
-       "He entendido: 'pon precio de venta a doscientos mil euros'"
-       ✅ Actualizado Precio de venta a 200000.0
+       "I'm hearing: 'set sale price to two hundred thousand euros'"
+       ✅ Sale price updated to 200000.0
 ```
 
 ### Mock Documents (for Prototyping)
 
 ```
-User: "sembrar docs mock"
-Agent: ✅ Documentos mock creados: 15. 0 errores.
+User: "seed mock docs"
+Agent: ✅ Mock documents created: 15. 0 errors.
 ```
 
 Creates placeholder text files for all pending document slots, allowing you to:
@@ -626,15 +641,15 @@ This creates lightweight placeholders marked with `metadata: {mock: True}` that 
 
 Quick test sequence:
 ```
-1. pon precio de venta a 250000
-2. pon impuestos a 0.21
-3. pon costes de construcción a 120000
-4. pon terrenos coste a 40000
-5. calcular
-6. gráfico en cascada
-7. escenario: -10% en precio y +12% en construcción
-8. punto de equilibrio
-9. envíalo por email a test@example.com
+1. set sale price to 250000
+2. set taxes to 0.21
+3. set construction costs to 120000
+4. set land cost to 40000
+5. calculate
+6. waterfall chart
+7. scenario: -10% on price and +12% on construction
+8. break-even
+9. send it by email to test@example.com
 ```
 
 Expected: All commands succeed, charts render, Excel arrives by email.
