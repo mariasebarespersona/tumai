@@ -37,9 +37,14 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
-      # BACKEND_URL will be populated with the public URL of rama-backend
-      - key: BACKEND_URL
+      # Use internal host/port to reach the backend from the frontend server
+      - key: BACKEND_HOST
         fromService:
           type: web
           name: rama-backend
-          property: url
+          property: host
+      - key: BACKEND_PORT
+        fromService:
+          type: web
+          name: rama-backend
+          property: port

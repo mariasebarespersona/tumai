@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Minimal proxy to Python backend. Configure BACKEND_URL in .env.local
-const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:7901";
+// Minimal proxy to Python backend.
+// Prefer BACKEND_URL; otherwise build from BACKEND_HOST/BACKEND_PORT (Render internal connection)
+const BACKEND_URL =
+  process.env.BACKEND_URL ||
+  (process.env.BACKEND_HOST && process.env.BACKEND_PORT
+    ? `http://${process.env.BACKEND_HOST}:${process.env.BACKEND_PORT}`
+    : "http://127.0.0.1:7901");
 
 export async function POST(req: NextRequest) {
   try {
