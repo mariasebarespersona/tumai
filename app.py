@@ -789,6 +789,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+async def healthcheck():
+    return {"status": "ok", "app": "RAMA AI Backend"}
+
 @app.post("/ui_chat")
 async def ui_chat(
     text: str = Form(""),
