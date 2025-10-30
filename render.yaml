@@ -1,0 +1,45 @@
+# Render Blueprint - Deploys backend (FastAPI) and frontend (Next.js)
+services:
+  - type: web
+    name: rama-backend
+    env: python
+    plan: free
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+
+  - type: web
+    name: rama-frontend
+    env: node
+    plan: free
+    autoDeploy: true
+    rootDir: web
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      # BACKEND_URL will be populated with the public URL of rama-backend
+      - key: BACKEND_URL
+        fromService:
+          type: web
+          name: rama-backend
+          property: url

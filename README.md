@@ -20,6 +20,23 @@ It helps teams organize documentation, perform financial calculations, generate 
 
 ---
 
+## 🚀 Public Demo Deployment
+
+Click to deploy both backend (FastAPI) and frontend (Next.js) on Render using the provided Blueprint:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mariasebarespersona/tumai)
+
+After clicking:
+- For the backend service (`rama-backend`), add at least `OPENAI_API_KEY`. Optionally add `SUPABASE_URL`, `SUPABASE_KEY`, `DATABASE_URL` (for persistence), and SMTP variables if you want email sending.
+- The frontend service (`rama-frontend`) will automatically get `BACKEND_URL` pointing to the backend URL.
+- Once both services are live, share the frontend URL (e.g., `https://rama-frontend.onrender.com`) with recruiters.
+
+Alternative (Vercel + Render):
+- Deploy backend on Render (as above) and copy its URL.
+- Deploy frontend on Vercel (root: `web/`) and set `BACKEND_URL` in Vercel Project Settings → Environment Variables to the backend URL.
+
+---
+
 ## 🔄 What's new (Oct 2025)
 
 - Prompt-as-code (modular): `prompts/core.md` + `prompts/policies/*` + `prompts/contracts/*` + `prompts/examples/*`.
