@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Minimal proxy to Python backend.
 // Prefer BACKEND_URL; otherwise build from BACKEND_HOST/BACKEND_PORT (Render internal connection)
-const BACKEND_URL =
-  process.env.BACKEND_URL ||
-  (process.env.BACKEND_HOST && process.env.BACKEND_PORT
-    ? `http://${process.env.BACKEND_HOST}:${process.env.BACKEND_PORT}`
-    : "http://127.0.0.1:7901");
+const BACKEND_URL = (() => {
+  if (process.env.BACKEND_URL) return process.env.BACKEND_URL;
+  const host = process.env.BACKEND_HOST;
+  // Prefer HTTPS to public host; Render terminates TLS at the edge
+  if (host) return `https://${host}`;
+  return "http://127.0.0.1:7901";
+})();
 
 export async function POST(req: NextRequest) {
   try {
