@@ -335,6 +335,17 @@ def numbers_chart_sensitivity_tool(property_id: str, precio_vec: List[float], co
     return _numbers_chart_sensitivity(property_id, precio_vec, costes_vec)
 
 
+# --- Numbers template selection (session-level) ---
+class SetNumbersTemplateInput(BaseModel):
+    property_id: str
+    template_key: str = Field(..., description="One of: R2B | R2B+PM | R2B+PM+Venta certs | Promocion")
+
+@tool("set_numbers_template")
+def set_numbers_template_tool(property_id: str, template_key: str) -> Dict:
+    """Set the active Numbers template for this property/session (no DB writes)."""
+    return {"property_id": property_id, "template_key": template_key}
+
+
 class GetSummarySpecInput(BaseModel):
     property_id: str
 

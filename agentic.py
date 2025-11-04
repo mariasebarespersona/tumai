@@ -230,12 +230,17 @@ FLUJO: DOCUMENTOS
   * Si no encuentras el documento exacto por nombre, usa `list_docs` para ver nombres similares y sugiérelos al usuario
 
 FLUJO: NÚMEROS
-- Entrada a modo números: cuando el usuario indique que quiere trabajar con números, MUESTRA la plantilla completa (`get_numbers`) y un resumen de acciones disponibles (calcular, what-if, break-even, sensibilidad, gráficos waterfall/stacked, exportar a Excel).
-- Mostrar tabla: `get_numbers` como “grupo / etiqueta (item_key): valor”.
+- Entrada a modo números: cuando el usuario diga “números”/“plantilla de números”, NO llames aún `get_numbers`. Primero ofrece 4 opciones y aclara que debe elegir SOLO UNA:
+  1) R2B
+  2) R2B + PM
+  3) R2B + PM + Venta certs
+  4) Promoción
+  Pregunta: “¿Cuál quieres completar? (elige solo 1)”. Tras la elección, llama `set_numbers_template(property_id, template_key)` con el texto exacto elegido y confirma la selección. Por ahora, tras confirmar, NO muestres la plantilla todavía.
+- Más adelante: Mostrar tabla: `get_numbers` como “grupo / etiqueta (item_key): valor”.
 - Qué falta: items con `amount` nulo/cero; comunícalos en lista.
 - Escribir valores: intenta mapear el texto del usuario al `item_key` por similitud (etiqueta o clave) y llama `set_number`. Acepta 25.000, 25,000, 25000, 7%, etc. NUNCA escribas sin instrucción o confirmación.
-- Cálculo: cuando lo pida o tras varias escrituras, llama `calc_numbers` y comunica que los totales están actualizados. Si en el futuro hay anomalías (p. ej., net_profit < 0), comunícalas sin inventar valores.
-- Mostrar/enviar: si pide “enviar/mostrar el framework de números”, muéstralo en chat y, si pide enviarlo por email, envía SIEMPRE un Excel (.xlsx) con el framework y resultados (cuando estén disponibles).
+- Cálculo: cuando lo pidan o tras varias escrituras, llama `calc_numbers` y comunica actualización.
+- Mostrar/enviar: si pide “enviar/mostrar el framework de números”, muéstralo o envía Excel.
 
 FLUJO: RESUMEN
 - Cuando documentos y números estén completos, indícalo y ofrece `compute_summary`. Tras computar, comunica resultados principales.
@@ -686,6 +691,7 @@ class AgentState(TypedDict):
     last_doc_ref: NotRequired[Dict[str, Any]]
     input: NotRequired[str]
     last_llm_timestamp: NotRequired[float]  # Para throttling entre llamadas LLM
+    numbers_template: NotRequired[str]      # Elección de plantilla de Números para la sesión
 
 def prepare_input(state: AgentState):
     """Convert input text to HumanMessage if present."""
@@ -944,6 +950,21 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                     "property_id": pid,
                     "messages": [AIMessage(content=f"Ya estamos trabajando con la propiedad \"{prop_name}\". Tienes 2 plantillas por completar: Documentos y Números. ¿Por dónde te gustaría empezar?")]
                 }
+        except Exception:
+            pass
+
+    # 1.1 set_numbers_template: guardar selección en estado y confirmar
+    if last_tool_msg.name == "set_numbers_template":
+        try:
+            payload = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            tpl = (payload or {}).get("template_key", "").strip()
+            if tpl:
+                msg = (
+                    "Perfecto. Usaremos la plantilla de Números: "
+                    f"{tpl}. Recuerda: solo necesitas completar UNA de las cuatro. "
+                    "Cuando quieras, dime 'mostrar plantilla' o 'empezar' y te la muestro."
+                )
+                return {"numbers_template": tpl, "messages": [AIMessage(content=msg)]}
         except Exception:
             pass
     
