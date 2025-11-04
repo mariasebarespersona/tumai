@@ -250,24 +250,80 @@ export default function ChatPage() {
     </div>
   )), [files, removeFile])
 
-  // Render assistant/user message with inline chart previews (PNG/JPG/WEBP) and download buttons for docs
+  // Render assistant/user message with lightweight markdown, media embeds and a clear callout
   const renderMessageContent = useCallback((text: string) => {
     if (!text) return null
     
-    // Primero, extraer links markdown [text](url) y convertirlos a URLs directas para imágenes
-    let processedText = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s)]*)?)\)/gi, (match, linkText, url) => {
-      // Si es un link markdown a imagen, reemplazar con la URL directa para que sea detectada después
-      return `\n${url}\n`
-    })
-    
-    // También reemplazar links markdown a documentos
-    processedText = processedText.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+?\.(?:pptx|xlsx|pdf|docx)(?:\?[^\s)]*)?)\)/gi, (match, linkText, url) => {
-      return `\n${url}\n`
-    })
-    
+    // Extract markdown links to images/documents first so we can render them as blocks
+    let processedText = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+?\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s)]*)?)\)/gi, (_m, _t, url) => `\n${url}\n`)
+    processedText = processedText.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+?\.(?:pptx|xlsx|pdf|docx)(?:\?[^\s)]*)?)\)/gi, (_m, _t, url) => `\n${url}\n`)
     const fileRegex = /(https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|gif|webp|pptx|xlsx|pdf|docx)(?:\?[^\s]*)?)/gi
     const parts = processedText.split(fileRegex)
     const nodes: React.ReactNode[] = []
+
+    // Inline bold **text** helper
+    const renderInline = (s: string) => {
+      const bits: React.ReactNode[] = []
+      const boldRegex = /\*\*([^*]+)\*\*/g
+      let lastIndex = 0
+      let m: RegExpExecArray | null
+      while ((m = boldRegex.exec(s)) !== null) {
+        if (m.index > lastIndex) bits.push(s.slice(lastIndex, m.index))
+        bits.push(<strong key={`b-${m.index}`} className="font-semibold">{m[1]}</strong>)
+        lastIndex = m.index + m[0].length
+      }
+      if (lastIndex < s.length) bits.push(s.slice(lastIndex))
+      return bits
+    }
+
+    // Very light markdown for headings and lists
+    const renderMarkdown = (block: string) => {
+      const lines = block.split(/\n/)
+      const out: React.ReactNode[] = []
+      let listType: 'ul' | 'ol' | null = null
+      let listItems: string[] = []
+      const flush = () => {
+        if (!listType || listItems.length === 0) return
+        if (listType === 'ul') {
+          out.push(
+            <ul key={`ul-${out.length}`} className="list-disc pl-6 space-y-1">
+              {listItems.map((li, i) => (<li key={i}>{renderInline(li)}</li>))}
+            </ul>
+          )
+        } else {
+          out.push(
+            <ol key={`ol-${out.length}`} className="list-decimal pl-6 space-y-1">
+              {listItems.map((li, i) => (<li key={i}>{renderInline(li)}</li>))}
+            </ol>
+          )
+        }
+        listType = null
+        listItems = []
+      }
+      for (const raw of lines) {
+        const line = raw.trimEnd()
+        if (!line.trim()) { flush(); out.push(<div key={`sp-${out.length}`} className="h-2" />); continue }
+        if (line.startsWith('### ')) { flush(); out.push(<div key={`h3-${out.length}`} className="mt-3 mb-2 text-[color:var(--c-green-800)] font-extrabold text-[18px]">{renderInline(line.slice(4))}</div>); continue }
+        if (line.startsWith('## '))  { flush(); out.push(<div key={`h2-${out.length}`} className="mt-3 mb-2 text-[color:var(--c-green-800)] font-extrabold text-[20px]">{renderInline(line.slice(3))}</div>); continue }
+        if (/^\d+\./.test(line)) { if (listType !== 'ol') { flush(); listType = 'ol' } listItems.push(line.replace(/^\d+\.\s*/, '')); continue }
+        if (line.startsWith('- ')) { if (listType !== 'ul') { flush(); listType = 'ul' } listItems.push(line.slice(2)); continue }
+        flush();
+        out.push(<p key={`p-${out.length}`} className="leading-relaxed">{renderInline(line)}</p>)
+      }
+      flush()
+      return out
+    }
+
+    // Callout: emphasize the "choose one of II/III/IV" rule whenever present
+    if (/elegir\s+una\s+entre\s+ii\/iii\/iv/i.test(processedText)) {
+      nodes.push(
+        <div key="callout-optional" className="mb-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 font-semibold flex items-start gap-3 nature-shadow">
+          <span>⚠️</span>
+          <span>Completa SOLO UNA de las secciones opcionales: II, III o IV. Dime cuál y te guiaré paso a paso.</span>
+        </div>
+      )
+    }
+
     for (let i = 0; i < parts.length; i++) {
       const token = parts[i]
       if (!token) continue
@@ -297,7 +353,7 @@ export default function ChatPage() {
           </div>
         )
       } else {
-        nodes.push(<span key={`txt-${i}`}>{token}</span>)
+        nodes.push(<div key={`md-${i}`} className="space-y-1">{renderMarkdown(token)}</div>)
       }
     }
     return <>{nodes}</>

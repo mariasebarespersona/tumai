@@ -8,7 +8,12 @@
     "document_subgroup": {"type": "string"},
     "document_name": {"type": "string", "minLength": 1},
     "storage_key": {"type": ["string", "null"]},
-    "metadata": {"type": ["object", "null"]}
+    "metadata": {"type": ["object", "null"]},
+    "document_kind": {"type": ["string", "null"], "enum": ["document", "factura", null]},
+    "parent_document_id": {"type": ["string", "null"]},
+    "due_date": {"type": ["string", "null"], "description": "ISO date for factura placeholders"},
+    "placeholder": {"type": ["boolean", "null"]},
+    "auto_generated": {"type": ["boolean", "null"]}
   }
 }
 

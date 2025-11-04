@@ -9,6 +9,8 @@ from agentic import build_graph
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
 from tools.property_tools import search_properties as db_search_properties
 from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists, seed_mock_documents
+from tools.docs_tools import list_related_facturas, seed_facturas_for
+from tools.docs_tools import FACTURABLE_DOCS
 from tools.rag_tool import summarize_document as rag_summarize, qa_document as rag_qa, qa_payment_schedule as rag_qa_pay
 from tools.rag_index import qa_with_citations, index_all_documents
 from tools.email_tool import send_email
@@ -104,6 +106,36 @@ def _normalize(s: str) -> str:
     return "".join(
         c for c in unicodedata.normalize("NFKD", s.lower()) if unicodedata.category(c) != "Mn"
     )
+
+
+def _soft_normalize(s: str) -> str:
+    """Lower + remove diacritics + strip punctuation to spaces and collapse.
+    Makes intent matching resilient to quotes/typos/punctuation.
+    """
+    import re as _re
+    t = _normalize(s)
+    t = _re.sub(r"[^a-z0-9\s]", " ", t)
+    t = _re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _fuzzy_match(text: str, candidates: list[str], threshold: float = 0.72) -> bool:
+    """Return True if text is similar to any candidate by ratio or token coverage."""
+    from difflib import SequenceMatcher
+    tt = _soft_normalize(text)
+    for cand in candidates:
+        cc = _soft_normalize(cand)
+        if not cc:
+            continue
+        ratio = SequenceMatcher(None, tt, cc).ratio()
+        if ratio >= threshold:
+            return True
+        tokens = cc.split()
+        if tokens:
+            present = sum(1 for tok in tokens if tok in tt)
+            if present / max(1, len(tokens)) >= 0.6:
+                return True
+    return False
 
 
 def _extract_uuid(s: str) -> str | None:
@@ -320,7 +352,13 @@ def _wants_email(text: str) -> bool:
     # 'por/al email/correo'
     if re.search(r"\b(por|al)\b.*\b(email|correo|mail)\b", t):
         return True
-    return False
+    # Fuzzy fallback
+    examples = [
+        "envíamelo por email", "enviamelo por correo", "manda esto a mi correo",
+        "mandamelo al email", "send by email", "email this", "enviar por mail",
+        "mandar por correo", "me lo mandas por email", "enviame por email"
+    ]
+    return _fuzzy_match(text, examples)
 
 
 def _wants_to_change_property(text: str) -> bool:
@@ -383,8 +421,23 @@ def _wants_focus_documents(text: str) -> bool:
         r"^\s*(documento|documentos|documents|document)\s*$",  # Just "documentos" alone
         r"\bframework\s+de\s+(los\s+)?documentos\b",
         r"\b(enfocar|centrar|trabajar|empezar|iniciar|start|vamos)\s+(en|con|a)?\s*(los\s+)?(documento|documentos|documents|document)\b",
+        r"\b(muestrame|muéstrame|muestra|mostrar|ver|lista|listame|ensename|enséñame)\b.*\b(plantilla|framework|esquema|docs?|documentos?)\b",
     ]
-    return any(re.search(p, t) for p in patterns)
+    if any(re.search(p, t) for p in patterns):
+        return True
+    # Fuzzy fallbacks with common phrases (robust to typos/quotes)
+    examples = [
+        "muestrame la plantilla de documentos",
+        "muéstrame la plantilla documentos",
+        "ver documentos",
+        "ver docs",
+        "lista documentos",
+        "mostrar framework documentos",
+        "esquema de documentos",
+        "document framework",
+        "documentos por favor",
+    ]
+    return _fuzzy_match(text, examples)
 
 
 def _wants_focus_numbers(text: str) -> bool:
@@ -397,7 +450,16 @@ def _wants_focus_numbers(text: str) -> bool:
         r"\bframework\s+de\s+(los\s+)?n(ú|u)meros\b",
         r"\b(enfocar|centrar|trabajar|empezar|iniciar|start)\s+(en|con)?\s*(los\s+)?(n(ú|u)meros|numbers|number)\b",
     ]
-    return any(re.search(p, t) for p in patterns)
+    if any(re.search(p, t) for p in patterns):
+        return True
+    examples = [
+        "muestrame la plantilla de numeros",
+        "muéstrame el framework números",
+        "ver numeros",
+        "lista numeros",
+        "numbers framework",
+    ]
+    return _fuzzy_match(text, examples)
 
 
 def _wants_list_numbers(text: str) -> bool:
@@ -411,7 +473,11 @@ def _wants_list_numbers(text: str) -> bool:
     # Also accept "numbers framework" or "framework numbers"
     if ("numbers" in t or "números" in t or "numeros" in t or "number" in t) and "framework" in t:
         return True
-    return False
+    examples = [
+        "ver esquema de numeros", "lista plantilla numeros", "framework numeros",
+        "mostrar tabla numeros", "enséñame los números", "ver numbers framework"
+    ]
+    return _fuzzy_match(text, examples)
 
 
 def _wants_numbers_help(text: str) -> bool:
@@ -422,12 +488,24 @@ def _wants_numbers_help(text: str) -> bool:
         r"\b(que|qué)\s+falt(a|an)\b.*\b(n(ú|u)meros|numbers|number|framework)\b",
         r"\b(completar|rellenar)\b.*\b(n(ú|u)meros|numbers|number|framework)\b",
     ]
-    return any(re.search(p, t) for p in patterns)
+    if any(re.search(p, t) for p in patterns):
+        return True
+    examples = [
+        "que falta en numeros", "qué falta en números", "ayuda con los numeros",
+        "completar numeros", "rellenar numeros", "que datos faltan del framework"
+    ]
+    return _fuzzy_match(text, examples)
 
 
 def _wants_calc_numbers(text: str) -> bool:
     t = _normalize(text)
-    return bool(re.search(r"\b(calcula|calcular|recalcula|recalcular|compute|calc)\b.*\b(n(ú|u)meros|numbers|totales|resumen)\b", t))
+    if bool(re.search(r"\b(calcula|calcular|recalcula|recalcular|compute|calc)\b.*\b(n(ú|u)meros|numbers|totales|resumen)\b", t)):
+        return True
+    examples = [
+        "calcula totales", "recalcula números", "compute numbers", "haz cuentas",
+        "recalcula los numeros", "actualiza el resumen de numeros"
+    ]
+    return _fuzzy_match(text, examples)
 
 
 def _wants_frameworks_info(text: str) -> bool:
@@ -962,7 +1040,9 @@ async def ui_chat(
             file_b64 = base64.b64encode(file_bytes).decode("utf-8")
             
             # Suggest slot using filename; we can extend hint with `user_text` context
-            proposal = propose_slot(fname, user_text)
+            # IMPORTANT: Pass property_id so facturas can match with placeholders
+            pid = STATE.get("property_id", "")
+            proposal = propose_slot(fname, user_text, property_id=pid)
             print(f"[DEBUG] Proposal: {proposal}")
             STATE["pending_proposal"] = {
                 "filename": fname,
@@ -1068,6 +1148,28 @@ async def ui_chat(
                     "document_name": proposal["document_name"],
                 }
                 save_sessions()
+                # Post-upload: try to auto-create factura placeholders via RAG if this doc is facturable
+                try:
+                    g = proposal["document_group"]
+                    sg = proposal.get("document_subgroup", "") or ""
+                    n = proposal["document_name"]
+                    if (g, sg, n) in FACTURABLE_DOCS:
+                        rel = list_related_facturas(pid, g, sg, n)
+                        if not rel:
+                            pay = rag_qa_pay(pid, g, sg, n)
+                            extracted = (pay or {}).get("extracted", {})
+                            dom = extracted.get("day_of_month")
+                            if not dom:
+                                nd = (pay or {}).get("next_due_date")
+                                try:
+                                    if nd:
+                                        dom = int(str(nd).split("-")[-1])
+                                except Exception:
+                                    dom = None
+                            if dom and 1 <= int(dom) <= 28:
+                                seed_facturas_for(pid, g, sg, n, int(dom), 12, None)
+                except Exception as _auto_err:
+                    print(f"[DEBUG] Auto factura seeding skipped: {_auto_err}")
                 
                 # Confirm with property name so user knows where it was uploaded
                 return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'.")
@@ -1080,11 +1182,47 @@ async def ui_chat(
             save_sessions()
             return make_response("De acuerdo. Dime el grupo/subgrupo/nombre exacto o vuelve a adjuntar el archivo con una pista (por ejemplo 'Contrato arquitecto').")
     
+    # Quick intent: "facturas asociadas" → list placeholders for current/mentioned doc
+    if any(k in _normalize(user_text) for k in ["factura", "facturas"]) and any(k in _normalize(user_text) for k in ["asociad", "relacionad", "de este", "de ese", "de este contrato", "de ese contrato"]):
+        pid = STATE.get("property_id")
+        if not pid:
+            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+        # Try to resolve document
+        doc_ref = _match_document_from_text(pid, user_text, STATE) or STATE.get("last_uploaded_doc")
+        if not doc_ref:
+            return make_response("No he podido identificar el documento. Dime el nombre exacto (p. ej., 'Contrato arquitecto').")
+        g = doc_ref.get("document_group", ""); sg = doc_ref.get("document_subgroup", "") or ""; n = doc_ref.get("document_name", "")
+        try:
+            rel = list_related_facturas(pid, g, sg, n)
+            if not rel and (g, sg, n) in FACTURABLE_DOCS:
+                # Last-chance: infer and seed
+                pay = rag_qa_pay(pid, g, sg, n)
+                extracted = (pay or {}).get("extracted", {})
+                dom = extracted.get("day_of_month")
+                if not dom:
+                    nd = (pay or {}).get("next_due_date")
+                    try:
+                        if nd:
+                            dom = int(str(nd).split("-")[-1])
+                    except Exception:
+                        dom = None
+                if dom and 1 <= int(dom) <= 28:
+                    seed_facturas_for(pid, g, sg, n, int(dom), 12, None)
+                    rel = list_related_facturas(pid, g, sg, n) or []
+            if rel:
+                lines = []
+                for r in rel:
+                    mark = "⧗" if r.get("placeholder") and not r.get("storage_key") else "✅"
+                    due = r.get("due_date") or "(sin fecha)"
+                    lines.append(f"{mark} {r.get('document_name','Factura')} — vence {due}")
+                return make_response("Facturas asociadas:\n" + "\n".join(lines))
+            else:
+                return make_response("No hay facturas asociadas aún. Si conoces el día mensual, dime 'día X' y las creo ahora.")
+        except Exception as e:
+            return make_response(f"No he podido obtener las facturas asociadas: {e}")
+
     # -------------------------------------------------------------
     # New: Delegate all remaining intent handling to the Agent
-    # We no longer run regex-based routers in this API layer.
-    # The Agent (LangGraph) is responsible for understanding the
-    # user's request and calling the appropriate tools.
     # -------------------------------------------------------------
     out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
     

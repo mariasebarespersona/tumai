@@ -37,6 +37,69 @@ Alternative (Vercel + Render):
 
 ---
 
+## 🔄 What's new (Nov 2025)
+
+### Document Framework V2 (I/II/III/IV)
+- Section I (R2B) is now mandatory for all properties.
+- Sections II, III or IV: the user completes only ONE; the agent asks which one.
+- Extended JSON schema for documents: `document_kind`, `parent_document_id`, `due_date`, `placeholder`, `auto_generated`.
+- New SQL migration: `migrations/2025-11-03_document_framework_v2.sql` (idempotent, with SECURITY DEFINER RPCs).
+
+### Automatic factura placeholders (RAG → dates → placeholders)
+- On upload of any document marked "+ facturas" (e.g., `Contrato arquitecto`), the agent:
+  1) runs `qa_payment_schedule` (RAG) to extract cadence and day of payment,
+  2) creates placeholders with `document_kind=factura`, linked via `parent_document_id`,
+  3) sets `due_date`, `placeholder=true`, `auto_generated=true`.
+- Frequency is detected dynamically: monthly, quarterly, yearly, every_15_days, or explicit "N cuotas".
+- Count of placeholders adapts to contract: e.g., 12 mensuales (1 año), 4 trimestrales, 1 anual, 6 cuotas, etc. (capped at 36).
+
+### RPC-only DB access (fixes PostgREST cache issues)
+- Reading documents always goes through `public.list_property_documents(p_id uuid)`.
+- Updating storage link uses `public.update_property_document_link(...)`.
+- NEW: Inserting placeholders uses `public.insert_property_document(...)` → avoids `PGRST205`.
+- Permissions: grants added for per-property schemas; RPCs are `SECURITY DEFINER` and `SET search_path = public`.
+
+### Smarter upload classification for invoices
+- `propose_doc_slot` now accepts `property_id` and, if the filename contains "factura", it:
+  - extracts date from filename (e.g., `2025-11-05`),
+  - searches existing factura placeholders and proposes the matching placeholder name (e.g., `Facturas arquitecto — 2025-11-05`).
+
+### Frontend UX
+- Chat highlights the rule “Elegir una entre II/III/IV”.
+- Markdown headings/lists rendered for readability.
+
+### LLM & Rate-limits
+- Default model switched to `gpt-4o-mini` with token caps to reduce 429s.
+
+---
+
+## ⬆️ Upgrade guide (DF V2)
+
+1) Run the migration in Supabase SQL editor:
+```
+-- open file migrations/2025-11-03_document_framework_v2.sql and run contents
+```
+2) Reload PostgREST schema cache:
+```sql
+select pg_notify('pgrst', 'reload schema');
+```
+3) Restart backend (no hot-reload) so it picks new code:
+```bash
+pkill -9 uvicorn || true
+cd /path/to/rama-agentic-ai
+source .venv/bin/activate
+uvicorn app:app --host 0.0.0.0 --port 7901
+```
+4) Point the frontend to your backend during local dev:
+```bash
+cd web
+export NEXT_PUBLIC_API_URL=http://127.0.0.1:7901
+npm run dev
+```
+5) Test: upload `Contrato arquitecto` and ask “¿Hay facturas asociadas…?” → placeholders should appear.
+
+---
+
 ## 🔄 What's new (Oct 2025)
 
 - Prompt-as-code (modular): `prompts/core.md` + `prompts/policies/*` + `prompts/contracts/*` + `prompts/examples/*`.

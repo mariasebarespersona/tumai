@@ -15,6 +15,8 @@ from .docs_tools import (
     list_docs as _list_docs,
     signed_url_for as _signed_url_for,
     slot_exists as _slot_exists,
+    list_related_facturas as _list_related_facturas,
+    seed_facturas_for as _seed_facturas_for,
     seed_mock_documents as _seed_mock_documents,
     purge_property_documents as _purge_property_documents,
     purge_all_documents as _purge_all_documents,
@@ -99,11 +101,13 @@ def delete_properties_tool(property_ids: List[str], purge_docs_first: bool = Tru
 class ProposeDocInput(BaseModel):
     filename: str
     hint: str = Field("", description="Optional free text / user hint to help classification")
+    property_id: str = Field("", description="Optional property_id to help match facturas with placeholders")
 
 @tool("propose_doc_slot")
-def propose_doc_slot_tool(filename: str, hint: str = "") -> Dict:
-    """Propose where a document should live in the documents framework."""
-    return _propose_slot(filename, hint)
+def propose_doc_slot_tool(filename: str, hint: str = "", property_id: str = "") -> Dict:
+    """Propose where a document should live in the documents framework. 
+    If filename contains 'factura' and property_id is provided, will try to match with existing placeholders."""
+    return _propose_slot(filename, hint, property_id)
 
 
 class UploadAndLinkInput(BaseModel):
@@ -158,6 +162,35 @@ class SlotExistsInput(BaseModel):
 def slot_exists_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
     """Check if a document slot exists in the per-property documents framework (and list available names)."""
     return _slot_exists(property_id, document_group, document_subgroup, document_name)
+
+
+# --- Related facturas ---
+class ListRelatedFacturasInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str = ""
+    document_name: str
+
+@tool("list_related_facturas")
+def list_related_facturas_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> List[Dict]:
+    """List invoice placeholders/children for a given document (returns name, due_date, placeholder, storage_key)."""
+    return _list_related_facturas(property_id, document_group, document_subgroup, document_name)
+
+
+class SeedFacturasForInput(BaseModel):
+    property_id: str
+    document_group: str
+    document_subgroup: str = ""
+    document_name: str
+    day_of_month: int = Field(..., ge=1, le=28)
+    months: int = Field(12, ge=1, le=24)
+    start_date: Optional[str] = Field(None, description="YYYY-MM-DD; default today")
+
+@tool("seed_facturas_for")
+def seed_facturas_for_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str,
+                           day_of_month: int, months: int = 12, start_date: Optional[str] = None) -> Dict:
+    """Create monthly factura placeholders (children) for a parent document. Use when extraction fails or user provides a day. Idempotent."""
+    return _seed_facturas_for(property_id, document_group, document_subgroup, document_name, day_of_month, months, start_date)
 
 
 # --- seed mock docs for prototyping ---
@@ -631,6 +664,8 @@ TOOLS = [
     rag_qa_with_citations_tool,    # NEW
     rag_index_all_documents_tool,  # NEW
     slot_exists_tool,              # NEW
+    list_related_facturas_tool,    # NEW - List placeholders/children invoices
+    seed_facturas_for_tool,        # NEW - Seed invoice placeholders
     purge_property_documents_tool, # NEW
     purge_all_documents_tool,      # NEW
     create_reminder_tool,          # NEW - Recordatorios

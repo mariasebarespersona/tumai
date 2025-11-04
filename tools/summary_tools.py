@@ -48,15 +48,14 @@ def _extract_from_meta(meta: Dict[str, Any], selector: str) -> Optional[float]:
     return None
 
 def _get_docs_values(property_id: str, group: str, subgroup: str, name: str, selector: str) -> List[Tuple[str, Optional[float]]]:
-    schema = docs_schema(property_id)
-    sb.postgrest.schema = schema
-    q = (sb.table("documents").select("document_group,document_subgroup,document_name,metadata")
-         .eq("property_id", property_id)
-         .eq("document_group", group))
-    q = q.eq("document_subgroup", subgroup or "")
-    if name != "*":
-        q = q.eq("document_name", name)
-    rows = q.execute().data
+    # Use RPC to avoid PGRST205 schema cache issues
+    all_docs = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data or []
+    rows = [
+        d for d in all_docs
+        if d.get("document_group") == group
+        and (d.get("document_subgroup") or "") == (subgroup or "")
+        and (name == "*" or d.get("document_name") == name)
+    ]
     out: List[Tuple[str, Optional[float]]] = []
     for r in rows:
         val = _extract_from_meta(r.get("metadata") or {}, selector)

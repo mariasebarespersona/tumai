@@ -120,6 +120,62 @@ OBJETIVO GLOBAL (checklist de producto)
 11) Cuando documentos y números estén completos, comunicarlo y ofrecer/generar `compute_summary` para la ficha resumen.
 12) **BORRAR PROPIEDADES**: Cuando el usuario pida borrar/eliminar una propiedad, USA `delete_property` directamente con el property_id actual. NO uses `search_properties` para confirmar - simplemente pide confirmación en lenguaje natural y luego borra.
 
+ESTRUCTURA DEL FRAMEWORK DE DOCUMENTOS (V2)
+- **SECCIÓN I — R2B (OBLIGATORIA para TODAS las propiedades)**
+  - Subgrupo Compra:
+    a) Catastro y nota simple
+    b) Acuerdo compraventa (verbal)
+    c) Señal / Arras
+    d) Due Diligence (DD) compra
+    e) Escritura notarial de compraventa
+    f) Notaría — factura
+    g) Impuestos de compra (ITP/IVA/Actos jurídicos)
+    h) Registro de la propiedad
+  - Subgrupo Diseño/Obra:
+    a) Mapas Nivel (+ facturas)
+    b) Contrato arquitecto (+ facturas)
+    c) Proyecto básico / mediciones / planos (+ facturas)
+    d) Contrato Aparejador (+ facturas)
+    e) Licencia de obra y acometidas (+ facturas)
+    f) Contrato constructor (+ facturas)
+
+- **SECCIÓN II — Venta R2B (ELEGIR UNA entre II/III/IV)**
+  a) Due Diligence (DD) de venta
+  b) Arras venta
+  c) Venta terreno
+  d) Venta proyecto
+  e) Escritura compraventa
+  f) Impuestos de venta
+
+- **SECCIÓN III — Venta R2B + Raquel PM (ELEGIR UNA entre II/III/IV)**
+  a) Planificación obra (cronograma)
+  b) Contrato obra
+  c) Facturas (múltiples documentos)
+  d) Contrato Raquel como PM
+
+- **SECCIÓN IV — Promoción (ELEGIR UNA entre II/III/IV)**
+  Obra nueva:
+    a) Planificación obra (cronograma)
+    b) Contrato obra
+    c) Facturas (múltiples documentos)
+    d) OCT
+    e) Seguro decenal
+    f) Libro del edificio
+    g) Escritura obra nueva
+  Venta:
+    a) Contrato arras venta
+    b) Registro obra nueva
+    c) Escritura compraventa
+    d) Impuestos de venta
+
+REGLAS V2 (CRÍTICAS):
+1) Siempre guía al usuario para COMPLETAR primero la **Sección I (R2B)**. Es obligatoria.
+2) Para II/III/IV: pregunta explícitamente cuál de las tres desea completar y trabaja SOLO en esa (pero puedes listar el estado de las otras si te lo piden). Cuando muestres el framework, incluye una llamada visual clara tipo: "⚠️ Completa SOLO UNA de las secciones opcionales: II, III o IV" justo antes de los apartados II/III/IV.
+3) Al subir un documento de la Sección I-Diseño/Obra marcado con “+ facturas” (p. ej., "Contrato arquitecto"), DEBES extraer la cadencia de pago con `qa_payment_schedule` y crear **placeholders de facturas** adjuntos al documento: mensual el día N (hasta 12 meses). Si no hay fecha clara, pide una aclaración breve.
+4) Los placeholders de facturas se guardan en la MISMA tabla `documents` (misma propiedad y grupo) usando un **vínculo padre→hijo** y marcados como `document_kind="factura"`, `placeholder=true`, con `due_date` correspondiente. Nunca los guardes en una tabla separada.
+5) Permite al usuario **saltar** un documento ("saltar este") y continúa con el siguiente. Guarda el progreso y re‑ofrece más tarde.
+6) Al listar, diferencia claramente: subidos ✓, placeholders de factura (⧗), pendientes (•).
+
 PRINCIPIOS
 - No inventes datos ni resultados; usa herramientas siempre.
 - Números (CRÍTICO): NUNCA inventes números, NUNCA rellenes celdas sin instrucción explícita o confirmación del usuario. Si faltan datos o hay dudas, dilo claramente y pide permiso antes de escribir.
@@ -156,12 +212,20 @@ FLUJO: DOCUMENTOS
 - **ANTES DE DECIR QUE UN DOCUMENTO NO EXISTE:** SIEMPRE llama a `list_docs` primero para verificar qué documentos están realmente subidos. NO asumas que algo no existe sin verificarlo.
 - Si el usuario menciona que tiene documentos subidos y luego pregunta sobre ellos, USA `list_docs` para encontrarlos y luego procesa la solicitud.
 - Listar: `list_docs`. Muestra subidos vs faltantes. Si falta, explica cómo subir.
-- Subida guiada: 1) `propose_doc_slot` (incluye cualquier pista del usuario). 2) Si dudas, `slot_exists`. 3) Pide confirmación. 4) `upload_and_link` y confirma subida (y firma URL).
+- Subida guiada: 1) `propose_doc_slot` (incluye cualquier pista del usuario Y SIEMPRE pasa property_id para que pueda detectar si es una factura que debe reemplazar un placeholder). 2) Si dudas, `slot_exists`. 3) Pide confirmación. 4) `upload_and_link` y confirma subida.
+  * **IMPORTANTE PLACEHOLDERS AUTOMÁTICOS**: Cuando `upload_and_link` devuelve `facturas_generated` en el resultado:
+    - Si `status == "created"`: Informa al usuario con formato según frecuencia:
+      * monthly: "✅ Subido '[documento]'. He creado {count} placeholders de facturas mensuales (día {day}) 📅"
+      * quarterly: "✅ Subido '[documento]'. He creado {count} placeholders de facturas trimestrales (día {day}) 📅"
+      * yearly: "✅ Subido '[documento]'. He creado {count} placeholder(s) de factura anual (día {day}) 📅"
+    - Si `status == "rag_failed"`: Informa al usuario: "✅ Subido '[documento]'. No pude extraer las fechas de pago automáticamente. Si me dices el día de pago y la frecuencia (ej: 'día 5 mensual' o '6 cuotas mensuales'), creo los placeholders ahora."
+    - Si `status == "not_facturable"`: No menciones nada sobre facturas (subida normal).
 - Indexación: tras subir, intenta `rag_index_document`. Para muchos documentos, sugiere `rag_index_all_documents`.
 - QA y Resúmenes: 
   * Para "resume el documento X" o "resumir X" → usa `summarize_document` con el documento específico
   * Para preguntas concretas sobre un documento → `qa_document`
   * Para pagos/fechas → `qa_payment_schedule` (si falta una fecha clave, pídesela)
+  * Para saber si un documento tiene facturas asociadas → `list_related_facturas`. Si devuelve 0 y el documento es de los marcados con "+ facturas", intenta `qa_payment_schedule` y, si encuentras día de mes, crea placeholders con `seed_facturas_for`.
   * Para preguntas abiertas sobre múltiples documentos → `rag_qa_with_citations` con citas claras
   * Si no encuentras el documento exacto por nombre, usa `list_docs` para ver nombres similares y sugiérelos al usuario
 
@@ -807,16 +871,36 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                 }])
                 return {"messages": [forced_call], "last_llm_timestamp": time.time()}
 
-    # Estrategia de dos modelos:
-    # - Si venimos de herramientas (último mensaje es ToolMessage), usamos gpt-4o para respuesta final
-    # - Si es planificación (último mensaje es HumanMessage), usamos gpt-4o-mini para tool calls
+        # Guarda 3: "¿hay facturas asociadas (a X)?" → listar facturas del documento más reciente o inferido
+        if ("factura" in last_user_text) and ("asociad" in last_user_text or "relacionad" in last_user_text):
+            if state.get("property_id"):
+                doc_ref = state.get("last_uploaded_doc") or state.get("last_doc_ref")
+                if not doc_ref:
+                    # Heurística rápida por mención del usuario
+                    if "arquitect" in last_user_text:
+                        doc_ref = {"document_group": "R2B", "document_subgroup": "Diseño/Obra", "document_name": "Contrato arquitecto"}
+                if doc_ref and doc_ref.get("document_group"):
+                    forced_call = AIMessage(content="", tool_calls=[{
+                        "name": "list_related_facturas",
+                        "args": {
+                            "property_id": state["property_id"],
+                            "document_group": doc_ref.get("document_group", ""),
+                            "document_subgroup": doc_ref.get("document_subgroup", ""),
+                            "document_name": doc_ref.get("document_name", "")
+                        },
+                        "id": "guard_list_related_facturas_1"
+                    }])
+                    return {"messages": [forced_call], "last_llm_timestamp": time.time()}
+
+    # Estrategia de un modelo ligero para evitar rate limits:
+    # - Usar siempre gpt-4o-mini (más rápido y con límites superiores)
     if messages and isinstance(messages[-1], ToolMessage):
-        # Respuesta final: usar gpt-4o sin tool binding (respuesta de texto)
-        llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60)
+        # Respuesta final (texto)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800)
         ai = llm.invoke(msgs)
     else:
-        # Planificación: usar gpt-4o-mini con tools (más rápido, mayor rate limit)
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60).bind_tools(TOOLS)
+        # Planificación con tools
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
         ai = llm.invoke(msgs)
 
     return {"messages": [ai], "last_llm_timestamp": time.time()}
@@ -985,6 +1069,24 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                 lines = [f"{i+1}. {p.get('name', 'Sin nombre')} - {p.get('address', 'Sin dirección')}" for i, p in enumerate(props)]
                 content = f"Propiedades encontradas ({len(props)}):\n" + "\n".join(lines)
             
+            return {"messages": [AIMessage(content=content)]}
+        except Exception:
+            pass
+
+    # 4.1. list_related_facturas: render respuesta clara
+    if last_tool_msg.name == "list_related_facturas":
+        try:
+            data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            items = data if isinstance(data, list) else []
+            if not items:
+                content = ("No hay facturas asociadas aún (placeholders no creados). Si conoces el día de pago mensual, dime 'día X' y las creo ahora.")
+            else:
+                lines = []
+                for r in items:
+                    mark = "⧗" if r.get("placeholder") and not r.get("storage_key") else "✅"
+                    due = r.get("due_date") or "(sin fecha)"
+                    lines.append(f"{mark} {r.get('document_name','Factura')} — vence {due}")
+                content = "Facturas asociadas (placeholders y/o subidas):\n" + "\n".join(lines)
             return {"messages": [AIMessage(content=content)]}
         except Exception:
             pass

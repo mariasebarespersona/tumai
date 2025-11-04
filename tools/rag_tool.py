@@ -254,14 +254,30 @@ def _extract_payment_info(text: str) -> Dict[str, Any]:
         info["amounts_eur"].append(amt_norm)
 
     # Frequency / cadence
-    if re.search(r"\bmensual(es)?\b|cada\s+mes\b", t):
+    if re.search(r"\banual(?:mente)?(es)?\b|cada\s+a[nñ]o\b|una\s+vez\s+al\s+a[nñ]o", t):
+        info["frequency"] = "yearly"
+    elif re.search(r"\btrimestral(?:mente)?(es)?\b|cada\s+trimestre\b|cada\s+3\s+meses\b", t):
+        info["frequency"] = "quarterly"
+    elif re.search(r"\bmensual(?:mente)?(es)?\b|cada\s+mes\b", t):
         info["frequency"] = "monthly"
     elif re.search(r"\bquincenal|cada\s+15\s*dias\b", t):
         info["frequency"] = "every_15_days"
     elif re.search(r"\bsemanal|cada\s+semana\b", t):
         info["frequency"] = "weekly"
+    
+    # Number of payments / installments
+    # "6 cuotas", "12 pagos", "en 3 plazos"
+    m = re.search(r"(\d{1,2})\s*(?:cuotas?|pagos?|plazos?|mensualidades?|facturas?)", t)
+    if m:
+        info["total_payments"] = int(m.group(1))
+    
+    # Contract duration: "durante 1 año", "por 2 años", "contrato de 3 años"
+    m = re.search(r"(?:durante|por|de)\s+(\d{1,2})\s+a[nñ]os?", t)
+    if m:
+        info["contract_years"] = int(m.group(1))
 
-    # Day of month: "dia 15 de cada mes" / "el 10 de cada mes" / "el día 5 de cada mes"
+    # Day of month patterns
+    # 1) "dia 15 de cada mes" / "el 10 de cada mes" / "el día 5 de cada mes"
     m = re.search(r"(?:dia|d[ii]a)\s+(\d{1,2})\s+de\s+cada\s+mes", t)
     if m:
         try:
@@ -279,6 +295,15 @@ def _extract_payment_info(text: str) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # 2) "el 5 del mes" / "dia 5 del mes"
+    m = re.search(r"(?:el\s+)?(?:dia\s+)?(\d{1,2})\s+del\s+mes", t)
+    if m and "day_of_month" not in info:
+        try:
+            info["day_of_month"] = int(m.group(1))
+            info.setdefault("frequency", "monthly")
+        except Exception:
+            pass
+
     # Spelled number: "el dia cinco de cada mes"
     m = re.search(r"\bel\s+(?:dia\s+)?([a-z\s]+?)\s+de\s+cada\s+mes\b", t)
     if m and "day_of_month" not in info:
@@ -286,6 +311,23 @@ def _extract_payment_info(text: str) -> Dict[str, Any]:
         if word in SPAN_WORD_TO_NUM:
             info["day_of_month"] = SPAN_WORD_TO_NUM[word]
             info.setdefault("frequency", "monthly")
+
+    # Spelled number with "del mes": "el cinco del mes"
+    m = re.search(r"\bel\s+([a-z\s]+?)\s+del\s+mes\b", t)
+    if m and "day_of_month" not in info:
+        word = m.group(1).strip()
+        if word in SPAN_WORD_TO_NUM:
+            info["day_of_month"] = SPAN_WORD_TO_NUM[word]
+            info.setdefault("frequency", "monthly")
+
+    # "mensual ... día 5" pattern (allow some words between)
+    m = re.search(r"mensual(?:mente)?[^.\n]{0,40}?(?:dia|d[ií]a|el)\s+(\d{1,2})", t)
+    if m and "day_of_month" not in info:
+        try:
+            info["day_of_month"] = int(m.group(1))
+            info.setdefault("frequency", "monthly")
+        except Exception:
+            pass
 
     # Method of payment (transferencia, domiciliacion, efectivo, cheque...)
     if "transferencia" in t or "iban" in t:
