@@ -18,6 +18,7 @@ export default function ChatPage() {
   const [isProcessingVoice, setIsProcessingVoice] = useState(false)
   const [propertyId, setPropertyId] = useState<string | null>(null) // Track current property_id
   const [propertyName, setPropertyName] = useState<string | null>(null) // Track property name for display
+  const [excelTemplate, setExcelTemplate] = useState<string | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -106,6 +107,11 @@ export default function ChatPage() {
       if (!resp.ok) throw new Error(data?.error || 'Request failed')
       const answer = String(data?.answer ?? '')
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
+      // Detect numbers template confirmation → open Excel panel
+      try {
+        const m = answer.match(/Usaremos la plantilla de Números:\s*([^\.\n]+)/i)
+        if (m && m[1]) setExcelTemplate(m[1].trim())
+      } catch {}
       
       // Update property_id if backend sent it back
       if (data.property_id) {
@@ -211,6 +217,11 @@ export default function ChatPage() {
           content: data.answer 
         }
         setMessages(prev => [...prev, aiMessage])
+        // Detect numbers template confirmation → open Excel panel
+        try {
+          const m = String(data.answer).match(/Usaremos la plantilla de Números:\s*([^\.\n]+)/i)
+          if (m && m[1]) setExcelTemplate(m[1].trim())
+        } catch {}
         
         // Update property_id if backend sent it back
         if (data.property_id) {
@@ -359,6 +370,54 @@ export default function ChatPage() {
     return <>{nodes}</>
   }, [])
 
+  const excelUrl = useMemo(() => {
+    if (!excelTemplate) return ''
+    const map: Record<string, string | undefined> = {
+      'R2B': process.env.NEXT_PUBLIC_EXCEL_EMBED_R2B,
+      'R2B + PM': process.env.NEXT_PUBLIC_EXCEL_EMBED_R2B_PM,
+      'R2B + PM + Venta certs': process.env.NEXT_PUBLIC_EXCEL_EMBED_R2B_PM_VENTA,
+      'Promoción': process.env.NEXT_PUBLIC_EXCEL_EMBED_PROMOCION,
+      'Promocion': process.env.NEXT_PUBLIC_EXCEL_EMBED_PROMOCION,
+    }
+    return map[excelTemplate] || ''
+  }, [excelTemplate])
+
+  const ExcelPanel = useMemo(() => {
+    if (!excelTemplate) return null
+    if (!excelUrl) {
+      return (
+        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 nature-shadow">
+          <div className="flex items-start justify-between">
+            <div className="pr-4">
+              <div className="font-bold mb-1">Excel para "{excelTemplate}"</div>
+              <div>
+                Falta configurar la URL de incrustación. Añade las variables de entorno en el frontend y reinicia `npm run dev`:
+                <pre className="mt-2 whitespace-pre-wrap text-sm bg-white/70 p-2 rounded">NEXT_PUBLIC_EXCEL_EMBED_R2B=...
+NEXT_PUBLIC_EXCEL_EMBED_R2B_PM=...
+NEXT_PUBLIC_EXCEL_EMBED_R2B_PM_VENTA=...
+NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
+                Acepta URLs públicas de Excel Online (OneDrive/SharePoint) o Google Sheets (publish/embed).
+              </div>
+            </div>
+            <button onClick={() => setExcelTemplate(null)} className="px-3 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold">Cerrar</button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="rounded-2xl border-2 border-[color:var(--c-green-300)] glass nature-shadow overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 bg-[color:var(--c-green-50)] border-b border-[color:var(--c-green-200)]">
+          <div className="font-bold text-[color:var(--c-green-800)]">Excel — {excelTemplate}</div>
+          <div className="flex items-center gap-2">
+            <a href={excelUrl} target="_blank" rel="noreferrer" className="text-[color:var(--c-green-700)] underline font-semibold">Abrir en pestaña</a>
+            <button onClick={() => setExcelTemplate(null)} className="rounded-lg px-3 py-1 bg-[color:var(--c-green-100)] hover:bg-[color:var(--c-green-200)] text-[color:var(--c-green-800)] font-semibold">Cerrar</button>
+          </div>
+        </div>
+        <iframe src={excelUrl} className="w-full h-[600px] bg-white" allowFullScreen sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+      </div>
+    )
+  }, [excelTemplate, excelUrl])
+
   return (
     <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
       {/* Property indicator */}
@@ -370,6 +429,7 @@ export default function ChatPage() {
       )}
       {/* Chat area */}
       <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-8 glass nature-shadow-lg scrollbar-thin">
+        {ExcelPanel}
         {messages.length === 0 ? (
           <div className="text-center text-[color:var(--c-green-800)]">
             <div className="mb-4 text-5xl animate-pulse-soft">🌾</div>
