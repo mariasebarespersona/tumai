@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
+// Removed EditableExcel import - using iframe instead
 
 type ChatMessage = {
   id: string
@@ -109,8 +110,23 @@ export default function ChatPage() {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
       // Detect numbers template confirmation → open Excel panel
       try {
-        const m = answer.match(/Usaremos la plantilla de Números:\s*([^\.\n]+)/i)
-        if (m && m[1]) setExcelTemplate(m[1].trim())
+        // Match "✅ Usaremos la plantilla de Números: [template]" or "Usaremos la plantilla de Números: [template]"
+        // Also match variations like "Ya hemos establecido la plantilla de Números como [template]"
+        const patterns = [
+          /✅?\s*Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
+          /Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
+          /establecido la plantilla de Números (?:como|:)\s*([^\.\n]+)/i,
+          /plantilla de Números:\s*([^\.\n]+)/i,
+        ]
+        for (const pattern of patterns) {
+          const m = answer.match(pattern)
+          if (m && m[1]) {
+            const template = m[1].trim()
+            setExcelTemplate(template)
+            console.log('[Frontend] Excel template detected:', template)
+            break
+          }
+        }
       } catch {}
       
       // Update property_id if backend sent it back
@@ -219,8 +235,35 @@ export default function ChatPage() {
         setMessages(prev => [...prev, aiMessage])
         // Detect numbers template confirmation → open Excel panel
         try {
-          const m = String(data.answer).match(/Usaremos la plantilla de Números:\s*([^\.\n]+)/i)
-          if (m && m[1]) setExcelTemplate(m[1].trim())
+          // Match "✅ Usaremos la plantilla de Números: [template]" or "Usaremos la plantilla de Números: [template]"
+          // Also match variations like "Ya hemos establecido la plantilla de Números como [template]"
+          const patterns = [
+            /✅?\s*Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
+            /Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
+            /establecido la plantilla de Números (?:como|:)\s*([^\.\n]+)/i,
+            /plantilla de Números:\s*([^\.\n]+)/i,
+          ]
+          for (const pattern of patterns) {
+            const m = String(data.answer).match(pattern)
+            if (m && m[1]) {
+              const template = m[1].trim()
+              setExcelTemplate(template)
+              console.log('[Frontend] Excel template detected:', template)
+              // Set focus to "numbers" when Excel opens
+              if (propertyId) {
+                fetch('/api/chat', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: new URLSearchParams({
+                    text: 'números',
+                    session_id: 'web-ui',
+                    property_id: propertyId,
+                  }),
+                }).catch(() => {}) // Silent fail - just trying to set focus
+              }
+              break
+            }
+          }
         } catch {}
         
         // Update property_id if backend sent it back
@@ -405,18 +448,76 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
       )
     }
     return (
-      <div className="rounded-2xl border-2 border-[color:var(--c-green-300)] glass nature-shadow overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2 bg-[color:var(--c-green-50)] border-b border-[color:var(--c-green-200)]">
-          <div className="font-bold text-[color:var(--c-green-800)]">Excel — {excelTemplate}</div>
-          <div className="flex items-center gap-2">
-            <a href={excelUrl} target="_blank" rel="noreferrer" className="text-[color:var(--c-green-700)] underline font-semibold">Abrir en pestaña</a>
-            <button onClick={() => setExcelTemplate(null)} className="rounded-lg px-3 py-1 bg-[color:var(--c-green-100)] hover:bg-[color:var(--c-green-200)] text-[color:var(--c-green-800)] font-semibold">Cerrar</button>
+      <div className="rounded-3xl border-2 border-[color:var(--c-green-400)] bg-white/95 backdrop-blur-sm shadow-2xl overflow-hidden transition-all duration-300 hover:shadow-3xl flex flex-col h-full min-h-0">
+        {/* Header with gradient and better styling */}
+        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <span className="text-2xl">📊</span>
+            </div>
+            <div>
+              <div className="font-bold text-lg">Excel — {excelTemplate}</div>
+              <div className="text-xs text-white/80 mt-0.5">Actualización en tiempo real vía chat</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <a 
+              href={excelUrl} 
+              target="_blank" 
+              rel="noreferrer" 
+              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105 flex items-center gap-2"
+            >
+              <span>🔗</span>
+              <span>Abrir en pestaña</span>
+            </a>
+            <button 
+              onClick={() => setExcelTemplate(null)} 
+              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105"
+            >
+              ✕
+            </button>
           </div>
         </div>
-        <iframe src={excelUrl} className="w-full h-[600px] bg-white" allowFullScreen sandbox="allow-scripts allow-same-origin allow-forms allow-popups" />
+        
+        {/* Excel iframe - shows actual Excel from OneDrive */}
+        <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
+          <div className="absolute top-2 right-2 z-10 px-3 py-1.5 rounded-lg bg-[color:var(--c-green-100)] text-[color:var(--c-green-800)] text-xs font-semibold flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[color:var(--c-green-500)] animate-pulse"></span>
+            <span>Sincronizado</span>
+          </div>
+          {excelUrl ? (
+            <iframe
+              src={excelUrl}
+              className="w-full h-full border-0"
+              allowFullScreen
+              title={`Excel ${excelTemplate}`}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-[color:var(--c-green-700)]">
+              <div className="text-center p-8">
+                <div className="text-4xl mb-4">📊</div>
+                <div className="font-semibold mb-2">Excel no configurado</div>
+                <div className="text-sm text-[color:var(--c-green-600)]">
+                  Falta configurar la URL de Excel en .env.local
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {/* Footer with helpful hints - compact */}
+        <div className="px-4 py-2 bg-gradient-to-r from-[color:var(--c-green-50)] to-[color:var(--c-green-100)] border-t border-[color:var(--c-green-200)] flex-shrink-0">
+          <div className="text-xs text-[color:var(--c-green-700)] flex items-center gap-2">
+            <span>💡</span>
+            <span>Di "pon [campo] a [valor]" o "borra [campo]"</span>
+          </div>
+        </div>
       </div>
     )
   }, [excelTemplate, excelUrl])
+
+  // Layout: two columns when Excel is open, single column otherwise
+  const hasExcel = !!excelTemplate
 
   return (
     <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
@@ -427,10 +528,21 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
           <span>Propiedad actual: {propertyName}</span>
         </div>
       )}
-      {/* Chat area */}
-      <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-8 glass nature-shadow-lg scrollbar-thin">
-        {ExcelPanel}
-        {messages.length === 0 ? (
+      
+      {/* Main content area: split layout when Excel is open */}
+      <div className={`flex-1 flex gap-4 ${hasExcel ? 'flex-row' : 'flex-col'}`}>
+        {/* Excel Panel - Left side when open (70% width) */}
+        {hasExcel && (
+          <div className="flex-[3] flex flex-col min-w-0">
+            {ExcelPanel}
+          </div>
+        )}
+        
+        {/* Chat area - Right side when Excel is open (30% width), full width otherwise */}
+        <div className={`${hasExcel ? 'flex-1 flex-shrink-0' : 'flex-1'} flex flex-col`}>
+          <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-6 glass nature-shadow-lg scrollbar-thin">
+            {!hasExcel && ExcelPanel}
+            {messages.length === 0 ? (
           <div className="text-center text-[color:var(--c-green-800)]">
             <div className="mb-4 text-5xl animate-pulse-soft">🌾</div>
             <div className="mb-3 text-3xl font-bold bg-gradient-to-r from-[color:var(--c-green-700)] to-[color:var(--c-green-600)] bg-clip-text text-transparent">
@@ -559,80 +671,156 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
             ))}
           </div>
         )}
-      </div>
-
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={onDrop}
-        className="rounded-3xl border-2 border-dashed border-[color:var(--c-green-400)] glass-strong p-6 text-[color:var(--c-green-800)] nature-shadow hover:nature-shadow-lg transition-all duration-300 hover:border-[color:var(--c-green-500)]"
-      >
-        <div className="flex items-center justify-between">
-          <div className="font-bold text-lg flex items-center gap-3">
-            <span className="text-2xl">📎</span>
-            <span>Arrastra PDFs aquí o haz click</span>
           </div>
-          <label className="cursor-pointer rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-6 py-3 text-white font-semibold nature-shadow-lg hover:scale-105 transition-all duration-200 shine-effect">
-            Elegir archivos
-            <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
-          </label>
+          
+          {/* Drop zone - Inside chat area when Excel is open */}
+          {hasExcel && (
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={onDrop}
+              className="mt-3 rounded-2xl border-2 border-dashed border-[color:var(--c-green-400)] glass-strong p-4 text-[color:var(--c-green-800)] nature-shadow"
+            >
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-sm flex items-center gap-2">
+                  <span className="text-lg">📎</span>
+                  <span>Arrastra PDFs</span>
+                </div>
+                <label className="cursor-pointer rounded-xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-4 py-2 text-white text-sm font-semibold nature-shadow hover:scale-105 transition-all duration-200">
+                  Archivos
+                  <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
+                </label>
+              </div>
+              {files.length > 0 && (
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  {filePreviews}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Composer - Inside chat area when Excel is open */}
+          {hasExcel && (
+            <div className="mt-3 flex items-end gap-2 rounded-2xl p-3 glass-strong nature-shadow-lg">
+              <button
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onTouchStart={startRecording}
+                onTouchEnd={stopRecording}
+                disabled={isProcessingVoice}
+                className={
+                  `${hasExcel ? 'h-10 w-10' : 'h-14 w-14'} shrink-0 rounded-full border-2 border-[color:var(--c-green-400)] nature-shadow transition-all duration-300 ` +
+                  (isRecording 
+                    ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110 animate-pulse' 
+                    : isProcessingVoice
+                    ? 'bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white animate-pulse'
+                    : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-800)] hover:from-[color:var(--c-green-100)] hover:to-[color:var(--c-green-200)] hover:scale-105')
+                }
+              >
+                <span className={hasExcel ? 'text-base' : 'text-xl'}>
+                  {isRecording ? '⏺' : isProcessingVoice ? '⏳' : '🎤'}
+                </span>
+              </button>
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Escribe tu mensaje..."
+                rows={1}
+                className="min-h-[40px] flex-1 resize-none rounded-xl border-2 border-[color:var(--c-green-300)] bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[color:var(--c-green-500)] focus:border-[color:var(--c-green-500)] transition-all duration-200 placeholder:text-[color:var(--c-green-400)]"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    onSend()
+                  }
+                }}
+              />
+              <button
+                onClick={onSend}
+                disabled={uploading}
+                className="h-10 shrink-0 rounded-xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-4 text-white text-sm font-bold nature-shadow hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100"
+              >
+                {uploading ? '⏳' : '✈️'}
+              </button>
+            </div>
+          )}
         </div>
-        {files.length > 0 && (
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
-            {filePreviews}
+      </div>
+      
+      {/* Drop zone - Outside chat area when Excel is NOT open */}
+      {!hasExcel && (
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={onDrop}
+          className="rounded-3xl border-2 border-dashed border-[color:var(--c-green-400)] glass-strong p-6 text-[color:var(--c-green-800)] nature-shadow hover:nature-shadow-lg transition-all duration-300 hover:border-[color:var(--c-green-500)]"
+        >
+          <div className="flex items-center justify-between">
+            <div className="font-bold text-lg flex items-center gap-3">
+              <span className="text-2xl">📎</span>
+              <span>Arrastra PDFs aquí o haz click</span>
+            </div>
+            <label className="cursor-pointer rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-6 py-3 text-white font-semibold nature-shadow-lg hover:scale-105 transition-all duration-200 shine-effect">
+              Elegir archivos
+              <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
+            </label>
           </div>
-        )}
-      </div>
+          {files.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+              {filePreviews}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Composer */}
-      <div className="flex items-end gap-4 rounded-3xl p-5 glass-strong nature-shadow-lg">
-        <button
-          onMouseDown={startRecording}
-          onMouseUp={stopRecording}
-          onTouchStart={startRecording}
-          onTouchEnd={stopRecording}
-          disabled={isProcessingVoice}
-          className={
-            'h-14 w-14 shrink-0 rounded-full border-2 border-[color:var(--c-green-400)] nature-shadow transition-all duration-300 ' +
-            (isRecording 
-              ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110 animate-pulse' 
-              : isProcessingVoice
-              ? 'bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white animate-pulse'
-              : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-800)] hover:from-[color:var(--c-green-100)] hover:to-[color:var(--c-green-200)] hover:scale-105')
-          }
-          title={
-            isRecording 
-              ? 'Suelta para detener' 
-              : isProcessingVoice 
-              ? 'Procesando mensaje de voz...' 
-              : 'Mantén para grabar voz'
-          }
-        >
-          <span className="text-xl">
-            {isRecording ? '⏺' : isProcessingVoice ? '⏳' : '🎤'}
-          </span>
-        </button>
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Escribe tu mensaje sobre propiedades..."
-          rows={1}
-          className="min-h-[56px] flex-1 resize-none rounded-2xl border-2 border-[color:var(--c-green-300)] bg-white px-5 py-4 text-base font-medium outline-none focus:ring-2 focus:ring-[color:var(--c-green-500)] focus:border-[color:var(--c-green-500)] transition-all duration-200 placeholder:text-[color:var(--c-green-400)]"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              onSend()
+      {/* Composer - Outside chat area when Excel is NOT open */}
+      {!hasExcel && (
+        <div className="flex items-end gap-4 rounded-3xl p-5 glass-strong nature-shadow-lg">
+          <button
+            onMouseDown={startRecording}
+            onMouseUp={stopRecording}
+            onTouchStart={startRecording}
+            onTouchEnd={stopRecording}
+            disabled={isProcessingVoice}
+            className={
+              'h-14 w-14 shrink-0 rounded-full border-2 border-[color:var(--c-green-400)] nature-shadow transition-all duration-300 ' +
+              (isRecording 
+                ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110 animate-pulse' 
+                : isProcessingVoice
+                ? 'bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white animate-pulse'
+                : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-800)] hover:from-[color:var(--c-green-100)] hover:to-[color:var(--c-green-200)] hover:scale-105')
             }
-          }}
-        />
-        <button
-          onClick={onSend}
-          disabled={uploading}
-          className="h-14 shrink-0 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-8 text-white font-bold nature-shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100 shine-effect"
-        >
-          {uploading ? '⏳ Enviando…' : '✈️ Enviar'}
-        </button>
-      </div>
+            title={
+              isRecording 
+                ? 'Suelta para detener' 
+                : isProcessingVoice 
+                ? 'Procesando mensaje de voz...' 
+                : 'Mantén para grabar voz'
+            }
+          >
+            <span className="text-xl">
+              {isRecording ? '⏺' : isProcessingVoice ? '⏳' : '🎤'}
+            </span>
+          </button>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Escribe tu mensaje sobre propiedades..."
+            rows={1}
+            className="min-h-[56px] flex-1 resize-none rounded-2xl border-2 border-[color:var(--c-green-300)] bg-white px-5 py-4 text-base font-medium outline-none focus:ring-2 focus:ring-[color:var(--c-green-500)] focus:border-[color:var(--c-green-500)] transition-all duration-200 placeholder:text-[color:var(--c-green-400)]"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                onSend()
+              }
+            }}
+          />
+          <button
+            onClick={onSend}
+            disabled={uploading}
+            className="h-14 shrink-0 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-8 text-white font-bold nature-shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100 shine-effect"
+          >
+            {uploading ? '⏳ Enviando…' : '✈️ Enviar'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

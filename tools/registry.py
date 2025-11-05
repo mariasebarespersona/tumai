@@ -21,7 +21,13 @@ from .docs_tools import (
     purge_property_documents as _purge_property_documents,
     purge_all_documents as _purge_all_documents,
 )
-from .numbers_tools import set_number as _set_number, get_numbers as _get_numbers, calc_numbers as _calc_numbers
+from .numbers_tools import (
+    set_number as _set_number, 
+    get_numbers as _get_numbers, 
+    calc_numbers as _calc_numbers,
+    clear_number as _clear_number,
+    find_item_by_value as _find_item_by_value,
+)
 from .numbers_agent import (
     compute_and_log as _numbers_compute_and_log,
     generate_numbers_excel as _numbers_excel,
@@ -223,12 +229,33 @@ def purge_all_documents_tool() -> Dict:
 class SetNumberInput(BaseModel):
     property_id: str
     item_key: str
-    amount: float
+    amount: Optional[float] = Field(None, description="Amount to set. Use None to clear/delete the value.")
 
 @tool("set_number")
-def set_number_tool(property_id: str, item_key: str, amount: float) -> Dict:
-    """Set a numeric input in the numbers framework."""
+def set_number_tool(property_id: str, item_key: str, amount: Optional[float] = None) -> Dict:
+    """Set a numeric input in the numbers framework. Use None to clear/delete a value."""
     return _set_number(property_id, item_key, amount)
+
+
+class ClearNumberInput(BaseModel):
+    property_id: str
+    item_key: str
+
+@tool("clear_number")
+def clear_number_tool(property_id: str, item_key: str) -> Dict:
+    """Clear/delete a specific number value in the numbers framework by setting it to None."""
+    return _clear_number(property_id, item_key)
+
+
+class FindItemByValueInput(BaseModel):
+    property_id: str
+    search_value: Optional[float] = Field(None, description="Value to search for (e.g., 10.0 for '10%')")
+    search_label: Optional[str] = Field(None, description="Label text to search for (e.g., 'IVA', 'Precio de venta')")
+
+@tool("find_item_by_value")
+def find_item_by_value_tool(property_id: str, search_value: Optional[float] = None, search_label: Optional[str] = None) -> Optional[Dict]:
+    """Find an item in the numbers framework by value or label. Useful for commands like 'borra IVA 10%'."""
+    return _find_item_by_value(property_id, search_value, search_label)
 
 
 class GetNumbersInput(BaseModel):
@@ -342,8 +369,17 @@ class SetNumbersTemplateInput(BaseModel):
 
 @tool("set_numbers_template")
 def set_numbers_template_tool(property_id: str, template_key: str) -> Dict:
-    """Set the active Numbers template for this property/session (no DB writes)."""
-    return {"property_id": property_id, "template_key": template_key}
+    """Set the active Numbers template for this property/session. This will clear all existing values and start fresh."""
+    # Clear all existing number values when selecting a new template
+    from .numbers_tools import clear_numbers, initialize_template_structure
+    try:
+        clear_numbers(property_id)
+        # Initialize the template structure (this ensures the structure exists even if values are NULL)
+        initialize_template_structure(property_id, template_key)
+    except Exception:
+        # If clearing/initializing fails, continue anyway - template selection is the priority
+        pass
+    return {"property_id": property_id, "template_key": template_key, "values_cleared": True}
 
 
 class GetSummarySpecInput(BaseModel):
@@ -644,6 +680,9 @@ TOOLS = [
     list_docs_tool,
     signed_url_for_tool,
     set_number_tool,
+    clear_number_tool,  # NEW - Clear/delete a specific number value
+    find_item_by_value_tool,  # NEW - Find item by value or label
+    set_numbers_template_tool,  # NEW - Set Numbers template selection
     get_numbers_tool,
     calc_numbers_tool,
     numbers_compute_tool,

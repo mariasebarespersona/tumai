@@ -514,11 +514,22 @@ def _wants_frameworks_info(text: str) -> bool:
 
 
 def _parse_number_value(text: str) -> float | None:
-    """Extract numeric value robustly (supports 1.234,56 | 1,234.56 | 1000.0 | 1.000 | 7%)."""
-    m = re.search(r"[-+]?\d[\d\.,]*\s*%?", text)
-    if not m:
-        return None
-    token = m.group(0).strip()
+    """Extract numeric value robustly (supports 1.234,56 | 1,234.56 | 1000.0 | 1.000 | 7%).
+    
+    Prioritizes numbers after "a" (e.g., "pon X a 1000" → extracts 1000).
+    Ignores numbers in dates (e.g., "29 de julio" → ignores 29).
+    """
+    # First, try to find the number after "a" (e.g., "pon X a 1000")
+    # This is the most common pattern for setting values
+    after_a = re.search(r"\ba\s+([-+]?\d[\d\.,]*)\s*%?", text, re.IGNORECASE)
+    if after_a:
+        token = after_a.group(1).strip()
+    else:
+        # Fallback: find any number in the text
+        m = re.search(r"[-+]?\d[\d\.,]*\s*%?", text)
+        if not m:
+            return None
+        token = m.group(0).strip()
     token = token.replace(" ", "").replace("%", "")
     # Both separators present: last one is decimal
     if "," in token and "." in token:
@@ -565,7 +576,7 @@ def _numbers_match_item(items: list[dict], text: str) -> dict | None:
         "project_mgmt_fees": ["project mgmt", "mgmt", "gestion proyecto", "gestión proyecto", "honorarios gestion"],
         "project_management_coste": ["project management", "gestion", "gestión", "coste gestion", "coste gestión"],
         "acometidas": ["acometidas"],
-        "total_pagado": ["total pagado", "pagado"],
+        "total_pagado": ["total pagado", "pagado", "importe total pagado", "total pagado 29 julio", "total pagado 29 de julio", "importe total pagado 29", "importe total pagado 29 julio", "importe total pagado 29 de julio"],
         "terreno_urbano": ["terreno urbano", "urbano"],
         "terreno_rustico": ["terreno rustico", "terreno rústico", "rustico", "rústico"],
     }
@@ -1234,14 +1245,27 @@ async def ui_chat(
     answer = out.get("answer") or out.get("content") or ""
     if not answer and out.get("messages"):
         msgs = out["messages"]
+        # First, check if there's a set_numbers_template confirmation message
         for msg in reversed(msgs):
             if isinstance(msg, dict):
                 content = msg.get("content", "")
             else:
                 content = getattr(msg, "content", "")
-            if content and not getattr(msg, "tool_calls", None):
+            # Look for the confirmation message specifically
+            if content and isinstance(content, str) and "Usaremos la plantilla de Números" in content:
                 answer = str(content)
                 break
+        
+        # If no confirmation message found, look for any AIMessage without tool_calls
+        if not answer:
+            for msg in reversed(msgs):
+                if isinstance(msg, dict):
+                    content = msg.get("content", "")
+                else:
+                    content = getattr(msg, "content", "")
+                if content and not getattr(msg, "tool_calls", None):
+                    answer = str(content)
+                    break
     
     # Include transcript if this was a voice input
     print(f"[DEBUG] Final transcript value: {transcript}")
@@ -1692,41 +1716,16 @@ async def ui_chat(
         except Exception as e:
             return make_response(f"No he podido listar los documentos: {e}")
     
-    # Focus numbers mode (also accept direct mentions like "numbers framework")
-    if _wants_focus_numbers(user_text) or ("framework" in _normalize(user_text) and ("numbers" in _normalize(user_text) or "numeros" in _normalize(user_text) or "números" in _normalize(user_text))):
-        STATE["focus"] = "numbers"
-        save_sessions()
-        # Mostrar la plantilla inmediatamente + resumen de acciones en español
-        pid = STATE.get("property_id")
-        if not pid:
-            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
-        try:
-            items = get_numbers(pid)
-            if not items:
-                return make_response("No hay números configurados aún para esta propiedad.")
-            lines = [f"- {it['group_name']} / {it['item_label']} ({it['item_key']}): {it['amount'] if it['amount'] is not None else '-'}" for it in items[:30]]
-            more_hint = f"\n\n({len(items)} items en total)" if len(items) > 30 else ""
-            acciones = ("\n\nPuedes pedirme: calcular, escenario (por ejemplo: -10% en precio/+12% en construcción), "
-                        "punto de equilibrio, sensibilidad, gráfico en cascada, barras apiladas al 100%, o 'enviarlo por email' (Excel).")
-            return make_response("Esquema de números:\n" + "\n".join(lines) + more_hint + acciones)
-        except Exception as e:
-            return make_response(f"No he podido listar los números: {e}")
-
-    # List numbers schema/items
-    if STATE.get("focus") == "numbers" and (_wants_list_numbers(user_text) or "esquema" in _normalize(user_text)):
-        pid = STATE.get("property_id")
-        if not pid:
-            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
-        try:
-            items = get_numbers(pid)
-            if not items:
-                return make_response("No hay números configurados aún para esta propiedad.")
-            lines = [f"- {it['group_name']} / {it['item_label']} ({it['item_key']}): {it['amount'] if it['amount'] is not None else '-'}" for it in items[:30]]
-            more_hint = f"\n\n({len(items)} items en total)" if len(items) > 30 else ""
-            actions = "\n\nPuedes pedirme: calcular, escenario (por ejemplo: -10% en precio/+12% en construcción), punto de equilibrio, sensibilidad, gráfico en cascada, barras apiladas al 100%, o 'enviarlo por email' (Excel)."
-            return make_response("Esquema de números:\n" + "\n".join(lines) + more_hint + actions)
-        except Exception as e:
-            return make_response(f"No he podido listar los números: {e}")
+    # CRÍTICO: NO interceptar NADA relacionado con números aquí
+    # Dejar que el agente LangGraph procese TODO:
+    # - Selección de plantilla (Guarda 0)
+    # - Listado de números
+    # - Comandos "pon X a Y" (el agente los procesará con set_number)
+    # El router SOLO procesa comandos "pon X a Y" como fallback rápido si el template está seleccionado
+    # PERO la prioridad es que el agente procese TODO
+    
+    # List numbers schema/items - DELEGAR AL AGENTE
+    # El agente procesará todo con get_numbers y set_number
 
     # Calculate numbers on demand
     if STATE.get("focus") == "numbers" and _wants_calc_numbers(user_text):
@@ -1762,30 +1761,65 @@ async def ui_chat(
             return make_response(f"No he podido revisar los números: {e}")
 
     # Set/update a number value (solo con orden explícita: pon/actualiza/...)
-    if STATE.get("focus") == "numbers" and _wants_set_number(user_text):
-        pid = STATE.get("property_id")
-        if not pid:
-            return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
+    # CRÍTICO: DELEGAR TODO AL AGENTE - el router SOLO procesa como fallback rápido
+    # El agente procesará los comandos "pon X a Y" usando set_number
+    # El router puede procesar como fallback rápido si el template está seleccionado Y el focus está en "numbers"
+    # PERO la prioridad es que el agente procese TODO
+    # 
+    # Fallback rápido SOLO si:
+    # - El template está seleccionado (verificado en el estado del agente)
+    # - El focus está en "numbers"
+    # - NO es una petición de selección de plantilla
+    if _wants_set_number(user_text):
+        # Verificar si hay un template seleccionado en el estado del agente
         try:
-            items = get_numbers(pid)
-            item = _numbers_match_item(items, user_text)
-            value = _parse_number_value(user_text)
-            if not item or value is None:
-                # If we can't infer item/value, guide user
-                hint = "o 'pon presupuesto reforma a 25000'"
-                return make_response("No he entendido qué valor quieres cambiar. Dime, por ejemplo: 'pon ITP a 12000' " + hint)
-            # Persist
-            result = set_number(pid, item["item_key"], float(value))
-            # Auto-recalculate and log using Numbers Agent (no invented values)
+            from agentic import agent
+            final_state = agent.get_state({"configurable": {"thread_id": session_id}})
+            has_template = final_state and final_state.values.get("numbers_template")
+        except Exception:
+            has_template = False
+        
+        # Check if user is asking to SELECT a template (not set a value)
+        is_template_selection = any(kw in user_text.lower() for kw in [
+            "plantilla numeros", "plantilla números", "numbers template", "number template",
+            "quiero completar", "quiero empezar", "quiero rellenar", "completar plantilla",
+            "empezar plantilla", "rellenar plantilla", "muestrame la plantilla", "muéstrame la plantilla",
+            "show me the template", "quiero ver", "quiero trabajar"
+        ])
+        
+        # Si hay template seleccionado Y NO es una petición de selección, procesar como fallback rápido
+        # Si NO hay template O es una petición de selección, delegar al agente
+        if has_template and not is_template_selection and STATE.get("focus") == "numbers":
+            # Fallback rápido: procesar directamente
+            if STATE.get("focus") != "numbers":
+                STATE["focus"] = "numbers"
+                save_sessions()
+            
+            pid = STATE.get("property_id") or property_id
+            if not pid:
+                return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
             try:
-                comp = numbers_compute_and_log(pid, triggered_by="user", trigger_type="set_number")
-                anomalies = comp.get("anomalies") or []
-                warn = ("\n⚠️ Anomalías: " + "; ".join(anomalies)) if anomalies else ""
-            except Exception:
-                warn = ""
-            return make_response(f"✅ Actualizado {item['item_label']} ({item['item_key']}) a {value}{warn}")
-        except Exception as e:
-            return make_response(f"No he podido actualizar el número: {e}")
+                items = get_numbers(pid)
+                item = _numbers_match_item(items, user_text)
+                value = _parse_number_value(user_text)
+                if not item or value is None:
+                    # If we can't infer item/value, delegate to agent
+                    pass  # Fall through to agent
+                else:
+                    # Persist
+                    result = set_number(pid, item["item_key"], float(value))
+                    # Auto-recalculate and log using Numbers Agent (no invented values)
+                    try:
+                        comp = numbers_compute_and_log(pid, triggered_by="user", trigger_type="set_number")
+                        anomalies = comp.get("anomalies") or []
+                        warn = ("\n⚠️ Anomalías: " + "; ".join(anomalies)) if anomalies else ""
+                    except Exception:
+                        warn = ""
+                    return make_response(f"✅ Actualizado {item['item_label']} ({item['item_key']}) a {value}{warn}")
+            except Exception as e:
+                # Fall through to agent on error
+                pass
+        # Si NO hay template O es una petición de selección, delegar al agente (Guarda 0 ofrecerá las opciones)
     
     # List missing documents
     if _wants_missing_docs(user_text):
@@ -2024,6 +2058,16 @@ async def ui_chat(
     print(f"[DEBUG] Final response extra: {extra}")
     return make_response(answer or "(sin respuesta)", extra)
 # --- Minimal Numbers Agent endpoints for testing and UI integration ---
+@app.get("/api/numbers")
+async def get_numbers_api(property_id: str, template_key: str | None = None):
+    """Get all numbers for a property. Returns the template structure even if values are NULL."""
+    try:
+        from tools.numbers_tools import get_numbers
+        data = get_numbers(property_id, template_key)
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.post("/numbers/compute")
 async def numbers_compute(property_id: str = Form(...)):
     try:

@@ -230,17 +230,51 @@ FLUJO: DOCUMENTOS
   * Si no encuentras el documento exacto por nombre, usa `list_docs` para ver nombres similares y sugiérelos al usuario
 
 FLUJO: NÚMEROS
-- Entrada a modo números: cuando el usuario diga “números”/“plantilla de números”, NO llames aún `get_numbers`. Primero ofrece 4 opciones y aclara que debe elegir SOLO UNA:
-  1) R2B
-  2) R2B + PM
-  3) R2B + PM + Venta certs
-  4) Promoción
-  Pregunta: “¿Cuál quieres completar? (elige solo 1)”. Tras la elección, llama `set_numbers_template(property_id, template_key)` con el texto exacto elegido y confirma la selección. Por ahora, tras confirmar, NO muestres la plantilla todavía.
-- Más adelante: Mostrar tabla: `get_numbers` como “grupo / etiqueta (item_key): valor”.
-- Qué falta: items con `amount` nulo/cero; comunícalos en lista.
-- Escribir valores: intenta mapear el texto del usuario al `item_key` por similitud (etiqueta o clave) y llama `set_number`. Acepta 25.000, 25,000, 25000, 7%, etc. NUNCA escribas sin instrucción o confirmación.
-- Cálculo: cuando lo pidan o tras varias escrituras, llama `calc_numbers` y comunica actualización.
-- Mostrar/enviar: si pide “enviar/mostrar el framework de números”, muéstralo o envía Excel.
+🔴 **PASO OBLIGATORIO AL ENTRAR EN MODO NÚMEROS** 🔴
+- **ANTES DE LLAMAR `get_numbers` o `set_number`**, verifica si el usuario quiere "empezar" o "completar" la plantilla desde cero.
+- **🚨 REGLA CRÍTICA: Si el usuario dice "quiero completar", "quiero empezar", "quiero rellenar" la plantilla de Números:**
+  - IGNORA cualquier `numbers_template` previo en el estado
+  - SIEMPRE ofrece las 4 opciones de plantillas primero
+  - NO llames `get_numbers` hasta que el usuario haya elegido UNA plantilla
+
+- **SI EL USUARIO QUIERE EMPEZAR/COMPLETAR (primera vez o resetear):**
+  1. Muestra al usuario las 4 opciones de plantillas:
+     • **R2B**
+     • **R2B + PM**
+     • **R2B + PM + Venta certs**
+     • **Promoción**
+  2. Aclara con énfasis: "⚠️ Debes elegir **SOLO UNA** de estas plantillas para tu propiedad."
+  3. Pregunta: "¿Cuál plantilla quieres usar? (escribe el nombre o número)"
+  4. Tras recibir la elección, llama `set_numbers_template(property_id, template_name)` con el nombre exacto elegido (ej: "R2B", "Promoción").
+  5. **🚨🚨🚨 CRÍTICO ABSOLUTO: DESPUÉS DE `set_numbers_template`, DETENTE COMPLETAMENTE 🚨🚨🚨**
+     - **PROHIBIDO** llamar `get_numbers` después de `set_numbers_template`
+     - **PROHIBIDO** llamar `set_number` después de `set_numbers_template`
+     - **PROHIBIDO** mostrar la tabla de valores después de `set_numbers_template`
+     - **PROHIBIDO** proponer completar campos después de `set_numbers_template`
+     - **PROHIBIDO** decir "Ahora procederé a mostrarte" o "mostrar la tabla" después de `set_numbers_template`
+     - **PROHIBIDO** decir "valores actuales" o "aquí tienes la plantilla" después de `set_numbers_template`
+     - **PROHIBIDO** decir "Ya hemos establecido" o "hemos establecido" después de `set_numbers_template`
+     - **PROHIBIDO** generar cualquier otro mensaje después de `set_numbers_template`
+     - El mensaje de confirmación "✅ Usaremos la plantilla de Números: [nombre]. Los valores previos han sido limpiados para empezar desde cero." abrirá automáticamente el Excel en la interfaz
+     - **SOLO** confirma con ese mensaje exacto y **DETENTE COMPLETAMENTE**. NO generes ningún otro mensaje.
+     - El Excel se abrirá automáticamente al lado del chat como copilot y permanecerá visible durante todo el proceso
+     - **IMPORTANTE**: El Excel debe permanecer visible en la UI todo el tiempo que el usuario esté rellenando la plantilla, hasta que el usuario diga que quiere salir o hacer otra acción
+     - Espera a que el usuario trabaje con el Excel y te pida ayuda si la necesita
+
+- **SI YA HAY UN TEMPLATE SELECCIONADO Y el usuario NO dice "quiero completar/empezar":**
+  - El Excel ya debería estar visible en la interfaz
+  - **ACTUALIZAR VALORES EN TIEMPO REAL:** Cuando el usuario diga "pon X a Y", "actualiza X con Y", "cambia X a Y", etc., usa `set_number` INMEDIATAMENTE para actualizar el valor en la base de datos. El router del backend procesará estos comandos directamente si hay un template seleccionado, pero SIEMPRE debes estar preparado para procesarlos también.
+  - **BORRAR VALORES:** Cuando el usuario diga "borra X", "elimina X", "quita X", "borra donde pone X", etc.:
+    1. Primero usa `find_item_by_value` para encontrar el item por etiqueta o valor (ej: "IVA 10%" → busca label="IVA" y value=10.0)
+    2. Si encuentras el item, usa `clear_number` para borrarlo (establece amount a None)
+    3. Si no encuentras el item, pregunta al usuario qué valor específico quiere borrar
+  - **RESPUESTA INMEDIATA:** Después de actualizar o borrar un valor, confirma inmediatamente: "✅ Actualizado [item] a [valor]" o "✅ Borrado [item]"
+  - **DETECCIÓN INTELIGENTE:** Usa `find_item_by_value` cuando el usuario mencione un valor específico del Excel (ej: "borra IVA 10%" → busca por label="IVA" y value=10.0)
+
+- **Mostrar tabla:** `get_numbers` devuelve "grupo / etiqueta (item_key): valor". SOLO úsalo si el usuario pide ver los valores actuales.
+- **Escribir valores:** Cuando el usuario te diga "pon X a Y", "actualiza X con Y", "cambia X a Y", etc., usa `set_number` INMEDIATAMENTE. Acepta 25.000, 25,000, 25000, 7%, etc.
+- **Cálculo:** SOLO cuando el usuario lo pida explícitamente ("calcula", "actualiza totales", etc.).
+- **Mostrar/enviar:** si pide "enviar/mostrar el framework de números", muéstralo o envía Excel.
 
 FLUJO: RESUMEN
 - Cuando documentos y números estén completos, indícalo y ofrece `compute_summary`. Tras computar, comunica resultados principales.
@@ -752,6 +786,41 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         ldr = state["last_doc_ref"]
         msgs.append(SystemMessage(content=f"Si el usuario dice 'ese documento', interpreta {ldr} como el objetivo por defecto."))
     
+    # CRÍTICO: Contexto de plantilla de Números seleccionada
+    # Primero verificar si el último ToolMessage fue de set_numbers_template
+    last_tool_msg = None
+    for msg in reversed(messages):
+        if isinstance(msg, ToolMessage):
+            last_tool_msg = msg
+            break
+    
+    # Si el último ToolMessage fue de set_numbers_template Y hay numbers_template en el estado
+    # significa que acabamos de seleccionar el template → DEBE DETENERSE
+    if last_tool_msg and last_tool_msg.name == "set_numbers_template" and state.get("numbers_template"):
+        msgs.append(SystemMessage(content=f"🚨🚨🚨 ATENCIÓN CRÍTICA: Acabas de llamar `set_numbers_template` y el template '{state['numbers_template']}' está guardado en el estado. 🚨🚨🚨 DEBES DETENERSE COMPLETAMENTE. NO llames `get_numbers`. NO llames `set_number`. NO muestres la tabla. SOLO confirma con '✅ Usaremos la plantilla de Números: {state['numbers_template']}.' y DETENTE. El Excel se abrirá automáticamente en la interfaz."))
+    else:
+        # Primero verificar si el usuario quiere "empezar" o "completar" la plantilla (resetear)
+        user_wants_to_start_afresh = False
+        if messages and isinstance(messages[-1], HumanMessage):
+            last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
+            # Si el usuario dice "quiero completar", "quiero empezar", "quiero rellenar" → resetear y ofrecer plantillas
+            if any(phrase in last_user_text for phrase in ["quiero completar", "quiero empezar", "quiero rellenar", "empezar con números", "completar plantilla"]):
+                user_wants_to_start_afresh = True
+        
+        if state.get("numbers_template") and not user_wants_to_start_afresh:
+            # Ya hay template y el usuario NO quiere resetear → continuar normalmente
+            msgs.append(SystemMessage(content=f"Contexto: Ya se ha seleccionado la plantilla de Números: {state['numbers_template']}. Puedes proceder con `get_numbers` y `set_number` cuando el usuario lo pida explícitamente."))
+        else:
+            # NO hay template O el usuario quiere empezar de nuevo → DEBE ofrecer las 4 opciones primero
+            if messages and isinstance(messages[-1], HumanMessage):
+                last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
+                if any(kw in last_user_text for kw in ["número", "numeros", "plantilla", "completar", "rellenar", "empezar"]):
+                    if user_wants_to_start_afresh:
+                        # CRÍTICO: Resetear el template en el estado para que el agente no vea un template previo
+                        msgs.append(SystemMessage(content="🚨🚨🚨 ATENCIÓN CRÍTICA: El usuario dijo 'quiero completar/empezar la plantilla de Números'. Esto significa que quiere EMPEZAR DESDE CERO. 🚨🚨🚨 DEBES: 1) IGNORAR COMPLETAMENTE cualquier `numbers_template` que pueda existir en el estado. 2) OFRECER las 4 opciones de plantillas (R2B, R2B + PM, R2B + PM + Venta certs, Promoción). 3) ESPERAR a que el usuario elija UNA. 4) NO LLAMAR `get_numbers` ni `set_number` hasta que el usuario haya elegido. TRATA ESTO COMO SI FUERA LA PRIMERA VEZ QUE EL USUARIO ENTRÓ EN NÚMEROS."))
+                    else:
+                        msgs.append(SystemMessage(content="⚠️ ATENCIÓN: El usuario está entrando en modo Números pero NO hay plantilla seleccionada. DEBES ofrecer las 4 opciones (R2B, R2B + PM, R2B + PM + Venta certs, Promoción) y esperar a que elija antes de llamar `get_numbers` o `set_number`."))
+    
     # Limitar historial a los últimos 15 mensajes para evitar rate limits
     # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos
     if len(messages) > 15:
@@ -828,6 +897,148 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     if messages and isinstance(messages[-1], HumanMessage):
         last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
         
+        # Guarda 0: Números - SIEMPRE preguntar cuando el usuario menciona "plantilla numeros" o "numbers template"
+        # CRÍTICO: Esta guarda debe activarse SIEMPRE que el usuario mencione la plantilla de números
+        # NO asumir R2B automáticamente - SIEMPRE ofrecer las 4 opciones primero
+        # Detectar cualquier mención a "plantilla numeros", "numbers template", etc.
+        has_numbers_keyword = any(kw in last_user_text for kw in [
+            "número", "numeros", "números", "numbers", "number"
+        ])
+        has_plantilla_keyword = any(kw in last_user_text for kw in [
+            "plantilla", "template", "framework", "marco"
+        ])
+        has_action_verb = any(phrase in last_user_text for phrase in [
+            "quiero completar", "quiero empezar", "quiero rellenar", 
+            "completar plantilla", "empezar plantilla", "rellenar plantilla",
+            "metete en", "entra en", "entrar en", "meterme en", "quiero entrar",
+            "abre la plantilla", "abrir plantilla", "muestra la plantilla", "mostrar plantilla",
+            "muestrame", "muéstrame", "show me", "dame", "quiero ver", "quiero trabajar",
+            "muestrame la plantilla", "muéstrame la plantilla", "muestra la plantilla numeros",
+            "muestra la plantilla números", "muestrame numeros", "muéstrame números"
+        ])
+        
+        # CRÍTICO: Activar SIEMPRE si el usuario menciona números/plantilla en cualquier combinación
+        # SIEMPRE preguntar primero - NUNCA asumir R2B automáticamente
+        should_activate = False
+        
+        # Caso 1: "plantilla numeros" o "numbers template" → SIEMPRE activar
+        if has_numbers_keyword and has_plantilla_keyword:
+            should_activate = True
+        # Caso 2: Cualquier verbo de acción + "numeros" → SIEMPRE activar
+        elif has_numbers_keyword and has_action_verb:
+            should_activate = True
+        # Caso 3: Frase exacta que contenga "plantilla numeros" o "numbers template" → SIEMPRE activar
+        elif "plantilla numeros" in last_user_text or "plantilla números" in last_user_text or "numbers template" in last_user_text or "number template" in last_user_text:
+            should_activate = True
+        # Caso 4: Si solo dice "numeros" o "numbers" pero está en contexto de plantilla → SIEMPRE activar
+        # (Por seguridad, si menciona números, siempre preguntar)
+        elif has_numbers_keyword and len(last_user_text.split()) <= 5:
+            # Si el mensaje es corto y menciona números, probablemente está pidiendo la plantilla
+            should_activate = True
+        
+        if should_activate:
+            # NO importa si hay un template previo - el usuario quiere empezar desde cero
+            logger.info(f"[assistant] Guarda NÚMEROS activada - forzando ofrecer 4 opciones de plantillas")
+            forced_response = AIMessage(content="""Antes de continuar, necesito que elijas una de las siguientes plantillas para completar la plantilla de Números:
+
+1. **R2B**
+2. **R2B + PM**
+3. **R2B + PM + Venta certs**
+4. **Promoción**
+
+⚠️ **Importante:** Debes elegir **SOLO UNA** de estas plantillas para tu propiedad.
+
+Por favor, selecciona solo una opción (escribe el nombre o número).""")
+            return {"messages": [forced_response], "last_llm_timestamp": time.time()}
+        
+        # Guarda 0.5: Números - Detectar selección de plantilla (R2B, Promoción, etc.)
+        # Detectar si el usuario está eligiendo una plantilla (sin importar contexto previo)
+        if state.get("property_id"):
+            user_text_clean = last_user_text.strip().lower()
+            template_name = None
+            
+            # Extraer número o nombre de plantilla de patrones como "1. R2B", "1) R2B", "1 R2B", etc.
+            import re
+            # Patrón: número seguido de punto, paréntesis, o espacio, luego opcionalmente texto
+            match = re.match(r'^(\d+)[\.\)\s]*(.*)', user_text_clean)
+            if match:
+                num_str = match.group(1)
+                rest_text = match.group(2).strip() if match.group(2) else ""
+            else:
+                num_str = None
+                rest_text = user_text_clean
+            
+            # Detectar qué plantilla eligió el usuario (más flexible)
+            # Primero intentar por número (1, 2, 3, 4)
+            if num_str:
+                if num_str == "1":
+                    template_name = "R2B"
+                elif num_str == "2":
+                    template_name = "R2B + PM"
+                elif num_str == "3":
+                    template_name = "R2B + PM + Venta certs"
+                elif num_str == "4":
+                    template_name = "Promoción"
+            
+            # Si no se detectó por número, intentar por texto
+            # CRÍTICO: No activar si el texto contiene "plantilla" o "numeros" sin una selección específica
+            # Solo activar si el usuario dice explícitamente "R2B", "Promoción", etc.
+            if not template_name:
+                # Verificar que el usuario esté eligiendo una plantilla específica, no solo mencionando "plantilla numeros"
+                is_just_mentioning = any(word in user_text_clean for word in ["plantilla", "numeros", "número", "completar", "empezar", "rellenar"])
+                is_selecting = any(word in user_text_clean for word in ["r2b", "promoción", "promocion", "pm", "venta"])
+                
+                # Solo activar si el usuario está seleccionando una plantilla específica (no solo mencionando "plantilla numeros")
+                if is_selecting and not (is_just_mentioning and not is_selecting):
+                    if rest_text in ["r2b"] or (user_text_clean in ["r2b", "1", "uno"] and "plantilla" not in user_text_clean):
+                        template_name = "R2B"
+                    elif rest_text in ["r2b + pm", "r2b+pm", "r2b pm"] or user_text_clean in ["r2b + pm", "r2b+pm", "2", "dos", "r2b pm"]:
+                        template_name = "R2B + PM"
+                    elif rest_text in ["r2b + pm + venta certs", "r2b + pm + venta", "r2b+pm+venta", "r2b+pm+ventacerts", "r2b pm venta"] or user_text_clean in ["r2b + pm + venta certs", "r2b + pm + venta", "r2b+pm+venta", "r2b+pm+ventacerts", "3", "tres", "r2b pm venta"]:
+                        template_name = "R2B + PM + Venta certs"
+                    elif rest_text in ["promoción", "promocion"] or user_text_clean in ["promoción", "promocion", "4", "cuatro"]:
+                        template_name = "Promoción"
+            
+            # Si detectamos una plantilla, SOLO activar si el último mensaje del agente ofreció las 4 opciones
+            # CRÍTICO: NO asumir R2B automáticamente - el usuario DEBE elegir explícitamente
+            if template_name:
+                # Verificar si el último mensaje del agente ofreció las 4 opciones
+                last_ai_msg = None
+                for msg in reversed(messages):
+                    if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
+                        last_ai_msg = msg
+                        break
+                
+                should_activate = False
+                if last_ai_msg and isinstance(last_ai_msg.content, str):
+                    ai_content = last_ai_msg.content.lower()
+                    # SOLO activar si el agente acaba de ofrecer las 4 opciones de plantillas
+                    # Buscar indicadores claros de que el agente ofreció las opciones
+                    has_template_options = ("r2b" in ai_content and "promoción" in ai_content) or ("r2b + pm" in ai_content and "promoción" in ai_content)
+                    has_selection_prompt = "selecciona" in ai_content and ("opción" in ai_content or "opciones" in ai_content or "elige" in ai_content)
+                    
+                    if has_template_options or has_selection_prompt:
+                        should_activate = True
+                        logger.info(f"[assistant] Guarda SELECCIÓN PLANTILLA - último mensaje ofreció opciones, usuario eligió: {template_name}")
+                
+                # NUNCA activar si el usuario solo menciona "plantilla numeros" sin elegir explícitamente
+                # NUNCA activar si no hay un mensaje previo del agente ofreciendo las opciones
+                if should_activate:
+                    logger.info(f"[assistant] Guarda SELECCIÓN PLANTILLA activada - usuario eligió: {template_name}")
+                    # Forzar llamada a set_numbers_template
+                    forced_call = AIMessage(content="", tool_calls=[{
+                        "name": "set_numbers_template",
+                        "args": {
+                            "property_id": state["property_id"],
+                            "template_key": template_name
+                        },
+                        "id": "guard_select_template"
+                    }])
+                    return {"messages": [forced_call], "last_llm_timestamp": time.time()}
+                else:
+                    # Si no se debe activar, log para debugging
+                    logger.info(f"[assistant] Guarda SELECCIÓN PLANTILLA NO activada - template_name={template_name}, pero no hay mensaje previo ofreciendo opciones")
+        
         # Guarda 1: Recordatorios mensuales con extracción de fecha de documento
         if all(kw in last_user_text for kw in ("recordatorio", "cada mes")) and "dia que haya que pagar" in last_user_text:
             if state.get("property_id"):
@@ -900,14 +1111,25 @@ def assistant(state: AgentState) -> Dict[str, Any]:
 
     # Estrategia de un modelo ligero para evitar rate limits:
     # - Usar siempre gpt-4o-mini (más rápido y con límites superiores)
-    if messages and isinstance(messages[-1], ToolMessage):
-        # Respuesta final (texto)
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800)
-        ai = llm.invoke(msgs)
-    else:
-        # Planificación con tools
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
-        ai = llm.invoke(msgs)
+    try:
+        if messages and isinstance(messages[-1], ToolMessage):
+            # Respuesta final (texto)
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800)
+            ai = llm.invoke(msgs)
+        else:
+            # Planificación con tools
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
+            ai = llm.invoke(msgs)
+    except Exception as e:
+        # Manejar errores de rate limit y otros errores de API
+        error_msg = str(e).lower()
+        if "rate limit" in error_msg or "429" in error_msg or "quota" in error_msg or "insufficient_quota" in error_msg:
+            logger.error(f"[assistant] Rate limit error: {e}")
+            error_response = AIMessage(content="⚠️ Lo siento, he alcanzado el límite de solicitudes a la API de OpenAI. Por favor, espera unos minutos y vuelve a intentar. Si el problema persiste, verifica tu plan y facturación de OpenAI.")
+        else:
+            logger.error(f"[assistant] Error al invocar LLM: {e}")
+            error_response = AIMessage(content=f"⚠️ Ha ocurrido un error al procesar tu solicitud: {str(e)}. Por favor, intenta de nuevo en un momento.")
+        return {"messages": [error_response], "last_llm_timestamp": time.time()}
 
     return {"messages": [ai], "last_llm_timestamp": time.time()}
 
@@ -955,17 +1177,101 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
 
     # 1.1 set_numbers_template: guardar selección en estado y confirmar
     if last_tool_msg.name == "set_numbers_template":
+        logger.info(f"[post_tool] ⚡ DETECTADO set_numbers_template - procesando...")
         try:
-            payload = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            # Manejar el contenido del ToolMessage de forma más robusta
+            content = last_tool_msg.content
+            logger.info(f"[post_tool] Content type: {type(content)}, content: {repr(content)}")
+            
+            # Si content es un string, intentar parsearlo como JSON
+            if isinstance(content, str):
+                if content.strip():
+                    try:
+                        payload = json.loads(content)
+                    except json.JSONDecodeError:
+                        # Si no es JSON válido, podría ser el template_key directamente O un error de validación
+                        if "ValidationError" in content or "field required" in content or "value_error" in content.lower():
+                            # Es un error de validación - buscar en los argumentos del tool_call
+                            logger.warning(f"[post_tool] Error de validación detectado, buscando template_key en tool_call args...")
+                            tool_call_id = getattr(last_tool_msg, "tool_call_id", None)
+                            tpl = None
+                            if tool_call_id:
+                                for msg in reversed(messages):
+                                    if isinstance(msg, AIMessage):
+                                        tool_calls = getattr(msg, "tool_calls", [])
+                                        for tc in tool_calls:
+                                            if tc.get("id") == tool_call_id:
+                                                args = tc.get("args", {})
+                                                tpl = args.get("template_key") or args.get("template_name")
+                                                logger.info(f"[post_tool] Template_key extraído del tool_call: {tpl}")
+                                                break
+                                        if tpl:
+                                            break
+                            if tpl:
+                                payload = {"template_key": tpl}
+                            else:
+                                # Si no encontramos en tool_call, tratar como template_key directo
+                                logger.warning(f"[post_tool] No se encontró en tool_call, tratando como template_key directo: {content[:100]}")
+                                tpl = content.strip()
+                                payload = {"template_key": tpl}
+                        else:
+                            # Si no es JSON válido, podría ser el template_key directamente
+                            logger.warning(f"[post_tool] Content no es JSON válido, tratando como template_key directo: {content}")
+                            tpl = content.strip()
+                            payload = {"template_key": tpl}
+                else:
+                    # String vacío - buscar en los argumentos del tool_call
+                    logger.warning(f"[post_tool] Content vacío, buscando en tool_call args...")
+                    # Buscar en los mensajes anteriores el AIMessage con tool_calls
+                    tool_call_id = getattr(last_tool_msg, "tool_call_id", None)
+                    tpl = None
+                    if tool_call_id:
+                        for msg in reversed(messages):
+                            if isinstance(msg, AIMessage):
+                                tool_calls = getattr(msg, "tool_calls", [])
+                                for tc in tool_calls:
+                                    if tc.get("id") == tool_call_id:
+                                        args = tc.get("args", {})
+                                        tpl = args.get("template_key") or args.get("template_name")
+                                        break
+                                if tpl:
+                                    break
+                    if tpl:
+                        payload = {"template_key": tpl}
+                    else:
+                        logger.error(f"[post_tool] No se pudo extraer template_key de ningún lugar")
+                        payload = {}
+            # Si content ya es un diccionario, usarlo directamente
+            elif isinstance(content, dict):
+                payload = content
+            else:
+                logger.error(f"[post_tool] Content tiene tipo inesperado: {type(content)}")
+                payload = {}
+            
+            logger.info(f"[post_tool] Payload procesado: {payload}")
             tpl = (payload or {}).get("template_key", "").strip()
+            logger.info(f"[post_tool] Template extraído: '{tpl}'")
+            
             if tpl:
-                msg = (
-                    "Perfecto. Usaremos la plantilla de Números: "
-                    f"{tpl}. Recuerda: solo necesitas completar UNA de las cuatro. "
-                    "Cuando quieras, dime 'mostrar plantilla' o 'empezar' y te la muestro."
-                )
-                return {"numbers_template": tpl, "messages": [AIMessage(content=msg)]}
-        except Exception:
+                # CRÍTICO: Este mensaje activa el Excel embed en el frontend
+                # Los valores previos ya fueron limpiados por set_numbers_template_tool
+                msg = f"✅ Usaremos la plantilla de Números: {tpl}. Los valores previos han sido limpiados para empezar desde cero."
+                logger.info(f"[post_tool] ✅ set_numbers_template procesado - template: {tpl}, valores limpiados, devolviendo AIMessage final")
+                # CRÍTICO: Devolver el AIMessage como el ÚNICO mensaje nuevo para que should_continue vea que es el último
+                # IMPORTANTE: El reducer add_messages agregará este mensaje al final de la lista
+                # Pero para asegurar que should_continue lo vea, necesitamos que el mensaje esté al final
+                confirm_msg = AIMessage(content=msg, id="post_tool_set_template_confirm")
+                result = {
+                    "numbers_template": tpl, 
+                    "messages": [confirm_msg]
+                }
+                logger.info(f"[post_tool] Devolviendo resultado: numbers_template={tpl}, messages length={len(result['messages'])}, message content={msg[:50]}")
+                logger.info(f"[post_tool] Estado actual de mensajes antes de devolver: {[type(m).__name__ for m in messages[-3:]]}")
+                return result
+            else:
+                logger.warning(f"[post_tool] ⚠️ Template vacío después de procesar payload")
+        except Exception as e:
+            logger.error(f"[post_tool] ❌ Error procesando set_numbers_template: {e}", exc_info=True)
             pass
     
     # 2. list_docs: renderizado directo de documentos subidos vs pendientes
@@ -1244,6 +1550,15 @@ def should_continue(state: AgentState) -> Literal["tools", "assistant", "end"]:
     if not messages:
         return "end"
     
+    # Log para debugging: mostrar los últimos 3 mensajes
+    logger.info(f"[should_continue] Últimos 3 mensajes: {[type(m).__name__ for m in messages[-3:]]}")
+    if messages:
+        last = messages[-1]
+        logger.info(f"[should_continue] Último mensaje: {type(last).__name__}, name={getattr(last, 'name', 'N/A')}")
+        if isinstance(last, AIMessage):
+            content_preview = str(last.content)[:100] if hasattr(last, 'content') else 'N/A'
+            logger.info(f"[should_continue] AIMessage content preview: {content_preview}")
+    
     last = messages[-1]
     
     # Si el último mensaje es AIMessage CON tool_calls, necesitamos ejecutar tools directamente
@@ -1254,12 +1569,35 @@ def should_continue(state: AgentState) -> Literal["tools", "assistant", "end"]:
     
     # Si el último mensaje es AIMessage SIN tool_calls, post_tool ya generó respuesta final → END
     if isinstance(last, AIMessage):
+        # Verificar si es un mensaje de confirmación de template
+        if hasattr(last, 'content') and isinstance(last.content, str) and "Usaremos la plantilla de Números" in last.content:
+            logger.info(f"[should_continue] AIMessage de confirmación de template → END (no continuar)")
+            return "end"
         logger.info("[should_continue] AIMessage sin tool_calls → END")
         return "end"
     
-    # Si el último mensaje es ToolMessage, necesitamos que assistant responda
+    # Si el último mensaje es ToolMessage, necesitamos verificar si post_tool ya procesó este mensaje
     if isinstance(last, ToolMessage):
-        logger.info("[should_continue] ToolMessage → volviendo a assistant")
+        logger.info(f"[should_continue] ToolMessage (name={last.name}) → verificando si post_tool ya procesó")
+        # CRÍTICO: Si es set_numbers_template, post_tool ya procesó y guardó numbers_template en el estado
+        # Si el estado tiene numbers_template, significa que post_tool ya procesó y devolvió el AIMessage
+        # En este caso, debemos TERMINAR el flujo porque el mensaje de confirmación ya se agregó (o se agregará)
+        if last.name == "set_numbers_template":
+            # Verificar si post_tool ya procesó: si hay numbers_template en el estado, post_tool ya lo procesó
+            if state.get("numbers_template"):
+                logger.info(f"[should_continue] ✅ numbers_template encontrado en estado ({state.get('numbers_template')}) - post_tool ya procesó, terminando flujo")
+                return "end"
+            # Verificar si hay un AIMessage de confirmación en los mensajes anteriores (aunque no sea el último)
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage) and isinstance(msg.content, str):
+                    if "Usaremos la plantilla de Números" in msg.content:
+                        logger.info(f"[should_continue] ✅ Encontrado AIMessage de confirmación en mensajes anteriores → END")
+                        return "end"
+            # Si no hay numbers_template ni AIMessage, significa que post_tool no procesó todavía
+            # PERO debemos TERMINAR de todas formas para evitar que el agente genere otro mensaje
+            logger.warning(f"[should_continue] ⚠️ ToolMessage de set_numbers_template detectado - terminando flujo para evitar mensaje duplicado")
+            return "end"
+        # Para otros ToolMessages, volver a assistant
         return "assistant"
     
     return "end"
