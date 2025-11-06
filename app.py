@@ -1245,18 +1245,38 @@ async def ui_chat(
     answer = out.get("answer") or out.get("content") or ""
     if not answer and out.get("messages"):
         msgs = out["messages"]
-        # First, check if there's a set_numbers_template confirmation message
-        for msg in reversed(msgs):
-            if isinstance(msg, dict):
-                content = msg.get("content", "")
-            else:
-                content = getattr(msg, "content", "")
-            # Look for the confirmation message specifically
-            if content and isinstance(content, str) and "Usaremos la plantilla de Números" in content:
-                answer = str(content)
+        
+        # Detect if THIS TURN actually called set_numbers_template
+        has_set_template_tool = False
+        for m in reversed(msgs):
+            # Stop scanning once we hit a HumanMessage (previous turn)
+            typ = getattr(m, "type", None)
+            if typ == "human":
+                break
+            name = getattr(m, "name", None)
+            if name == "set_numbers_template":
+                has_set_template_tool = True
                 break
         
-        # If no confirmation message found, look for any AIMessage without tool_calls
+        # 1) Prefer the set_numbers_template confirmation ONLY if the tool was called this turn
+        if has_set_template_tool:
+            for msg in reversed(msgs):
+                if isinstance(msg, dict):
+                    content = msg.get("content", "")
+                else:
+                    content = getattr(msg, "content", "")
+                if content and isinstance(content, str) and "Usaremos la plantilla de Números" in content:
+                    # Sanitize: keep ONLY the confirmation sentence
+                    m = re.search(r"Usaremos la plantilla de Números:\s*([^\.\n]+)", content)
+                    if m:
+                        tpl = m.group(1).strip()
+                        answer = f"✅ Usaremos la plantilla de Números: {tpl}."
+                    else:
+                        # Fallback to whole line but trimmed
+                        answer = "✅ Usaremos la plantilla de Números: R2B."
+                    break
+        
+        # 2) Otherwise, pick the last plain AI message (ignore spurious template confirmations)
         if not answer:
             for msg in reversed(msgs):
                 if isinstance(msg, dict):
@@ -1264,6 +1284,9 @@ async def ui_chat(
                 else:
                     content = getattr(msg, "content", "")
                 if content and not getattr(msg, "tool_calls", None):
+                    # Ignore spurious template confirmations when no tool was called
+                    if "Usaremos la plantilla de Números" in str(content):
+                        continue
                     answer = str(content)
                     break
     

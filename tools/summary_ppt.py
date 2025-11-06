@@ -258,7 +258,7 @@ def build_summary_ppt(property_id: str, property_name: str | None = None, addres
             # AI-generated summary (call LLM for brief intro)
             try:
                 from langchain_openai import ChatOpenAI
-                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, timeout=30)
+                llm = ChatOpenAI(model="gpt-4o", temperature=0.7, timeout=30)
                 summary_prompt = f"""Genera un resumen ejecutivo breve (máximo 3 frases) para esta propiedad rural:
 Nombre: {title}
 Dirección: {address or 'No especificada'}

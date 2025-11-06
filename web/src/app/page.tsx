@@ -448,7 +448,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
       )
     }
     return (
-      <div className="rounded-3xl border-2 border-[color:var(--c-green-400)] bg-white/95 backdrop-blur-sm shadow-2xl overflow-hidden transition-all duration-300 hover:shadow-3xl flex flex-col h-full min-h-0">
+      <div className="rounded-3xl border-2 border-[color:var(--c-green-400)] bg-white/95 backdrop-blur-sm shadow-2xl overflow-hidden transition-all duration-300 hover:shadow-3xl flex flex-col h-auto max-h-[80vh] min-h-0">
         {/* Header with gradient and better styling */}
         <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -488,7 +488,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
           {excelUrl ? (
             <iframe
               src={excelUrl}
-              className="w-full h-full border-0"
+              className="w-full h-[70vh] border-0"
               allowFullScreen
               title={`Excel ${excelTemplate}`}
             />
@@ -531,15 +531,15 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
       
       {/* Main content area: split layout when Excel is open */}
       <div className={`flex-1 flex gap-4 ${hasExcel ? 'flex-row' : 'flex-col'}`}>
-        {/* Excel Panel - Left side when open (70% width) */}
+        {/* Excel Panel - Left side when open (larger) */}
         {hasExcel && (
-          <div className="flex-[3] flex flex-col min-w-0">
+          <div className="flex-[7] flex flex-col min-w-0">
             {ExcelPanel}
           </div>
         )}
         
-        {/* Chat area - Right side when Excel is open (30% width), full width otherwise */}
-        <div className={`${hasExcel ? 'flex-1 flex-shrink-0' : 'flex-1'} flex flex-col`}>
+        {/* Chat area - Right side when Excel is open (smaller), full width otherwise */}
+        <div className={`${hasExcel ? 'flex-[2] flex-shrink-0' : 'flex-1'} flex flex-col`}>
           <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-6 glass nature-shadow-lg scrollbar-thin">
             {!hasExcel && ExcelPanel}
             {messages.length === 0 ? (

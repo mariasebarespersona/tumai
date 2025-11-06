@@ -169,7 +169,7 @@ def extract_payment_date_from_document(
             subgroup=document_subgroup,
             name=document_name,
             question=question,
-            model="gpt-4o-mini"
+            model="gpt-4o"
         )
         
         answer = qa_result.get("answer", "")

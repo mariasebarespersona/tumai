@@ -247,19 +247,17 @@ FLUJO: NÚMEROS
   3. Pregunta: "¿Cuál plantilla quieres usar? (escribe el nombre o número)"
   4. Tras recibir la elección, llama `set_numbers_template(property_id, template_name)` con el nombre exacto elegido (ej: "R2B", "Promoción").
   5. **🚨🚨🚨 CRÍTICO ABSOLUTO: DESPUÉS DE `set_numbers_template`, DETENTE COMPLETAMENTE 🚨🚨🚨**
-     - **PROHIBIDO** llamar `get_numbers` después de `set_numbers_template`
-     - **PROHIBIDO** llamar `set_number` después de `set_numbers_template`
-     - **PROHIBIDO** mostrar la tabla de valores después de `set_numbers_template`
-     - **PROHIBIDO** proponer completar campos después de `set_numbers_template`
-     - **PROHIBIDO** decir "Ahora procederé a mostrarte" o "mostrar la tabla" después de `set_numbers_template`
-     - **PROHIBIDO** decir "valores actuales" o "aquí tienes la plantilla" después de `set_numbers_template`
-     - **PROHIBIDO** decir "Ya hemos establecido" o "hemos establecido" después de `set_numbers_template`
-     - **PROHIBIDO** generar cualquier otro mensaje después de `set_numbers_template`
-     - El mensaje de confirmación "✅ Usaremos la plantilla de Números: [nombre]. Los valores previos han sido limpiados para empezar desde cero." abrirá automáticamente el Excel en la interfaz
-     - **SOLO** confirma con ese mensaje exacto y **DETENTE COMPLETAMENTE**. NO generes ningún otro mensaje.
-     - El Excel se abrirá automáticamente al lado del chat como copilot y permanecerá visible durante todo el proceso
-     - **IMPORTANTE**: El Excel debe permanecer visible en la UI todo el tiempo que el usuario esté rellenando la plantilla, hasta que el usuario diga que quiere salir o hacer otra acción
-     - Espera a que el usuario trabaje con el Excel y te pida ayuda si la necesita
+     - **PROHIBIDO ABSOLUTO** llamar `get_numbers` después de `set_numbers_template`
+     - **PROHIBIDO ABSOLUTO** llamar `set_number` después de `set_numbers_template`
+     - **PROHIBIDO ABSOLUTO** mostrar la tabla de valores después de `set_numbers_template`
+     - **PROHIBIDO ABSOLUTO** proponer completar campos después de `set_numbers_template`
+     - **PROHIBIDO ABSOLUTO** decir "Ahora procederé", "procederé a mostrarte", "mostrarte la tabla", "mostrar la tabla"
+     - **PROHIBIDO ABSOLUTO** decir "valores actuales", "aquí tienes la plantilla", "puedas trabajar en ella"
+     - **PROHIBIDO ABSOLUTO** decir "Ya hemos establecido", "hemos establecido", "Un momento, por favor"
+     - **PROHIBIDO ABSOLUTO** generar cualquier texto después del mensaje de confirmación
+     - **MENSAJE EXACTO Y ÚNICO**: "✅ Usaremos la plantilla de Números: [nombre]." (Y NADA MÁS)
+     - El Excel se abrirá automáticamente al lado del chat como copilot
+     - Espera en SILENCIO a que el usuario trabaje con el Excel
 
 - **SI YA HAY UN TEMPLATE SELECCIONADO Y el usuario NO dice "quiero completar/empezar":**
   - El Excel ya debería estar visible en la interfaz
@@ -270,6 +268,69 @@ FLUJO: NÚMEROS
     3. Si no encuentras el item, pregunta al usuario qué valor específico quiere borrar
   - **RESPUESTA INMEDIATA:** Después de actualizar o borrar un valor, confirma inmediatamente: "✅ Actualizado [item] a [valor]" o "✅ Borrado [item]"
   - **DETECCIÓN INTELIGENTE:** Usa `find_item_by_value` cuando el usuario mencione un valor específico del Excel (ej: "borra IVA 10%" → busca por label="IVA" y value=10.0)
+
+- **EJEMPLOS (few‑shot): NÚMEROS**
+  ❌ MAL:
+  Usuario: "quiero completar la plantilla números"
+  Tú: "✅ Usaremos la plantilla de Números: R2B. Ahora procederé a mostrarte la tabla..."
+  → PROHIBIDO mostrar tabla o valores tras `set_numbers_template`.
+
+  ✅ BIEN (1):
+  Usuario: "quiero completar la plantilla números"
+  Tú: "Elige una plantilla: 1) R2B  2) R2B + PM  3) R2B + PM + Venta certs  4) Promoción. Debes elegir SOLO UNA."
+
+  ✅ BIEN (2):
+  Usuario: "R2B"
+  Tú: "✅ Usaremos la plantilla de Números: R2B."
+
+  ✅ BIEN (3):
+  Usuario: "pon precio de venta a 160000"
+  Tú: [llama `set_number('precio_venta', 160000)`] → "✅ Actualizado Precio de venta a 160000."
+
+**EJEMPLOS (few‑shot): FACTURAS / PLACEHOLDERS**
+✅ BIEN (1):
+Usuario: "subo Contrato arquitecto"
+Tú: [tras `upload_and_link` con éxito] si `facturas_generated.status == "created"` →
+"✅ Subido 'Contrato arquitecto'. He creado 12 placeholders de facturas mensuales (día 5) 📅" (o trimestrales/anuales según frecuencia)
+
+✅ BIEN (2):
+Usuario: "¿Hay facturas asociadas al contrato arquitecto?"
+Tú: llama `list_related_facturas(property_id, R2B, Diseño/Obra, Contrato arquitecto)` →
+si hay resultados: lista fechas pendientes/llenas; si 0 y es facturable: intenta `qa_payment_schedule` y luego `seed_facturas_for` o pide el día de pago.
+
+**EJEMPLOS (few‑shot): SALTAR DOCUMENTO**
+Usuario: "saltar este"
+Tú: "OK, lo dejamos pendiente y pasamos al siguiente documento del grupo."
+
+**EJEMPLOS (few‑shot): ELEGIR UNA ENTRE II/III/IV**
+Usuario: "Quiero completar la sección opcional"
+Tú: "Debes elegir SOLO UNA: II) Venta R2B, III) Venta R2B + Raquel PM, IV) Promoción. ¿Cuál eliges?"
+
+**EJEMPLOS (few‑shot): PROPIEDADES (MÁXIMA PRIORIDAD - IGNORAR CONTEXTO DE NÚMEROS)**
+🚨 REGLA CRÍTICA: Si el usuario menciona "propiedades", "lista propiedades", "ver propiedades", "qué propiedades hay"
+→ SIEMPRE llama `list_properties` INMEDIATAMENTE
+→ NO importa si hay `numbers_template` en el estado
+→ NO importa si el Excel está abierto
+→ Las propiedades tienen PRIORIDAD ABSOLUTA sobre números
+
+❌ MAL:
+Usuario: "quiero ver todas las propiedades que hay"
+Tú: "Ahora procederé a mostrarte la tabla de números..."
+→ PROHIBIDO. El usuario pidió PROPIEDADES, no números.
+
+✅ BIEN (1):
+Usuario: "quiero ver todas las propiedades que hay"
+Tú: [llama `list_properties(limit=50)`] → muestra lista
+→ IGNORA completamente el contexto de números
+
+✅ BIEN (2):
+Usuario: "lista propiedades"
+Tú: [llama `list_properties(limit=50)`] → muestra lista
+
+**EJEMPLOS (few‑shot): BORRAR CELDA EN EXCEL**
+Usuario: "borra donde pone IVA 10%"
+Tú: usa `find_item_by_value(search_label="IVA", search_value=10)` → `clear_number(item_key)` →
+"✅ Borrado IVA (%)."
 
 - **Mostrar tabla:** `get_numbers` devuelve "grupo / etiqueta (item_key): valor". SOLO úsalo si el usuario pide ver los valores actuales.
 - **Escribir valores:** Cuando el usuario te diga "pon X a Y", "actualiza X con Y", "cambia X a Y", etc., usa `set_number` INMEDIATAMENTE. Acepta 25.000, 25,000, 25000, 7%, etc.
@@ -711,6 +772,23 @@ RESUMEN ULTRA-COMPACTO: TÚ DECIDES TODO CON EL LLM
 NUNCA repreguntes lo ya resuelto por el backend (p. ej., si `property_id` está fijado) salvo que el usuario indique cambio.
 """
 
+# Override the verbose prompt with a compact version loaded from prompts/core.md
+try:
+    import os as _os
+    _base_dir = _os.path.dirname(__file__)
+    _prompt_path = _os.path.join(_base_dir, "prompts", "core.md")
+    with open(_prompt_path, "r", encoding="utf-8") as _f:
+        SYSTEM_PROMPT = _f.read()
+except Exception:
+    SYSTEM_PROMPT = (
+        "Rol: PropertyAgent para RAMA Country Living.\n"
+        "Objetivo: ayudar a completar Documentos, Números y Resumen por propiedad.\n"
+        "Reglas esenciales: verifica con herramientas antes de negar; property_id pegajoso; "
+        "no ofrezcas enlaces si no lo piden; español claro; usa herramientas; "
+        "email: usa send_email si lo piden; recordatorios: usa extract_payment_date y recurrence.\n"
+        "Salida: breve y accionable; menciona la propiedad cuando toque."
+    )
+
 # ---------------- State ----------------
 from langgraph.graph import add_messages
 from typing_extensions import Annotated, NotRequired
@@ -786,19 +864,74 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         ldr = state["last_doc_ref"]
         msgs.append(SystemMessage(content=f"Si el usuario dice 'ese documento', interpreta {ldr} como el objetivo por defecto."))
     
-    # CRÍTICO: Contexto de plantilla de Números seleccionada
-    # Primero verificar si el último ToolMessage fue de set_numbers_template
+    # Prioridad absoluta: si el usuario pide listar propiedades, forzar herramienta directamente
+    if messages and isinstance(messages[-1], HumanMessage):
+        last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
+        has_properties_kw = any(kw in last_user_text for kw in [
+            "propiedad", "propiedades", "properties", "property"
+        ])
+        has_list_verb = any(kw in last_user_text for kw in [
+            "lista", "listar", "list", "muestrame", "muéstrame", "mostrar", "ver",
+            "enseñame", "enséñame", "que propiedades", "qué propiedades", "todas"
+        ])
+        if has_properties_kw and has_list_verb:
+            forced_call = AIMessage(content="", tool_calls=[{
+                "name": "list_properties",
+                "args": {"limit": 50},
+                "id": "force_list_properties"
+            }])
+            return {"messages": [forced_call], "last_llm_timestamp": time.time()}
+        # Handle entering the Numbers workflow.
+        # If the user explicitly names a template (e.g. "R2B"), force set_numbers_template so the frontend opens the Excel.
+        # If the user only says "números" / "quiero completar la plantilla de Números", ASK them to choose among the 4 options
+        template_map = {
+            "r2b": "R2B",
+            "r2b+pm": "R2B + PM",
+            "r2b + pm": "R2B + PM",
+            "r2b+pm+venta certs": "R2B + PM + Venta certs",
+            "r2b + pm + venta certs": "R2B + PM + Venta certs",
+            "promocion": "Promoción",
+            "promoción": "Promoción",
+        }
+
+        numbers_keywords = ["número", "numeros", "números", "plantilla", "números"]
+        mentioned_numbers = any(kw in last_user_text for kw in numbers_keywords)
+
+        selected_tpl = None
+        for key, val in template_map.items():
+            if key in last_user_text:
+                selected_tpl = val
+                break
+
+        if selected_tpl and state.get("property_id"):
+            forced_set_tpl = AIMessage(content="", tool_calls=[{
+                "name": "set_numbers_template",
+                "args": {"property_id": state.get("property_id"), "template_key": selected_tpl},
+                "id": "force_set_numbers_template"
+            }])
+            return {"messages": [forced_set_tpl], "last_llm_timestamp": time.time()}
+
+        if mentioned_numbers and not selected_tpl:
+            ask_msg = AIMessage(content=(
+                "¿Qué plantilla de Números quieres usar? Elige una de las siguientes opciones y respóndeme con el nombre o el número:\n\n"
+                "1) R2B\n2) R2B + PM\n3) R2B + PM + Venta certs\n4) Promoción"
+            ))
+            return {"messages": [ask_msg], "last_llm_timestamp": time.time()}
+    
+    # CRÍTICO: Verificar si ACABAMOS de llamar set_numbers_template
+    # Si el último ToolMessage es set_numbers_template, NO añadir contexto de plantilla
+    # porque post_tool ya generó el mensaje de confirmación y el LLM debe detenerse
     last_tool_msg = None
     for msg in reversed(messages):
         if isinstance(msg, ToolMessage):
             last_tool_msg = msg
             break
     
-    # Si el último ToolMessage fue de set_numbers_template Y hay numbers_template en el estado
-    # significa que acabamos de seleccionar el template → DEBE DETENERSE
-    if last_tool_msg and last_tool_msg.name == "set_numbers_template" and state.get("numbers_template"):
-        msgs.append(SystemMessage(content=f"🚨🚨🚨 ATENCIÓN CRÍTICA: Acabas de llamar `set_numbers_template` y el template '{state['numbers_template']}' está guardado en el estado. 🚨🚨🚨 DEBES DETENERSE COMPLETAMENTE. NO llames `get_numbers`. NO llames `set_number`. NO muestres la tabla. SOLO confirma con '✅ Usaremos la plantilla de Números: {state['numbers_template']}.' y DETENTE. El Excel se abrirá automáticamente en la interfaz."))
-    else:
+    just_set_template = (last_tool_msg and last_tool_msg.name == "set_numbers_template")
+    
+    # Sin guardias adicionales. Confiamos en el SYSTEM_PROMPT y en post_tool/should_continue.
+    # PERO: Si acabamos de llamar set_numbers_template, NO añadir ningún SystemMessage sobre números
+    if not just_set_template:
         # Primero verificar si el usuario quiere "empezar" o "completar" la plantilla (resetear)
         user_wants_to_start_afresh = False
         if messages and isinstance(messages[-1], HumanMessage):
@@ -809,7 +942,8 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         
         if state.get("numbers_template") and not user_wants_to_start_afresh:
             # Ya hay template y el usuario NO quiere resetear → continuar normalmente
-            msgs.append(SystemMessage(content=f"Contexto: Ya se ha seleccionado la plantilla de Números: {state['numbers_template']}. Puedes proceder con `get_numbers` y `set_number` cuando el usuario lo pida explícitamente."))
+            # SOLO añadir este contexto si NO acabamos de seleccionar el template
+            msgs.append(SystemMessage(content=f"Contexto: Plantilla de Números seleccionada: {state['numbers_template']}. El Excel ya está visible. Espera instrucciones del usuario para modificar valores con `set_number` o `clear_number`."))
         else:
             # NO hay template O el usuario quiere empezar de nuevo → DEBE ofrecer las 4 opciones primero
             if messages and isinstance(messages[-1], HumanMessage):
@@ -821,10 +955,10 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                     else:
                         msgs.append(SystemMessage(content="⚠️ ATENCIÓN: El usuario está entrando en modo Números pero NO hay plantilla seleccionada. DEBES ofrecer las 4 opciones (R2B, R2B + PM, R2B + PM + Venta certs, Promoción) y esperar a que elija antes de llamar `get_numbers` o `set_number`."))
     
-    # Limitar historial a los últimos 15 mensajes para evitar rate limits
+    # Limitar historial a los últimos 10 mensajes para evitar rate limits
     # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos
-    if len(messages) > 15:
-        filtered = messages[-15:]
+    if len(messages) > 10:
+        filtered = messages[-10:]
         
         # Verificar si el primer mensaje es un ToolMessage
         # Si lo es, necesitamos incluir el AIMessage con tool_calls que lo precede
@@ -893,232 +1027,17 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     
     msgs = msgs[:2] + cleaned_msgs  # Mantener System messages al inicio
 
-    # Guardas explícitas para flujos complejos
-    if messages and isinstance(messages[-1], HumanMessage):
-        last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
-        
-        # Guarda 0: Números - SIEMPRE preguntar cuando el usuario menciona "plantilla numeros" o "numbers template"
-        # CRÍTICO: Esta guarda debe activarse SIEMPRE que el usuario mencione la plantilla de números
-        # NO asumir R2B automáticamente - SIEMPRE ofrecer las 4 opciones primero
-        # Detectar cualquier mención a "plantilla numeros", "numbers template", etc.
-        has_numbers_keyword = any(kw in last_user_text for kw in [
-            "número", "numeros", "números", "numbers", "number"
-        ])
-        has_plantilla_keyword = any(kw in last_user_text for kw in [
-            "plantilla", "template", "framework", "marco"
-        ])
-        has_action_verb = any(phrase in last_user_text for phrase in [
-            "quiero completar", "quiero empezar", "quiero rellenar", 
-            "completar plantilla", "empezar plantilla", "rellenar plantilla",
-            "metete en", "entra en", "entrar en", "meterme en", "quiero entrar",
-            "abre la plantilla", "abrir plantilla", "muestra la plantilla", "mostrar plantilla",
-            "muestrame", "muéstrame", "show me", "dame", "quiero ver", "quiero trabajar",
-            "muestrame la plantilla", "muéstrame la plantilla", "muestra la plantilla numeros",
-            "muestra la plantilla números", "muestrame numeros", "muéstrame números"
-        ])
-        
-        # CRÍTICO: Activar SIEMPRE si el usuario menciona números/plantilla en cualquier combinación
-        # SIEMPRE preguntar primero - NUNCA asumir R2B automáticamente
-        should_activate = False
-        
-        # Caso 1: "plantilla numeros" o "numbers template" → SIEMPRE activar
-        if has_numbers_keyword and has_plantilla_keyword:
-            should_activate = True
-        # Caso 2: Cualquier verbo de acción + "numeros" → SIEMPRE activar
-        elif has_numbers_keyword and has_action_verb:
-            should_activate = True
-        # Caso 3: Frase exacta que contenga "plantilla numeros" o "numbers template" → SIEMPRE activar
-        elif "plantilla numeros" in last_user_text or "plantilla números" in last_user_text or "numbers template" in last_user_text or "number template" in last_user_text:
-            should_activate = True
-        # Caso 4: Si solo dice "numeros" o "numbers" pero está en contexto de plantilla → SIEMPRE activar
-        # (Por seguridad, si menciona números, siempre preguntar)
-        elif has_numbers_keyword and len(last_user_text.split()) <= 5:
-            # Si el mensaje es corto y menciona números, probablemente está pidiendo la plantilla
-            should_activate = True
-        
-        if should_activate:
-            # NO importa si hay un template previo - el usuario quiere empezar desde cero
-            logger.info(f"[assistant] Guarda NÚMEROS activada - forzando ofrecer 4 opciones de plantillas")
-            forced_response = AIMessage(content="""Antes de continuar, necesito que elijas una de las siguientes plantillas para completar la plantilla de Números:
+    # Sin guardias: dejamos que el LLM decida con el SYSTEM_PROMPT reforzado
 
-1. **R2B**
-2. **R2B + PM**
-3. **R2B + PM + Venta certs**
-4. **Promoción**
-
-⚠️ **Importante:** Debes elegir **SOLO UNA** de estas plantillas para tu propiedad.
-
-Por favor, selecciona solo una opción (escribe el nombre o número).""")
-            return {"messages": [forced_response], "last_llm_timestamp": time.time()}
-        
-        # Guarda 0.5: Números - Detectar selección de plantilla (R2B, Promoción, etc.)
-        # Detectar si el usuario está eligiendo una plantilla (sin importar contexto previo)
-        if state.get("property_id"):
-            user_text_clean = last_user_text.strip().lower()
-            template_name = None
-            
-            # Extraer número o nombre de plantilla de patrones como "1. R2B", "1) R2B", "1 R2B", etc.
-            import re
-            # Patrón: número seguido de punto, paréntesis, o espacio, luego opcionalmente texto
-            match = re.match(r'^(\d+)[\.\)\s]*(.*)', user_text_clean)
-            if match:
-                num_str = match.group(1)
-                rest_text = match.group(2).strip() if match.group(2) else ""
-            else:
-                num_str = None
-                rest_text = user_text_clean
-            
-            # Detectar qué plantilla eligió el usuario (más flexible)
-            # Primero intentar por número (1, 2, 3, 4)
-            if num_str:
-                if num_str == "1":
-                    template_name = "R2B"
-                elif num_str == "2":
-                    template_name = "R2B + PM"
-                elif num_str == "3":
-                    template_name = "R2B + PM + Venta certs"
-                elif num_str == "4":
-                    template_name = "Promoción"
-            
-            # Si no se detectó por número, intentar por texto
-            # CRÍTICO: No activar si el texto contiene "plantilla" o "numeros" sin una selección específica
-            # Solo activar si el usuario dice explícitamente "R2B", "Promoción", etc.
-            if not template_name:
-                # Verificar que el usuario esté eligiendo una plantilla específica, no solo mencionando "plantilla numeros"
-                is_just_mentioning = any(word in user_text_clean for word in ["plantilla", "numeros", "número", "completar", "empezar", "rellenar"])
-                is_selecting = any(word in user_text_clean for word in ["r2b", "promoción", "promocion", "pm", "venta"])
-                
-                # Solo activar si el usuario está seleccionando una plantilla específica (no solo mencionando "plantilla numeros")
-                if is_selecting and not (is_just_mentioning and not is_selecting):
-                    if rest_text in ["r2b"] or (user_text_clean in ["r2b", "1", "uno"] and "plantilla" not in user_text_clean):
-                        template_name = "R2B"
-                    elif rest_text in ["r2b + pm", "r2b+pm", "r2b pm"] or user_text_clean in ["r2b + pm", "r2b+pm", "2", "dos", "r2b pm"]:
-                        template_name = "R2B + PM"
-                    elif rest_text in ["r2b + pm + venta certs", "r2b + pm + venta", "r2b+pm+venta", "r2b+pm+ventacerts", "r2b pm venta"] or user_text_clean in ["r2b + pm + venta certs", "r2b + pm + venta", "r2b+pm+venta", "r2b+pm+ventacerts", "3", "tres", "r2b pm venta"]:
-                        template_name = "R2B + PM + Venta certs"
-                    elif rest_text in ["promoción", "promocion"] or user_text_clean in ["promoción", "promocion", "4", "cuatro"]:
-                        template_name = "Promoción"
-            
-            # Si detectamos una plantilla, SOLO activar si el último mensaje del agente ofreció las 4 opciones
-            # CRÍTICO: NO asumir R2B automáticamente - el usuario DEBE elegir explícitamente
-            if template_name:
-                # Verificar si el último mensaje del agente ofreció las 4 opciones
-                last_ai_msg = None
-                for msg in reversed(messages):
-                    if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
-                        last_ai_msg = msg
-                        break
-                
-                should_activate = False
-                if last_ai_msg and isinstance(last_ai_msg.content, str):
-                    ai_content = last_ai_msg.content.lower()
-                    # SOLO activar si el agente acaba de ofrecer las 4 opciones de plantillas
-                    # Buscar indicadores claros de que el agente ofreció las opciones
-                    has_template_options = ("r2b" in ai_content and "promoción" in ai_content) or ("r2b + pm" in ai_content and "promoción" in ai_content)
-                    has_selection_prompt = "selecciona" in ai_content and ("opción" in ai_content or "opciones" in ai_content or "elige" in ai_content)
-                    
-                    if has_template_options or has_selection_prompt:
-                        should_activate = True
-                        logger.info(f"[assistant] Guarda SELECCIÓN PLANTILLA - último mensaje ofreció opciones, usuario eligió: {template_name}")
-                
-                # NUNCA activar si el usuario solo menciona "plantilla numeros" sin elegir explícitamente
-                # NUNCA activar si no hay un mensaje previo del agente ofreciendo las opciones
-                if should_activate:
-                    logger.info(f"[assistant] Guarda SELECCIÓN PLANTILLA activada - usuario eligió: {template_name}")
-                    # Forzar llamada a set_numbers_template
-                    forced_call = AIMessage(content="", tool_calls=[{
-                        "name": "set_numbers_template",
-                        "args": {
-                            "property_id": state["property_id"],
-                            "template_key": template_name
-                        },
-                        "id": "guard_select_template"
-                    }])
-                    return {"messages": [forced_call], "last_llm_timestamp": time.time()}
-                else:
-                    # Si no se debe activar, log para debugging
-                    logger.info(f"[assistant] Guarda SELECCIÓN PLANTILLA NO activada - template_name={template_name}, pero no hay mensaje previo ofreciendo opciones")
-        
-        # Guarda 1: Recordatorios mensuales con extracción de fecha de documento
-        if all(kw in last_user_text for kw in ("recordatorio", "cada mes")) and "dia que haya que pagar" in last_user_text:
-            if state.get("property_id"):
-                # Detectar concepto de pago
-                if "arquitecto" in last_user_text:
-                    payment_concept = "pago al arquitecto"
-                    doc_name_hint = "arquitecto"
-                elif "honorarios" in last_user_text:
-                    payment_concept = "honorarios"
-                    doc_name_hint = "honorarios"
-                else:
-                    payment_concept = "pago"
-                    doc_name_hint = "contrato"
-                
-                # FORZAR list_docs - NO dejar que el LLM decida
-                logger.info(f"[assistant] Guarda recordatorio activada - forzando list_docs")
-                forced_call = AIMessage(content="", tool_calls=[{
-                    "name": "list_docs",
-                    "args": {"property_id": state["property_id"]},
-                    "id": "guard_reminder_list_docs"
-                }])
-                return {"messages": [forced_call], "last_llm_timestamp": time.time()}
-        
-        # Guarda 2: ficha resumen propiedad
-        if any(k in last_user_text for k in ("ficha resumen", "resumen propiedad", "genera resumen", "generar resumen", "crear resumen", "resumen pdf")):
-            if state.get("property_id"):
-                # Obtener info de la propiedad
-                try:
-                    from tools.property_tools import get_property
-                    prop_info = get_property(state["property_id"])
-                    prop_name = (prop_info or {}).get("name")
-                    prop_address = (prop_info or {}).get("address")
-                except:
-                    prop_name = None
-                    prop_address = None
-                
-                # Forzar llamada a build_summary_ppt
-                forced_call = AIMessage(content="", tool_calls=[{
-                    "name": "build_summary_ppt",
-                    "args": {
-                        "property_id": state["property_id"],
-                        "property_name": prop_name,
-                        "address": prop_address,
-                        "format": "pdf"
-                    },
-                    "id": "manual_build_summary_1"
-                }])
-                return {"messages": [forced_call], "last_llm_timestamp": time.time()}
-
-        # Guarda 3: "¿hay facturas asociadas (a X)?" → listar facturas del documento más reciente o inferido
-        if ("factura" in last_user_text) and ("asociad" in last_user_text or "relacionad" in last_user_text):
-            if state.get("property_id"):
-                doc_ref = state.get("last_uploaded_doc") or state.get("last_doc_ref")
-                if not doc_ref:
-                    # Heurística rápida por mención del usuario
-                    if "arquitect" in last_user_text:
-                        doc_ref = {"document_group": "R2B", "document_subgroup": "Diseño/Obra", "document_name": "Contrato arquitecto"}
-                if doc_ref and doc_ref.get("document_group"):
-                    forced_call = AIMessage(content="", tool_calls=[{
-                        "name": "list_related_facturas",
-                        "args": {
-                            "property_id": state["property_id"],
-                            "document_group": doc_ref.get("document_group", ""),
-                            "document_subgroup": doc_ref.get("document_subgroup", ""),
-                            "document_name": doc_ref.get("document_name", "")
-                        },
-                        "id": "guard_list_related_facturas_1"
-                    }])
-                    return {"messages": [forced_call], "last_llm_timestamp": time.time()}
-
-    # Estrategia de un modelo ligero para evitar rate limits:
-    # - Usar siempre gpt-4o-mini (más rápido y con límites superiores)
+    # Modelo principal para planificación y respuestas
     try:
         if messages and isinstance(messages[-1], ToolMessage):
             # Respuesta final (texto)
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800)
+            llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800)
             ai = llm.invoke(msgs)
         else:
             # Planificación con tools
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
+            llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
             ai = llm.invoke(msgs)
     except Exception as e:
         # Manejar errores de rate limit y otros errores de API
@@ -1255,7 +1174,7 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
             if tpl:
                 # CRÍTICO: Este mensaje activa el Excel embed en el frontend
                 # Los valores previos ya fueron limpiados por set_numbers_template_tool
-                msg = f"✅ Usaremos la plantilla de Números: {tpl}. Los valores previos han sido limpiados para empezar desde cero."
+                msg = f"✅ Usaremos la plantilla de Números: {tpl}."
                 logger.info(f"[post_tool] ✅ set_numbers_template procesado - template: {tpl}, valores limpiados, devolviendo AIMessage final")
                 # CRÍTICO: Devolver el AIMessage como el ÚNICO mensaje nuevo para que should_continue vea que es el último
                 # IMPORTANTE: El reducer add_messages agregará este mensaje al final de la lista
