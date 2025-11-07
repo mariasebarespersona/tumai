@@ -42,11 +42,9 @@ def get_numbers(property_id: str, template_key: Optional[str] = None) -> List[Di
         ],
     }
     
-    # Default template key
-    template_key = template_key or "R2B"
-    
-    # If template_key is specified, always return the template structure
-    # This ensures the frontend always shows the correct structure for the selected template
+    # If a template_key is explicitly provided, return the template structure merged with DB values.
+    # If no template_key is provided, do NOT fall back to a default template — return only DB items (or empty list).
+    # This avoids auto-showing the old R2B template when the user didn't select it.
     if template_key:
         # Try to get items from DB and merge with template structure
         schema = nums_schema(property_id)

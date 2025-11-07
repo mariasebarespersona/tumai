@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RAMA Excel Add-in (Task Pane)</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; }
+      header { background: #2f855a; color: white; padding: 10px 14px; font-weight: 700; }
+      main { padding: 12px; }
+      .log { font-size: 12px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; height: 200px; overflow: auto; }
+      .row { margin-bottom: 8px; }
+      input, button { padding: 6px 8px; }
+      button { background: #38a169; color: white; border: 0; border-radius: 8px; cursor: pointer; }
+      button:hover { filter: brightness(1.05); }
+    </style>
+  </head>
+  <body>
+    <header>RAMA Excel Add-in</header>
+    <main>
+      <div class="row">
+        <input id="addr" value="A1" />
+        <input id="val" value="Hola" />
+        <button id="write">Escribir</button>
+      </div>
+      <div class="row">
+        <button id="subscribe">Suscribirse a cambios</button>
+      </div>
+      <div class="log" id="log"></div>
+    </main>
+    <script>
+      const log = msg => { const el = document.getElementById('log'); el.textContent += `\n${new Date().toISOString()} ${msg}`; el.scrollTop = el.scrollHeight }
+      // Connect to MCP WebSocket broker if available
+      const wsUrl = (new URL(window.location.href)).searchParams.get('ws') || 'ws://127.0.0.1:4310/ws'
+      let ws
+      try {
+        ws = new WebSocket(wsUrl)
+        ws.onopen = () => {
+          log('WS connected to ' + wsUrl)
+          // auto-register if propertyId provided via query param
+          const qp = new URL(window.location.href).searchParams.get('propertyId')
+          if (qp) {
+            ws.send(JSON.stringify({ type: 'register', propertyId: qp }))
+            log('Auto-registered add-in for propertyId: ' + qp)
+          }
+        }
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data)
+            // rpc: { id, type:'rpc', method, params }
+            if (msg && msg.type === 'rpc') {
+              // Execute Excel action
+              (async () => {
+                try {
+                  let result = null
+                  if (msg.method === 'excel.get_range') {
+                    await Excel.run(async ctx => {
+                      const range = ctx.workbook.worksheets.getActiveWorksheet().getRange(msg.params.address || 'A1')
+                      range.load('values')
+                      await ctx.sync()
+                      result = { values: range.values }
+                    })
+                  } else if (msg.method === 'excel.set_range') {
+                    await Excel.run(async ctx => {
+                      const range = ctx.workbook.worksheets.getActiveWorksheet().getRange(msg.params.address || 'A1')
+                      range.values = msg.params.values || [[null]]
+                      await ctx.sync()
+                      result = { ok: true }
+                    })
+                  } else if (msg.method === 'excel.append_row') {
+                    // naive append: find used range and set next row
+                    await Excel.run(async ctx => {
+                      const sheet = ctx.workbook.worksheets.getActiveWorksheet()
+                      const used = sheet.getUsedRange()
+                      used.load('rowCount, columnCount')
+                      await ctx.sync()
+                      const next = sheet.getRangeByIndexes(used.rowCount, 0, 1, msg.params.values.length || 1)
+                      next.values = [msg.params.values || []]
+                      await ctx.sync()
+                      result = { ok: true }
+                    })
+                  }
+                  else if (msg.method === 'excel.inject_addresses') {
+                    // params: addressRange like A1:E10
+                    await Excel.run(async ctx => {
+                      const sheetName = 'RAMA_Addresses'
+                      // remove existing sheet if present
+                      try { ctx.workbook.worksheets.getItem(sheetName).delete(); await ctx.sync() } catch(e) {}
+                      const sheet = ctx.workbook.worksheets.add(sheetName)
+                      const addressRange = msg.params && msg.params.addressRange ? msg.params.addressRange : 'A1:E10'
+                      const active = ctx.workbook.worksheets.getActiveWorksheet()
+                      const rng = active.getRange(addressRange)
+                      rng.load('values,rowIndex,columnIndex,rowCount,columnCount')
+                      await ctx.sync()
+                      const vals = rng.values || []
+                      const rows = vals.length
+                      const cols = vals[0] ? vals[0].length : (rng.columnCount || 0)
+                      const out = []
+                      for (let r=0;r<rows;r++){
+                        const row = []
+                        for (let c=0;c<cols;c++){
+                          // compute column label
+                          let ci = rng.columnIndex + c
+                          let colLabel = ''
+                          while(ci >= 0){ colLabel = String.fromCharCode(65 + (ci % 26)) + colLabel; ci = Math.floor(ci/26)-1 }
+                          const addr = colLabel + (rng.rowIndex + r + 1)
+                          row.push(addr + ': ' + String(vals[r][c]))
+                        }
+                        out.push(row)
+                      }
+                      const dest = sheet.getRangeByIndexes(0,0,out.length,out[0] ? out[0].length : 1)
+                      dest.values = out
+                      sheet.activate()
+                      await ctx.sync()
+                      result = { ok: true, created: sheetName, rows: out.length }
+                    })
+                  }
+                  // send response
+                  ws.send(JSON.stringify({ type: 'response', id: msg.id, result }))
+                } catch (err) {
+                  ws.send(JSON.stringify({ type: 'response', id: msg.id, result: { error: String(err) } }))
+                }
+              })()
+            }
+          } catch (e) { console.error('WS parse', e) }
+        }
+
+        // Also support rpc method to inject Addresses sheet: { type:'rpc', method:'excel.inject_addresses', params: { addressRange: 'A1:E10' } }
+        // This allows the add-in to create a dedicated sheet with address labels and values visible inside the workbook.
+        // Will handle above in the same message handler when method matches.
+      } catch (e) {
+        log('WS connect failed: ' + String(e))
+      }
+
+      Office.onReady(() => {
+        log('Office ready')
+        document.getElementById('write').onclick = async () => {
+          const addr = document.getElementById('addr').value
+          const val = document.getElementById('val').value
+          try {
+            await Excel.run(async ctx => {
+              const range = ctx.workbook.worksheets.getActiveWorksheet().getRange(addr)
+              range.values = [[val]]
+              await ctx.sync()
+            })
+            log(`Escrito ${val} en ${addr}`)
+            window.parent?.postMessage({ source: 'rama-addin', type: 'cellChanged', address: addr, value: val, at: new Date().toISOString() }, '*')
+            if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'event', event: 'cellChanged', address: addr, value: val, at: new Date().toISOString() }))
+          } catch (e) { log('Error: ' + e.message) }
+        }
+
+        document.getElementById('subscribe').onclick = async () => {
+          try {
+            await Excel.run(async ctx => {
+              const ws = ctx.workbook.worksheets.getActiveWorksheet()
+              ws.onChanged.add(async (event) => {
+                window.parent?.postMessage({ source: 'rama-addin', type: 'cellChanged', address: event.address, at: new Date().toISOString() }, '*')
+              })
+              await ctx.sync()
+            })
+            log('Suscrito a cambios del worksheet')
+          } catch (e) { log('Error: ' + e.message) }
+        }
+      })
+    </script>
+  </body>
+  </html>
+
+

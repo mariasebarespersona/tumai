@@ -3,6 +3,7 @@ import env_loader  # loads .env first
 import base64, os, uuid, re, unicodedata, json
 from typing import Dict, Any
 from fastapi import FastAPI, UploadFile, Form, File
+import time
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
@@ -2091,6 +2092,107 @@ async def get_numbers_api(property_id: str, template_key: str | None = None):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+# ----------------- Realtime values (SQLite-backed) -----------------
+import sqlite3
+from pathlib import Path
+import json
+import asyncio
+
+_DB_PATH = os.path.join(os.path.dirname(__file__), "realtime_values.db")
+_QUEUES: dict = {}
+
+def _init_db():
+    conn = sqlite3.connect(_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS realtime_values (
+        property_id TEXT,
+        address TEXT,
+        value TEXT,
+        updated_at TEXT,
+        PRIMARY KEY(property_id, address)
+    )
+    """)
+    conn.commit()
+    conn.close()
+
+_init_db()
+
+def db_get_range(property_id: str, address_start: str, address_end: str | None = None):
+    # simplistic: return all values for property; filtering by range not implemented yet
+    conn = sqlite3.connect(_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT address, value FROM realtime_values WHERE property_id = ?", (property_id,))
+    rows = cur.fetchall()
+    conn.close()
+    return {r[0]: r[1] for r in rows}
+
+def db_set_value(property_id: str, address: str, value: str):
+    ts = time.strftime('%Y-%m-%dT%H:%M:%S')
+    conn = sqlite3.connect(_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("INSERT OR REPLACE INTO realtime_values(property_id,address,value,updated_at) VALUES(?,?,?,?)", (property_id, address, str(value), ts))
+    conn.commit()
+    conn.close()
+    # notify queues
+    q = _QUEUES.get(property_id)
+    if q:
+        try:
+            q.put_nowait(json.dumps({"type": "valueChanged", "property_id": property_id, "address": address, "value": value, "updated_at": ts}))
+        except Exception:
+            pass
+
+
+@app.get("/api/values")
+async def api_get_values(property_id: str, address_range: str | None = None):
+    try:
+        if not property_id:
+            return JSONResponse({"error": "property_id required"}, status_code=400)
+        data = db_get_range(property_id, 'A1', address_range)
+        # Return as values matrix by parsing addresses (simple A1.. mapping not full range parsing)
+        return JSONResponse({"ok": True, "data": data})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/values")
+async def api_set_value(property_id: str = Form(...), address: str = Form(...), value: str = Form(...)):
+    try:
+        db_set_value(property_id, address, value)
+        return JSONResponse({"ok": True, "address": address, "value": value})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get('/api/values/stream')
+async def values_stream(request: Request, property_id: str):
+    # Server-Sent Events stream for a property
+    if not property_id:
+        return JSONResponse({"error": "property_id required"}, status_code=400)
+
+    q = _QUEUES.get(property_id)
+    if not q:
+        q = asyncio.Queue()
+        _QUEUES[property_id] = q
+
+    async def event_generator():
+        try:
+            while True:
+                # If client disconnected, exit
+                if await request.is_disconnected():
+                    break
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {item}\n\n"
+                except asyncio.TimeoutError:
+                    # send a comment to keep connection alive
+                    yield ': keepalive\n\n'
+        finally:
+            return
+
+    return StreamingResponse(event_generator(), media_type='text/event-stream')
+
 @app.post("/numbers/compute")
 async def numbers_compute(property_id: str = Form(...)):
     try:
@@ -2117,6 +2219,17 @@ async def numbers_whatif(property_id: str = Form(...), deltas_json: str = Form(.
         import json
         deltas = json.loads(deltas_json)
         out = numbers_what_if(property_id, deltas, name)
+        return JSONResponse(out)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/clear")
+async def clear_numbers_api(property_id: str = Form(...)):
+    """Clear all numbers for a property (dev helper)."""
+    try:
+        from tools.numbers_tools import clear_numbers
+        out = clear_numbers(property_id)
         return JSONResponse(out)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

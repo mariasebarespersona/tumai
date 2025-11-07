@@ -508,6 +508,48 @@ npm run dev
 # Next.js app at http://localhost:3000
 ```
 
+## Web (Next.js) — Excel/MCP Dev
+
+Run these in separate terminals during local development:
+
+- Next.js frontend:
+```bash
+cd web
+npm install
+npm run dev
+```
+
+- MCP server (JSON-RPC):
+```bash
+MCP_MODE=OFFICEJS node packages/mcp-server/server.js
+# or GRAPH mode to proxy to Next API routes
+# MCP_MODE=GRAPH node packages/mcp-server/server.js
+```
+
+- Excel add-in (static dev server):
+```bash
+python3 -m http.server 4300 -d packages/excel-addin/public
+# then sideload the panel at http://127.0.0.1:4300/panel.html (see docs/EXCEL_ADDIN_SETUP.md)
+```
+
+Environment (web/.env.local):
+```
+NEXT_PUBLIC_MCP_URL=http://127.0.0.1:4310/jsonrpc
+EXCEL_FILE_ID=
+# Optional embed URLs if you use the iframe panel in chat
+NEXT_PUBLIC_EXCEL_EMBED_R2B=
+NEXT_PUBLIC_EXCEL_EMBED_R2B_PM=
+NEXT_PUBLIC_EXCEL_EMBED_R2B_PM_VENTA=
+NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=
+```
+
+Docs:
+- docs/EXCEL_ADDIN_SETUP.md
+- docs/MCP_TOOLS.md
+- docs/GRAPH_MODE.md
+- docs/DECISIONS.md
+- docs/QA_SCRIPT.md
+
 ---
 
 ## 📖 User Guide

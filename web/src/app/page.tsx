@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { mcpExcel } from '@/lib/mcp/client'
+import Spreadsheet from '@/components/Spreadsheet'
 import type { DragEvent } from 'react'
 // Removed EditableExcel import - using iframe instead
 
@@ -20,6 +22,7 @@ export default function ChatPage() {
   const [propertyId, setPropertyId] = useState<string | null>(null) // Track current property_id
   const [propertyName, setPropertyName] = useState<string | null>(null) // Track property name for display
   const [excelTemplate, setExcelTemplate] = useState<string | null>(null)
+  const [toolLogs, setToolLogs] = useState<Array<{tool:string,args:any,ms:number,mode:string,result:any}>>([])
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -87,7 +90,70 @@ export default function ChatPage() {
     if (dropped.length) setFiles(prev => [...prev, ...dropped])
   }, [])
 
+  
+
+  async function writeCell(address: string, value: any) {
+    try {
+      // DB write (real-time model)
+      await fetch(`${BACKEND_URL}/api/values`, {
+        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ property_id: propertyId || '', address, value: String(value) })
+      })
+    } catch {}
+    try {
+      // Graph write (mock/real)
+      await fetch(`/api/excel/setRange`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, values: [[value]], worksheet: 'Sheet1' })
+      })
+    } catch {}
+    try { await loadAddresses() } catch {}
+    setExcelRefreshKey(Date.now())
+  }
+
   const onSend = useCallback(async () => {
+    // Intercept direct cell commands when Excel panel is active
+    if (excelTemplate) {
+      try {
+        const text = String(input || '')
+        // Supported: "pon 1000 en D2", "pon D2 a 1000", "escribe 1000 en D2"
+        const patterns = [
+          /pon\s+([\d.,]+)\s+en\s+([A-Za-z]+\d+)/i,
+          /pon\s+([A-Za-z]+\d+)\s+a\s+([\d.,]+)/i,
+          /escribe\s+([\d.,]+)\s+en\s+([A-Za-z]+\d+)/i,
+          /pon(?:\s+el)?\s*valor\s+([\d.,]+)\s+en\s+la\s*casilla\s+([A-Za-z]+\d+)/i,
+        ]
+        let addr: string | null = null
+        let raw: string | null = null
+        for (const rx of patterns) {
+          const m = text.match(rx)
+          if (m) {
+            // m could be (value, addr) or (addr, value)
+            const a = /[A-Za-z]+\d+/.test(m[1]) ? m[1] : m[2]
+            const v = /[A-Za-z]+\d+/.test(m[1]) ? m[2] : m[1]
+            addr = a.toUpperCase()
+            raw = v
+            break
+          }
+        }
+        if (addr && raw) {
+          const num = Number(raw.replace(',', '.'))
+          const valueToWrite = isNaN(num) ? raw : num
+          setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: input }])
+          setInput('')
+          try {
+            await writeCell(addr, valueToWrite)
+            setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `✅ He escrito ${valueToWrite} en ${addr}` }])
+          } catch (e) {
+            setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `❌ Error escribiendo ${addr}: ${String(e)}` }])
+          }
+          return
+        }
+      } catch (e) {
+        console.error('cell command intercept error', e)
+      }
+    }
+
     if (!input.trim() && files.length === 0) return
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: input }
     setMessages(prev => [...prev, userMessage])
@@ -96,10 +162,7 @@ export default function ChatPage() {
     const form = new FormData()
     form.append('text', userMessage.content)
     form.append('session_id', 'web-ui')
-    // Include property_id if we have one
-    if (propertyId) {
-      form.append('property_id', propertyId)
-    }
+    if (propertyId) form.append('property_id', propertyId)
     for (const f of files) form.append('files', f)
     setUploading(true)
     try {
@@ -108,10 +171,21 @@ export default function ChatPage() {
       if (!resp.ok) throw new Error(data?.error || 'Request failed')
       const answer = String(data?.answer ?? '')
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
+      // Post-process: if assistant confirms a write, perform it for real
+      try {
+        // ejemplos: "valor de 1000 ha sido establecido en la celda D2"
+        const m = answer.match(/valor\s+de\s+([\d.,]+).*?celda\s+([A-Za-z]+\d+)/i)
+        if (m) {
+          const raw = m[1]
+          const addr = m[2].toUpperCase()
+          const num = Number(raw.replace(',', '.'))
+          const valueToWrite = isNaN(num) ? raw : num
+          await writeCell(addr, valueToWrite)
+        }
+      } catch {}
+
       // Detect numbers template confirmation → open Excel panel
       try {
-        // Match "✅ Usaremos la plantilla de Números: [template]" or "Usaremos la plantilla de Números: [template]"
-        // Also match variations like "Ya hemos establecido la plantilla de Números como [template]"
         const patterns = [
           /✅?\s*Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
           /Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
@@ -120,24 +194,14 @@ export default function ChatPage() {
         ]
         for (const pattern of patterns) {
           const m = answer.match(pattern)
-          if (m && m[1]) {
-            const template = m[1].trim()
-            setExcelTemplate(template)
-            console.log('[Frontend] Excel template detected:', template)
-            break
-          }
+          if (m && m[1]) { setExcelTemplate(m[1].trim()); break }
         }
       } catch {}
-      
-      // Update property_id if backend sent it back
+
       if (data.property_id) {
         setPropertyId(data.property_id)
-        // Use property_name from backend directly
-        if (data.property_name) {
-          setPropertyName(data.property_name)
-        }
+        if (data.property_name) setPropertyName(data.property_name)
       }
-      
       setFiles([])
     } catch (e: any) {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Error: ${e?.message || String(e)}` }])
@@ -145,6 +209,232 @@ export default function ChatPage() {
       setUploading(false)
     }
   }, [input, files, propertyId])
+
+  // Quick actions: Excel MCP tools
+  const quickGetRange = useCallback(async () => {
+    const t0 = Date.now()
+    const result = await mcpExcel.getRange('A1:B10', undefined, propertyId || undefined)
+    setToolLogs(prev => [{ tool: 'excel.get_range', args: { address: 'A1:B10' }, ms: result.ms || (Date.now()-t0), mode: result.mode, result }, ...prev])
+    // Prepare human-friendly output
+    let content = ''
+    if (!result.ok) {
+      content = `Leer rango A1:B10 → ERROR: ${result.error?.message || 'unknown'}`
+    } else {
+      const data = (result as any).data
+      if (data && data.values) {
+        content = `Leer rango A1:B10 → OK (${result.mode}, ${result.ms}ms)\n` + data.values.map((r: any[]) => r.join(' | ')).join('\n')
+      } else if (data && data.values === undefined && data) {
+        content = `Leer rango A1:B10 → OK (${result.mode}, ${result.ms}ms)\n` + JSON.stringify(data)
+      } else {
+        content = `Leer rango A1:B10 → OK (${result.mode}, ${result.ms}ms) - no data returned` 
+      }
+    }
+    setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content }])
+  }, [propertyId])
+
+  // Address inspector for Excel iframe: show addresses and values for a range
+  const [showAddresses, setShowAddresses] = useState(true)
+  const [addressRange, setAddressRange] = useState('A1:E10')
+  const [addressesData, setAddressesData] = useState<any[][] | null>(null)
+  const [addressesLoading, setAddressesLoading] = useState(false)
+  const [addressesError, setAddressesError] = useState<string | null>(null)
+  const [selectedCell, setSelectedCell] = useState<string | null>(null)
+  const [excelRefreshKey, setExcelRefreshKey] = useState<number>(0)
+  const [worksheetName] = useState<string>('Sheet1')
+
+  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const [zoom, setZoom] = useState<number>(0.85) // 85% default
+  const BASE_W = 1600
+  const BASE_H = 1000
+
+  const loadAddresses = useCallback(async () => {
+    if (!propertyId) {
+      setAddressesError('No hay propertyId seleccionado')
+      return
+    }
+    try {
+      setAddressesLoading(true)
+      setAddressesError(null)
+      console.log('[Addresses] loading range', addressRange, 'for', propertyId)
+      // Prefer DB-backed API
+      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(addressRange)}`)
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        setAddressesError(`API error: ${resp.status} ${text.slice(0,200)}`)
+        setAddressesData(null)
+        return
+      }
+      const contentType = resp.headers.get('content-type') || ''
+      let payload
+      if (!contentType.includes('application/json')) {
+        const text = await resp.text().catch(() => '')
+        setAddressesError(`Invalid JSON response: ${text.slice(0,200)}`)
+        setAddressesData(null)
+        return
+      }
+      payload = await resp.json()
+      console.log('[Addresses] db result', payload)
+      if (payload?.ok && payload?.data) {
+        // payload.data is map address->value; convert to matrix for display
+        const parsed = parseRange(addressRange) || { startCol: 0, startRow: 1, colCount: 5, rowCount: 10 }
+        const rows: any[][] = []
+        for (let r = 0; r < parsed.rowCount; r++) {
+          const row: any[] = []
+          for (let c = 0; c < parsed.colCount; c++) {
+            const col = colLabel(parsed.startCol + c)
+            const addr = `${col}${parsed.startRow + r}`
+            row.push(payload.data[addr] ?? '')
+          }
+          rows.push(row)
+        }
+        setAddressesData(rows)
+      } else {
+        // fallback to MCP getRange
+        const res = await mcpExcel.getRange(addressRange, undefined, propertyId)
+        console.log('[Addresses] mcp result', res)
+        if (res.ok && res.data && res.data.values) {
+          setAddressesData(res.data.values)
+        } else {
+          setAddressesData(null)
+          setAddressesError(res.error?.message || 'No data returned')
+        }
+      }
+    } catch (e: any) {
+      console.error('[Addresses] error', e)
+      setAddressesError(String(e?.message || e))
+      setAddressesData(null)
+    } finally {
+      setAddressesLoading(false)
+    }
+  }, [addressRange, propertyId])
+
+  // Auto-show addresses by default when Excel panel/template is active
+  // Always show addresses by default when propertyId is available; reload when propertyId changes
+  useEffect(() => {
+    setShowAddresses(true)
+    if (propertyId) loadAddresses()
+  }, [propertyId, loadAddresses])
+
+  // SSE realtime updates from backend
+  useEffect(() => {
+    if (!propertyId) return
+    const url = `${BACKEND_URL}/api/values/stream?property_id=${encodeURIComponent(propertyId)}`
+    const es = new EventSource(url)
+    es.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data || '{}')
+        if (msg && msg.type === 'valueChanged') {
+          // If the changed address is inside the current range, patch the matrix
+          const parsed = parseRange(addressRange)
+          if (!parsed || !addressesData) return
+          const { startCol, startRow, colCount, rowCount } = parsed
+          const [m, rstr] = [msg.address.match(/^([A-Za-z]+)(\d+)$/), msg.address]
+          if (!m) return
+          const col = m[1].toUpperCase()
+          const row = parseInt(m[2], 10)
+          // convert col to index
+          let colIdx = 0
+          for (let i = 0; i < col.length; i++) colIdx = colIdx*26 + (col.charCodeAt(i)-64)
+          colIdx -= 1
+          if (row >= startRow && row < startRow + rowCount && colIdx >= startCol && colIdx < startCol + colCount) {
+            const r = row - startRow
+            const c = colIdx - startCol
+            setAddressesData(prev => {
+              if (!prev) return prev
+              const next = prev.map(row => row.slice())
+              if (next[r]) next[r][c] = msg.value
+              return next
+            })
+            setExcelRefreshKey(Date.now())
+          }
+        }
+      } catch {}
+    }
+    es.onerror = () => {}
+    return () => { try { es.close() } catch {} }
+  }, [propertyId, addressRange, addressesData])
+
+  // helper: convert zero-based column index to Excel column label (A, B, ..., Z, AA, AB, ...)
+  const colLabel = (idx: number) => {
+    let s = ''
+    let i = idx
+    while (i >= 0) {
+      s = String.fromCharCode(65 + (i % 26)) + s
+      i = Math.floor(i / 26) - 1
+    }
+    return s
+  }
+
+  // parse addressRange like A1:E10 into startColIndex (0-based) and startRow (1-based) and colCount, rowCount
+  const parseRange = (range: string) => {
+    try {
+      const parts = range.split(':')
+      const parseCell = (c: string) => {
+        const m = c.match(/^([A-Za-z]+)(\d+)$/)
+        if (!m) return null
+        const col = m[1].toUpperCase()
+        const row = parseInt(m[2], 10)
+        // convert col letters to index
+        let idx = 0
+        for (let i = 0; i < col.length; i++) {
+          idx = idx * 26 + (col.charCodeAt(i) - 64)
+        }
+        return { colIndex: idx - 1, row }
+      }
+      const a = parseCell(parts[0])
+      const b = parts[1] ? parseCell(parts[1]) : null
+      if (!a) return null
+      const startCol = a.colIndex
+      const startRow = a.row
+      const endCol = b ? b.colIndex : startCol
+      const endRow = b ? b.row : startRow
+      return { startCol, startRow, colCount: endCol - startCol + 1, rowCount: endRow - startRow + 1 }
+    } catch (e) {
+      return null
+    }
+  }
+
+  const setCellValue = useCallback(async (addr: string) => {
+    setSelectedCell(addr)
+    const v = window.prompt(`Valor para ${addr}`)
+    if (v === null) return
+    const parsed = Number(String(v).replace(',', '.'))
+    const valueToWrite = isNaN(parsed) ? v : parsed
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/values`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ property_id: propertyId || '', address: addr, value: String(valueToWrite) })
+      })
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `❌ Error escribiendo ${addr}: ${resp.status} ${text.slice(0,200)}` }])
+      } else {
+        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `✅ He escrito ${valueToWrite} en ${addr}` }])
+        await loadAddresses()
+      }
+    } catch (e) {
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `❌ Error escribiendo ${addr}: ${String(e)}` }])
+    }
+  }, [propertyId, loadAddresses])
+  const quickSetA1 = useCallback(async () => {
+    const t0 = Date.now()
+    const result = await mcpExcel.setRange('A1', 'Hola RAMA', undefined, propertyId || undefined)
+    setToolLogs(prev => [{ tool: 'excel.set_range', args: { address: 'A1', values: 'Hola RAMA' }, ms: result.ms || (Date.now()-t0), mode: result.mode, result }, ...prev])
+    const data = (result as any).data
+    const content = result.ok ? `Escribir A1 → OK (${result.mode}, ${result.ms}ms) ${data ? JSON.stringify(data) : ''}` : `Escribir A1 → ERROR: ${result.error?.message || 'unknown'}`
+    setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content }])
+  }, [propertyId])
+  const quickAppend = useCallback(async () => {
+    const t0 = Date.now()
+    const result = await mcpExcel.appendRow('Tabla1', ['Nueva fila', Date.now()], undefined, propertyId || undefined)
+    setToolLogs(prev => [{ tool: 'excel.append_row', args: { tableName: 'Tabla1', values: ['Nueva fila', Date.now()] }, ms: result.ms || (Date.now()-t0), mode: result.mode, result }, ...prev])
+    const data = (result as any).data
+    const content = result.ok ? `Añadir fila a Tabla1 → OK (${result.mode}, ${result.ms}ms) ${data ? JSON.stringify(data) : ''}` : `Añadir fila a Tabla1 → ERROR: ${result.error?.message || 'unknown'}`
+    setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content }])
+  }, [propertyId])
+  // clearOldTemplate removed per request
 
   const startRecording = useCallback(async () => {
     if (isRecording) return
@@ -470,6 +760,25 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
               <span>🔗</span>
               <span>Abrir en pestaña</span>
             </a>
+            <div className="hidden md:flex items-center gap-1 bg-white/20 rounded-lg px-1 py-0.5">
+              <button onClick={() => setZoom(z => Math.max(0.4, Math.round((z-0.1)*100)/100))} className="px-2 py-1 text-white/90 hover:text-white">−</button>
+              <button onClick={() => setZoom(1)} className="px-2 py-1 text-white/90 hover:text-white">100%</button>
+              <button onClick={() => {
+                const box = panelRef.current
+                if (!box) return
+                const w = box.clientWidth - 24
+                const h = box.clientHeight - 24
+                const fit = Math.min(w/BASE_W, h/BASE_H)
+                setZoom(Math.max(0.4, Math.min(1.2, Math.round(fit*100)/100)))
+              }} className="px-2 py-1 text-white/90 hover:text-white">Ajustar</button>
+              <button onClick={() => setZoom(z => Math.min(1.2, Math.round((z+0.1)*100)/100))} className="px-2 py-1 text-white/90 hover:text-white">＋</button>
+            </div>
+            <button 
+              onClick={() => setExcelRefreshKey(Date.now())}
+              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105"
+            >
+              ↻ Recargar
+            </button>
             <button 
               onClick={() => setExcelTemplate(null)} 
               className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105"
@@ -480,18 +789,57 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
         </div>
         
         {/* Excel iframe - shows actual Excel from OneDrive */}
-        <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
+          <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
           <div className="absolute top-2 right-2 z-10 px-3 py-1.5 rounded-lg bg-[color:var(--c-green-100)] text-[color:var(--c-green-800)] text-xs font-semibold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[color:var(--c-green-500)] animate-pulse"></span>
             <span>Sincronizado</span>
           </div>
+          {/** Replace iframe with in-app Spreadsheet for realtime editing */}
           {excelUrl ? (
-            <iframe
-              src={excelUrl}
-              className="w-full h-[70vh] border-0"
-              allowFullScreen
-              title={`Excel ${excelTemplate}`}
-            />
+            <div className="relative w-full h-[70vh]" ref={panelRef}>
+              <div className="w-full h-full overflow-auto">
+                <div className="relative" style={{ width: `${Math.round(BASE_W*zoom)}px`, height: `${Math.round(BASE_H*zoom)}px` }}>
+                  <iframe
+                    src={`${excelUrl}${excelUrl.includes('?') ? '&' : '?'}t=${excelRefreshKey}`}
+                    width={BASE_W}
+                    height={BASE_H}
+                    style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', display: 'block' }}
+                    className="border-0"
+                    allowFullScreen
+                    title={`Excel ${excelTemplate}`}
+                  />
+                  {/* Overlay aligned to scaled content */}
+                  <div
+                    className="absolute inset-0"
+                    style={{ background: 'transparent', pointerEvents: 'auto' }}
+                    onClick={(e) => {
+                      try {
+                        if (!addressesData || addressesData.length === 0) return
+                        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+                        const x = e.clientX - rect.left
+                        const y = e.clientY - rect.top
+                        const parsed = parseRange(addressRange) || { startCol: 0, startRow: 1, colCount: (addressesData[0]?.length || 1), rowCount: (addressesData.length || 1) }
+                        const cols = parsed.colCount || (addressesData[0]?.length || 1)
+                        const rows = parsed.rowCount || (addressesData.length || 1)
+                        const colW = rect.width / Math.max(cols,1)
+                        const rowH = rect.height / Math.max(rows,1)
+                        let cIdx = Math.min(Math.max(Math.floor(x / colW), 0), cols-1)
+                        let rIdx = Math.min(Math.max(Math.floor(y / rowH), 0), rows-1)
+                        const toCol = (n:number) => {
+                          let s = ''
+                          let i = (parsed.startCol + n)
+                          while (i >= 0) { s = String.fromCharCode(65 + (i % 26)) + s; i = Math.floor(i / 26) - 1 }
+                          return s
+                        }
+                        const addr = `${toCol(cIdx)}${parsed.startRow + rIdx}`
+                        setSelectedCell(addr)
+                        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
+                      } catch {}
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="flex items-center justify-center h-full text-[color:var(--c-green-700)]">
               <div className="text-center p-8">
@@ -514,7 +862,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
         </div>
       </div>
     )
-  }, [excelTemplate, excelUrl])
+  }, [excelTemplate, excelUrl, excelRefreshKey])
 
   // Layout: two columns when Excel is open, single column otherwise
   const hasExcel = !!excelTemplate
@@ -539,9 +887,36 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
         )}
         
         {/* Chat area - Right side when Excel is open (smaller), full width otherwise */}
-        <div className={`${hasExcel ? 'flex-[2] flex-shrink-0' : 'flex-1'} flex flex-col`}>
+        <div className={`${hasExcel ? 'flex-[2] flex-shrink-0 h-[70vh]' : 'flex-1'} flex flex-col min-h-0`}>
           <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-6 glass nature-shadow-lg scrollbar-thin">
             {!hasExcel && ExcelPanel}
+            {hasExcel && (
+              <>
+                {/* Quick actions for MCP excel tools (visible only when completing a Numbers template) */}
+                <div className="mb-4 flex flex-wrap gap-2 items-center">
+                  <button onClick={quickGetRange} className="rounded-xl px-3 py-1.5 bg-[color:var(--c-green-600)] text-white text-sm font-semibold">Leer A1:B10</button>
+                  <button onClick={quickSetA1} className="rounded-xl px-3 py-1.5 bg-[color:var(--c-green-600)] text-white text-sm font-semibold">Escribir A1</button>
+                  <button onClick={quickAppend} className="rounded-xl px-3 py-1.5 bg-[color:var(--c-green-600)] text-white text-sm font-semibold">Añadir fila a Tabla1</button>
+                  {selectedCell && (
+                    <div className="ml-3 px-3 py-1 rounded bg-[color:var(--c-green-50)] text-[color:var(--c-green-700)] font-medium">Seleccionada: {selectedCell}</div>
+                  )}
+                </div>
+
+                {toolLogs.length > 0 && (
+                  <div className="mb-4 rounded-2xl border-2 border-[color:var(--c-green-200)] bg-white p-3 text-xs text-[color:var(--c-green-900)]">
+                    <div className="font-bold mb-1">Logs de tools</div>
+                    <div className="space-y-2 max-h-48 overflow-auto">
+                      {toolLogs.map((l, i) => (
+                        <div key={i} className="border-b last:border-b-0 pb-1">
+                          <div className="font-semibold">{l.tool} <span className="opacity-70">({l.mode}, {l.ms}ms)</span></div>
+                          <div className="opacity-80">args: {JSON.stringify(l.args)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
             {messages.length === 0 ? (
           <div className="text-center text-[color:var(--c-green-800)]">
             <div className="mb-4 text-5xl animate-pulse-soft">🌾</div>
@@ -695,12 +1070,13 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                   {filePreviews}
                 </div>
               )}
+              {/* removed inspector of addresses to show only the real Excel */}
             </div>
           )}
           
           {/* Composer - Inside chat area when Excel is open */}
           {hasExcel && (
-            <div className="mt-3 flex items-end gap-2 rounded-2xl p-3 glass-strong nature-shadow-lg">
+            <div className="sticky bottom-0 mt-3 flex items-end gap-2 rounded-2xl p-3 glass-strong nature-shadow-lg backdrop-blur bg-white/60">
               <button
                 onMouseDown={startRecording}
                 onMouseUp={stopRecording}
