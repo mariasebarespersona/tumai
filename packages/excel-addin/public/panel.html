@@ -20,6 +20,10 @@
     <header>RAMA Excel Add-in</header>
     <main>
       <div class="row">
+        <input id="prop" placeholder="propertyId" style="width: 60%" />
+        <button id="register">Registrar</button>
+      </div>
+      <div class="row">
         <input id="addr" value="A1" />
         <input id="val" value="Hola" />
         <button id="write">Escribir</button>
@@ -135,6 +139,14 @@
 
       Office.onReady(() => {
         log('Office ready')
+        // manual registration for propertyId
+        document.getElementById('register').onclick = () => {
+          const pid = document.getElementById('prop').value
+          if (ws && ws.readyState === WebSocket.OPEN && pid) {
+            ws.send(JSON.stringify({ type: 'register', propertyId: pid }))
+            log('Registered propertyId: ' + pid)
+          }
+        }
         document.getElementById('write').onclick = async () => {
           const addr = document.getElementById('addr').value
           const val = document.getElementById('val').value
@@ -156,6 +168,11 @@
               const ws = ctx.workbook.worksheets.getActiveWorksheet()
               ws.onChanged.add(async (event) => {
                 window.parent?.postMessage({ source: 'rama-addin', type: 'cellChanged', address: event.address, at: new Date().toISOString() }, '*')
+              })
+              ws.onSelectionChanged.add(async (event) => {
+                const addr = event.address
+                window.parent?.postMessage({ source: 'rama-addin', type: 'selection', address: addr, at: new Date().toISOString() }, '*')
+                if (window.ws && window.ws.readyState === WebSocket.OPEN) window.ws.send(JSON.stringify({ type: 'event', event: 'selection', address: addr, at: new Date().toISOString() }))
               })
               await ctx.sync()
             })
