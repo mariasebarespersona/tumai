@@ -10,14 +10,14 @@
   <HighResolutionIconUrl DefaultValue="https://localhost/icon-80.png" />
   <SupportUrl DefaultValue="https://example.com" />
   <AppDomains>
-    <AppDomain>http://127.0.0.1:4300</AppDomain>
+    <AppDomain>https://hisako-largish-nontabularly.ngrok-free.dev</AppDomain>
     <AppDomain>https://appsforoffice.microsoft.com</AppDomain>
   </AppDomains>
   <Hosts>
     <Host Name="Workbook" />
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="http://127.0.0.1:4300/panel.html" />
+    <SourceLocation DefaultValue="https://hisako-largish-nontabularly.ngrok-free.dev/panel.html" />
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0">
@@ -57,11 +57,11 @@
     </Hosts>
     <Resources>
       <bt:Images xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0">
-        <bt:Image id="icon16" DefaultValue="https://localhost/icon-16.png" />
+        <bt:Image id="icon16" DefaultValue="https://hisako-largish-nontabularly.ngrok-free.dev/icon-16.png" />
       </bt:Images>
       <bt:Urls xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0">
-        <bt:Url id="residTaskPaneUrl" DefaultValue="http://127.0.0.1:4300/panel.html" />
-        <bt:Url id="residFunctionFile" DefaultValue="http://127.0.0.1:4300/panel.html" />
+        <bt:Url id="residTaskPaneUrl" DefaultValue="https://hisako-largish-nontabularly.ngrok-free.dev/panel.html" />
+        <bt:Url id="residFunctionFile" DefaultValue="https://hisako-largish-nontabularly.ngrok-free.dev/panel.html" />
         <bt:Url id="residLearnMoreUrl" DefaultValue="https://example.com" />
       </bt:Urls>
       <bt:ShortStrings xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0">
