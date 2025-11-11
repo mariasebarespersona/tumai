@@ -262,9 +262,22 @@ export default function ChatPage() {
       setAddressesLoading(true)
       setAddressesError(null)
       console.log('[Addresses] loading range', addressRange, 'for', propertyId)
-      // Prefer DB-backed API
       // Compute effective range including header row/col if user specified
-      let effectiveRange = addressRange\n+      try {\n+        const parsedOriginal = parseRange(addressRange)\n+        if (parsedOriginal) {\n+          const endColIndex = parsedOriginal.startCol + parsedOriginal.colCount - 1\n+          const endRow = parsedOriginal.startRow + parsedOriginal.rowCount - 1\n+          const endColLabel = colLabel(endColIndex)\n+          // use header inputs if provided\n+          const startColLabel = (headerColInput || colLabel(parsedOriginal.startCol)).toUpperCase()\n+          const startRowNum = Number(headerRowInput) || parsedOriginal.startRow\n+          effectiveRange = `${startColLabel}${startRowNum}:${endColLabel}${endRow}`\n+        }\n+      } catch (e) {}\n+\n+      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(effectiveRange)}`)
+      let effectiveRange = addressRange;
+      try {
+        const parsedOriginal = parseRange(addressRange)
+        if (parsedOriginal) {
+          const endColIndex = parsedOriginal.startCol + parsedOriginal.colCount - 1
+          const endRow = parsedOriginal.startRow + parsedOriginal.rowCount - 1
+          const endColLabel = colLabel(endColIndex)
+          // use header inputs if provided
+          const startColLabel = (headerColInput || colLabel(parsedOriginal.startCol)).toUpperCase()
+          const startRowNum = Number(headerRowInput) || parsedOriginal.startRow
+          effectiveRange = `${startColLabel}${startRowNum}:${endColLabel}${endRow}`
+        }
+      } catch (e) {}
+
+      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(effectiveRange)}`)
       if (!resp.ok) {
         const text = await resp.text().catch(() => '')
         setAddressesError(`API error: ${resp.status} ${text.slice(0,200)}`)
@@ -397,6 +410,67 @@ export default function ChatPage() {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `⚠️ Error sincronizando con Excel: ${String(e)}` }])
     }
   }
+
+  // Automatically detect header row and column from the fetched data
+  const detectHeaders = useCallback(async () => {
+    if (!propertyId) {
+      setAddressesError('No hay propertyId seleccionado')
+      return
+    }
+    try {
+      const parsed = parseRange(addressRange)
+      if (!parsed) {
+        setAddressesError('Rango inválido para detectar cabeceras')
+        return
+      }
+      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(addressRange)}`)
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        setAddressesError(`API error: ${resp.status} ${text.slice(0,200)}`)
+        return
+      }
+      const payload = await resp.json()
+      if (!(payload?.ok && payload?.data)) {
+        setAddressesError('No se obtuvieron datos para detectar cabeceras')
+        return
+      }
+      const dataMap = payload.data || {}
+      const { startCol, startRow, colCount, rowCount } = parsed
+      // helper to get value at row/col index (0-based)
+      const getVal = (rIdx: number, cIdx: number) => {
+        const col = colLabel(startCol + cIdx)
+        const addr = `${col}${startRow + rIdx}`
+        return dataMap[addr]
+      }
+      const isLabel = (v: any) => (typeof v === 'string' && v.trim() !== '' && isNaN(Number(String(v).replace(',', '.'))))
+      // detect header row: find first row with at least one label-like value
+      let detectedRow = null
+      for (let r = 0; r < rowCount; r++) {
+        let found = false
+        for (let c = 0; c < colCount; c++) {
+          const v = getVal(r, c)
+          if (isLabel(v)) { found = true; break }
+        }
+        if (found) { detectedRow = startRow + r; break }
+      }
+      // detect header col: find first column with at least one label-like value
+      let detectedColIdx = null
+      for (let c = 0; c < colCount; c++) {
+        let found = false
+        for (let r = 0; r < rowCount; r++) {
+          const v = getVal(r, c)
+          if (isLabel(v)) { found = true; break }
+        }
+        if (found) { detectedColIdx = startCol + c; break }
+      }
+      if (detectedRow) setHeaderRowInput(String(detectedRow))
+      if (detectedColIdx !== null) setHeaderColInput(colLabel(detectedColIdx))
+      // reload addresses to apply headers
+      await loadAddresses()
+    } catch (e:any) {
+      setAddressesError(String(e?.message || e))
+    }
+  }, [addressRange, propertyId, loadAddresses])
 
   // helper: convert zero-based column index to Excel column label (A, B, ..., Z, AA, AB, ...)
   const colLabel = (idx: number) => {
@@ -869,6 +943,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
               <div className="px-4 py-2 bg-white border-t flex gap-2 items-center flex-wrap">
                 <input value={addressRange} onChange={(e) => setAddressRange(e.target.value)} className="border px-2 py-1 rounded" />
                 <button onClick={loadAddresses} className="px-3 py-1 rounded bg-[color:var(--c-green-600)] text-white">Cargar</button>
+                <button onClick={detectHeaders} className="px-3 py-1 rounded border bg-white text-[color:var(--c-green-700)]">Detect headers</button>
                 <div className="flex items-center gap-2">
                   <label className="text-sm">Header row:</label>
                   <input value={headerRowInput} onChange={(e)=>setHeaderRowInput(e.target.value)} className="border px-2 py-1 rounded w-20" />
