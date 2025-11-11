@@ -108,6 +108,8 @@ export default function ChatPage() {
       })
     } catch {}
     try { await loadAddresses() } catch {}
+    // give Graph a moment to persist and propagate
+    await new Promise(res => setTimeout(res, 800))
     setExcelRefreshKey(Date.now())
   }
 
@@ -712,7 +714,15 @@ export default function ChatPage() {
       'Promoción': process.env.NEXT_PUBLIC_EXCEL_EMBED_PROMOCION,
       'Promocion': process.env.NEXT_PUBLIC_EXCEL_EMBED_PROMOCION,
     }
-    return map[excelTemplate] || ''
+    const raw = map[excelTemplate] || ''
+    if (!raw) return ''
+    try {
+      const u = new URL(raw)
+      u.searchParams.set('wdAllowInteractivity', 'True')
+      return u.toString()
+    } catch {
+      return raw.replace(/wdAllowInteractivity=\w+/i, 'wdAllowInteractivity=True')
+    }
   }, [excelTemplate])
 
   const ExcelPanel = useMemo(() => {
@@ -796,48 +806,27 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
           </div>
           {/** Replace iframe with in-app Spreadsheet for realtime editing */}
           {excelUrl ? (
-            <div className="relative w-full h-[70vh]" ref={panelRef}>
-              <div className="w-full h-full overflow-auto">
-                <div className="relative" style={{ width: `${Math.round(BASE_W*zoom)}px`, height: `${Math.round(BASE_H*zoom)}px` }}>
-                  <iframe
-                    src={`${excelUrl}${excelUrl.includes('?') ? '&' : '?'}t=${excelRefreshKey}`}
-                    width={BASE_W}
-                    height={BASE_H}
-                    style={{ transform: `scale(${zoom})`, transformOrigin: 'top left', display: 'block' }}
-                    className="border-0"
-                    allowFullScreen
-                    title={`Excel ${excelTemplate}`}
-                  />
-                  {/* Overlay aligned to scaled content */}
-                  <div
-                    className="absolute inset-0"
-                    style={{ background: 'transparent', pointerEvents: 'auto' }}
-                    onClick={(e) => {
-                      try {
-                        if (!addressesData || addressesData.length === 0) return
-                        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-                        const x = e.clientX - rect.left
-                        const y = e.clientY - rect.top
-                        const parsed = parseRange(addressRange) || { startCol: 0, startRow: 1, colCount: (addressesData[0]?.length || 1), rowCount: (addressesData.length || 1) }
-                        const cols = parsed.colCount || (addressesData[0]?.length || 1)
-                        const rows = parsed.rowCount || (addressesData.length || 1)
-                        const colW = rect.width / Math.max(cols,1)
-                        const rowH = rect.height / Math.max(rows,1)
-                        let cIdx = Math.min(Math.max(Math.floor(x / colW), 0), cols-1)
-                        let rIdx = Math.min(Math.max(Math.floor(y / rowH), 0), rows-1)
-                        const toCol = (n:number) => {
-                          let s = ''
-                          let i = (parsed.startCol + n)
-                          while (i >= 0) { s = String.fromCharCode(65 + (i % 26)) + s; i = Math.floor(i / 26) - 1 }
-                          return s
-                        }
-                        const addr = `${toCol(cIdx)}${parsed.startRow + rIdx}`
-                        setSelectedCell(addr)
-                        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
-                      } catch {}
+            // Show mirrored in-app Spreadsheet for realtime editing/viewing
+            <div className="relative w-full h-[70vh] flex flex-col">
+              <div className="flex-1 overflow-auto p-4">
+                {addressesData ? (
+                  <Spreadsheet
+                    data={addressesData}
+                    addressRange={addressRange}
+                    selected={selectedCell}
+                    onCellClick={(addr) => {
+                      setSelectedCell(addr)
+                      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
                     }}
                   />
-                </div>
+                ) : (
+                  <div className="text-[color:var(--c-green-700)]">Cargando datos...</div>
+                )}
+              </div>
+              <div className="px-4 py-2 bg-white border-t flex gap-2">
+                <input value={addressRange} onChange={(e) => setAddressRange(e.target.value)} className="border px-2 py-1 rounded" />
+                <button onClick={loadAddresses} className="px-3 py-1 rounded bg-[color:var(--c-green-600)] text-white">Cargar</button>
+                <div className="ml-auto text-xs text-[color:var(--c-green-700)]">Mirrored view (DB + SSE) — Excel iframe still available via \"Abrir en pestaña\"</div>
               </div>
             </div>
           ) : (
