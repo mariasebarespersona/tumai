@@ -250,6 +250,8 @@ export default function ChatPage() {
   const [zoom, setZoom] = useState<number>(0.85) // 85% default
   const BASE_W = 1600
   const BASE_H = 1000
+  const [headerRowInput, setHeaderRowInput] = useState<string>('1')
+  const [headerColInput, setHeaderColInput] = useState<string>('A')
 
   const loadAddresses = useCallback(async () => {
     if (!propertyId) {
@@ -261,7 +263,8 @@ export default function ChatPage() {
       setAddressesError(null)
       console.log('[Addresses] loading range', addressRange, 'for', propertyId)
       // Prefer DB-backed API
-      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(addressRange)}`)
+      // Compute effective range including header row/col if user specified
+      let effectiveRange = addressRange\n+      try {\n+        const parsedOriginal = parseRange(addressRange)\n+        if (parsedOriginal) {\n+          const endColIndex = parsedOriginal.startCol + parsedOriginal.colCount - 1\n+          const endRow = parsedOriginal.startRow + parsedOriginal.rowCount - 1\n+          const endColLabel = colLabel(endColIndex)\n+          // use header inputs if provided\n+          const startColLabel = (headerColInput || colLabel(parsedOriginal.startCol)).toUpperCase()\n+          const startRowNum = Number(headerRowInput) || parsedOriginal.startRow\n+          effectiveRange = `${startColLabel}${startRowNum}:${endColLabel}${endRow}`\n+        }\n+      } catch (e) {}\n+\n+      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(effectiveRange)}`)
       if (!resp.ok) {
         const text = await resp.text().catch(() => '')
         setAddressesError(`API error: ${resp.status} ${text.slice(0,200)}`)
@@ -280,7 +283,7 @@ export default function ChatPage() {
       console.log('[Addresses] db result', payload)
       if (payload?.ok && payload?.data) {
         // payload.data is map address->value; convert to matrix for display
-        const parsed = parseRange(addressRange) || { startCol: 0, startRow: 1, colCount: 5, rowCount: 10 }
+        const parsed = parseRange(effectiveRange) || { startCol: 0, startRow: 1, colCount: 5, rowCount: 10 }
         const rows: any[][] = []
         for (let r = 0; r < parsed.rowCount; r++) {
           const row: any[] = []
@@ -863,12 +866,20 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                   <div className="text-[color:var(--c-green-700)]">Cargando datos...</div>
                 )}
               </div>
-              <div className="px-4 py-2 bg-white border-t flex gap-2 items-center">
+              <div className="px-4 py-2 bg-white border-t flex gap-2 items-center flex-wrap">
                 <input value={addressRange} onChange={(e) => setAddressRange(e.target.value)} className="border px-2 py-1 rounded" />
                 <button onClick={loadAddresses} className="px-3 py-1 rounded bg-[color:var(--c-green-600)] text-white">Cargar</button>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm">Header row:</label>
+                  <input value={headerRowInput} onChange={(e)=>setHeaderRowInput(e.target.value)} className="border px-2 py-1 rounded w-20" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm">Header col:</label>
+                  <input value={headerColInput} onChange={(e)=>setHeaderColInput(e.target.value)} className="border px-2 py-1 rounded w-20" />
+                </div>
                 <button onClick={syncToExcel} className="px-3 py-1 rounded bg-[color:var(--c-blue-600)] text-white">Sync to Excel</button>
                 <label className="ml-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={autoSync} onChange={(e)=>setAutoSync(e.target.checked)} /> Auto-sync</label>
-                <div className="ml-auto text-xs text-[color:var(--c-green-700)]">Mirrored view (DB + SSE) — Excel iframe still available via \"Abrir en pestaña\"</div>
+                <div className="ml-auto text-xs text-[color:var(--c-green-700)]">Mirrored view (DB + SSE) — Excel iframe still available via "Abrir en pestaña"</div>
               </div>
             </div>
           ) : (
