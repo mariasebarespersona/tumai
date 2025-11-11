@@ -243,6 +243,7 @@ export default function ChatPage() {
   const [selectedCell, setSelectedCell] = useState<string | null>(null)
   const [excelRefreshKey, setExcelRefreshKey] = useState<number>(0)
   const [worksheetName] = useState<string>('Sheet1')
+  const [autoSync, setAutoSync] = useState<boolean>(false)
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -357,6 +358,43 @@ export default function ChatPage() {
     return () => { try { es.close() } catch {} }
   }, [propertyId, addressRange, addressesData])
 
+  // Sync current mirrored matrix to the real workbook via Graph API
+  async function syncToExcel() {
+    if (!addressesData || !propertyId) return
+    const parsed = parseRange(addressRange)
+    if (!parsed) return
+    // If we treat first row and first column as headers, write the submatrix excluding them
+    const hasHeaders = addressesData.length > 0 && addressesData[0].length > 0
+    let targetAddress = addressRange
+    let valuesToWrite = addressesData
+    if (hasHeaders) {
+      // write area starting at one row and one column after the displayed range start
+      const startCol = parsed.startCol + 1
+      const startRow = parsed.startRow + 1
+      const colLabelStart = colLabel(startCol)
+      targetAddress = `${colLabelStart}${startRow}`
+      valuesToWrite = addressesData.slice(1).map(r => r.slice(1))
+    }
+    try {
+      const resp = await fetch(`/api/excel/setRange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ worksheet: worksheetName, address: targetAddress, values: valuesToWrite })
+      })
+      const data = await resp.json().catch(() => null)
+      if (!resp.ok || !data?.ok) {
+        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `⚠️ Error sincronizando con Excel: ${data?.error || resp.status}` }])
+      } else {
+        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `✅ Sincronizado con Excel en ${targetAddress}` }])
+        // refresh iframe or bump key so any real workbook viewers refresh
+        await new Promise(r => setTimeout(r, 800))
+        setExcelRefreshKey(Date.now())
+      }
+    } catch (e) {
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `⚠️ Error sincronizando con Excel: ${String(e)}` }])
+    }
+  }
+
   // helper: convert zero-based column index to Excel column label (A, B, ..., Z, AA, AB, ...)
   const colLabel = (idx: number) => {
     let s = ''
@@ -415,6 +453,8 @@ export default function ChatPage() {
       } else {
         setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `✅ He escrito ${valueToWrite} en ${addr}` }])
         await loadAddresses()
+        // auto sync full matrix if enabled
+        try { if (autoSync) await syncToExcel() } catch {}
       }
     } catch (e) {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `❌ Error escribiendo ${addr}: ${String(e)}` }])
@@ -823,9 +863,11 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                   <div className="text-[color:var(--c-green-700)]">Cargando datos...</div>
                 )}
               </div>
-              <div className="px-4 py-2 bg-white border-t flex gap-2">
+              <div className="px-4 py-2 bg-white border-t flex gap-2 items-center">
                 <input value={addressRange} onChange={(e) => setAddressRange(e.target.value)} className="border px-2 py-1 rounded" />
                 <button onClick={loadAddresses} className="px-3 py-1 rounded bg-[color:var(--c-green-600)] text-white">Cargar</button>
+                <button onClick={syncToExcel} className="px-3 py-1 rounded bg-[color:var(--c-blue-600)] text-white">Sync to Excel</button>
+                <label className="ml-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={autoSync} onChange={(e)=>setAutoSync(e.target.checked)} /> Auto-sync</label>
                 <div className="ml-auto text-xs text-[color:var(--c-green-700)]">Mirrored view (DB + SSE) — Excel iframe still available via \"Abrir en pestaña\"</div>
               </div>
             </div>
