@@ -944,6 +944,47 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                 <input value={addressRange} onChange={(e) => setAddressRange(e.target.value)} className="border px-2 py-1 rounded" />
                 <button onClick={loadAddresses} className="px-3 py-1 rounded bg-[color:var(--c-green-600)] text-white">Cargar</button>
                 <button onClick={detectHeaders} className="px-3 py-1 rounded border bg-white text-[color:var(--c-green-700)]">Detect headers</button>
+                <button onClick={async () => {
+                  // Auto-detect full template: scan a wide area and compute bounding box of non-empty cells
+                  if (!propertyId) { setAddressesError('No property selected'); return }
+                  try {
+                    const scanRange = 'A1:Z100'
+                    const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(scanRange)}`)
+                    if (!resp.ok) { setAddressesError(`Scan error: ${resp.status}`); return }
+                    const payload = await resp.json()
+                    if (!payload?.ok || !payload?.data) { setAddressesError('No data from scan'); return }
+                    const map = payload.data
+                    // find bounding box of non-empty addresses within scanRange
+                    const cols = 26 // A..Z
+                    const rows = 100
+                    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity
+                    const colForIndex = (i:number) => {
+                      let s = '', n=i
+                      while (n>=0) { s = String.fromCharCode(65+(n%26))+s; n = Math.floor(n/26)-1 }
+                      return s
+                    }
+                    for (let r=1;r<=rows;r++){
+                      for (let c=0;c<cols;c++){
+                        const addr = `${colForIndex(c)}${r}`
+                        const v = map[addr]
+                        if (v !== undefined && v !== null && String(v).toString().trim() !== '') {
+                          minR = Math.min(minR, r); maxR = Math.max(maxR, r)
+                          minC = Math.min(minC, c); maxC = Math.max(maxC, c)
+                        }
+                      }
+                    }
+                    if (minR===Infinity) { setAddressesError('No non-empty cells found in scan'); return }
+                    const startColLabel = colForIndex(minC)
+                    const endColLabel = colForIndex(maxC)
+                    const newRange = `${startColLabel}${minR}:${endColLabel}${maxR}`
+                    setAddressRange(newRange)
+                    setHeaderRowInput(String(minR))
+                    setHeaderColInput(startColLabel)
+                    await loadAddresses()
+                  } catch (e:any) {
+                    setAddressesError(String(e?.message||e))
+                  }
+                }} className="px-3 py-1 rounded border bg-white text-[color:var(--c-green-700)]">Detect template</button>
                 <div className="flex items-center gap-2">
                   <label className="text-sm">Header row:</label>
                   <input value={headerRowInput} onChange={(e)=>setHeaderRowInput(e.target.value)} className="border px-2 py-1 rounded w-20" />
