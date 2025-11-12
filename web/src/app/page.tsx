@@ -93,24 +93,30 @@ export default function ChatPage() {
   
 
   async function writeCell(address: string, value: any) {
+    if (!propertyId || !excelTemplate) {
+      throw new Error('No propertyId or template selected')
+    }
     try {
-      // DB write (real-time model)
-      await fetch(`${BACKEND_URL}/api/values`, {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ property_id: propertyId || '', address, value: String(value) })
+      // Write to Numbers Table (new system)
+      const form = new FormData()
+      form.append('property_id', propertyId)
+      form.append('template_key', excelTemplate)
+      form.append('cell_address', address)
+      form.append('value', String(value))
+      const resp = await fetch(`${BACKEND_URL}/api/numbers/set-cell-value`, {
+        method: 'POST',
+        body: form
       })
-    } catch {}
-    try {
-      // Graph write (mock/real)
-      await fetch(`/api/excel/setRange`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address, values: [[value]], worksheet: 'Sheet1' })
-      })
-    } catch {}
-    try { await loadAddresses() } catch {}
-    // give Graph a moment to persist and propagate
-    await new Promise(res => setTimeout(res, 800))
-    setExcelRefreshKey(Date.now())
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        throw new Error(data?.error || `Failed to write cell: ${resp.status}`)
+      }
+      // Reload table after write
+      await loadAddresses()
+    } catch (e) {
+      console.error('[writeCell] error', e)
+      throw e
+    }
   }
 
   const onSend = useCallback(async () => {
@@ -169,8 +175,16 @@ export default function ChatPage() {
     setUploading(true)
     try {
       const resp = await fetch('/api/chat', { method: 'POST', body: form })
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '')
+        throw new Error(`Request failed: ${resp.status} ${text.slice(0, 200)}`)
+      }
+      const contentType = resp.headers.get('content-type') || ''
+      if (!contentType.includes('application/json')) {
+        const text = await resp.text().catch(() => '')
+        throw new Error(`Expected JSON but got ${contentType}. Response: ${text.slice(0, 200)}`)
+      }
       const data = await resp.json()
-      if (!resp.ok) throw new Error(data?.error || 'Request failed')
       const answer = String(data?.answer ?? '')
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
       // Post-process: if assistant confirms a write, perform it for real
@@ -199,11 +213,11 @@ export default function ChatPage() {
           if (m && m[1]) { setExcelTemplate(m[1].trim()); break }
         }
       } catch {}
-
+      
       if (data.property_id) {
         setPropertyId(data.property_id)
         if (data.property_name) setPropertyName(data.property_name)
-      }
+        }
       setFiles([])
     } catch (e: any) {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Error: ${e?.message || String(e)}` }])
@@ -236,281 +250,189 @@ export default function ChatPage() {
 
   // Address inspector for Excel iframe: show addresses and values for a range
   const [showAddresses, setShowAddresses] = useState(true)
-  const [addressRange, setAddressRange] = useState('A1:E10')
   const [addressesData, setAddressesData] = useState<any[][] | null>(null)
   const [addressesLoading, setAddressesLoading] = useState(false)
   const [addressesError, setAddressesError] = useState<string | null>(null)
   const [selectedCell, setSelectedCell] = useState<string | null>(null)
   const [excelRefreshKey, setExcelRefreshKey] = useState<number>(0)
   const [worksheetName] = useState<string>('Sheet1')
-  const [autoSync, setAutoSync] = useState<boolean>(false)
+  // autoSync removed - all changes are saved directly to DB
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [zoom, setZoom] = useState<number>(0.85) // 85% default
   const BASE_W = 1600
   const BASE_H = 1000
-  const [headerRowInput, setHeaderRowInput] = useState<string>('1')
-  const [headerColInput, setHeaderColInput] = useState<string>('A')
 
   const loadAddresses = useCallback(async () => {
-    if (!propertyId) {
-      setAddressesError('No hay propertyId seleccionado')
+    if (!propertyId || !excelTemplate) {
+      setAddressesError('No hay propertyId o template seleccionado')
       return
     }
     try {
       setAddressesLoading(true)
       setAddressesError(null)
-      console.log('[Addresses] loading range', addressRange, 'for', propertyId)
-      // Compute effective range including header row/col if user specified
-      let effectiveRange = addressRange;
-      try {
-        const parsedOriginal = parseRange(addressRange)
-        if (parsedOriginal) {
-          const endColIndex = parsedOriginal.startCol + parsedOriginal.colCount - 1
-          const endRow = parsedOriginal.startRow + parsedOriginal.rowCount - 1
-          const endColLabel = colLabel(endColIndex)
-          // use header inputs if provided
-          const startColLabel = (headerColInput || colLabel(parsedOriginal.startCol)).toUpperCase()
-          const startRowNum = Number(headerRowInput) || parsedOriginal.startRow
-          effectiveRange = `${startColLabel}${startRowNum}:${endColLabel}${endRow}`
-        }
-      } catch (e) {}
+      console.log('[Numbers Table] loading template', excelTemplate, 'for', propertyId)
 
-      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(effectiveRange)}`)
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => '')
-        setAddressesError(`API error: ${resp.status} ${text.slice(0,200)}`)
-        setAddressesData(null)
-        return
+      // Load structure from new Numbers Table API
+      const structureRes = await fetch(`${BACKEND_URL}/api/numbers/template-structure?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
+      if (!structureRes.ok) {
+        const text = await structureRes.text().catch(() => '')
+        throw new Error(`Failed to load structure: ${structureRes.status} ${text.slice(0, 200)}`)
       }
-      const contentType = resp.headers.get('content-type') || ''
-      let payload
+      const contentType = structureRes.headers.get('content-type') || ''
       if (!contentType.includes('application/json')) {
-        const text = await resp.text().catch(() => '')
-        setAddressesError(`Invalid JSON response: ${text.slice(0,200)}`)
-        setAddressesData(null)
+        const text = await structureRes.text().catch(() => '')
+        throw new Error(`Expected JSON but got ${contentType}. Response: ${text.slice(0, 200)}`)
+      }
+      const structureData = await structureRes.json()
+      console.log('[Numbers Table] structure response', structureData)
+      
+      // Handle both response formats: {ok: true, structure: {...}} and direct structure
+      let structure = {}
+      if (structureData?.ok && structureData?.structure) {
+        structure = structureData.structure
+      } else if (structureData?.structure) {
+        structure = structureData.structure
+      } else if (structureData && !structureData.error) {
+        // Direct structure object
+        structure = structureData
+      } else {
+        throw new Error(structureData?.error || 'Failed to load structure from database')
+      }
+      
+      console.log('[Numbers Table] parsed structure:', structure, 'keys:', Object.keys(structure))
+      
+      // Check if structure is empty (template not imported yet)
+      if (!structure || Object.keys(structure).length === 0 || !structure.cells || structure.cells.length === 0) {
+        console.log('[Numbers Table] Structure is empty, triggering import...')
+        console.log('[Numbers Table] Structure keys:', Object.keys(structure))
+        setAddressesLoading(true)
+        setAddressesError('Importando template desde Excel... Por favor espera.')
+        
+        // Show file upload prompt
+        setAddressesError('Para importar la plantilla R2B, por favor sube el archivo Excel directamente usando el botón "Subir Excel R2B" abajo.')
+        setAddressesLoading(false)
         return
       }
-      payload = await resp.json()
-      console.log('[Addresses] db result', payload)
-      if (payload?.ok && payload?.data) {
-        // payload.data is map address->value; convert to matrix for display
-        const parsed = parseRange(effectiveRange) || { startCol: 0, startRow: 1, colCount: 5, rowCount: 10 }
-        const rows: any[][] = []
-        for (let r = 0; r < parsed.rowCount; r++) {
-          const row: any[] = []
-          for (let c = 0; c < parsed.colCount; c++) {
-            const col = colLabel(parsed.startCol + c)
-            const addr = `${col}${parsed.startRow + r}`
-            row.push(payload.data[addr] ?? '')
+      
+      console.log('[Numbers Table] structure loaded', structure, 'cells:', structure.cells?.length)
+
+      // Load values from new Numbers Table API
+      const valuesRes = await fetch(`${BACKEND_URL}/api/numbers/table-values?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
+      let cellValues: Record<string, any> = {}
+      if (valuesRes.ok) {
+        const contentType = valuesRes.headers.get('content-type') || ''
+        if (contentType.includes('application/json')) {
+          const valuesData = await valuesRes.json()
+          if (valuesData?.ok && valuesData?.values) {
+            cellValues = valuesData.values
+            console.log('[Numbers Table] values loaded', Object.keys(cellValues).length, 'cells')
           }
-          rows.push(row)
-        }
-        setAddressesData(rows)
-      } else {
-        // fallback to MCP getRange
-        const res = await mcpExcel.getRange(addressRange, undefined, propertyId)
-        console.log('[Addresses] mcp result', res)
-        if (res.ok && res.data && res.data.values) {
-          setAddressesData(res.data.values)
         } else {
-          setAddressesData(null)
-          setAddressesError(res.error?.message || 'No data returned')
+          console.warn('[Numbers Table] Values response is not JSON:', contentType)
+        }
+      } else {
+        console.warn('[Numbers Table] Failed to load values:', valuesRes.status)
+      }
+
+      // Build matrix from structure
+      const maxRow = structure.rows || 30
+      const maxCol = structure.columns || 5
+      console.log('[Numbers Table] Building matrix:', maxRow, 'rows x', maxCol, 'cols')
+      
+      const rows: any[][] = []
+
+      // Create maps for values and formats
+      const valueMap: Record<string, string> = {}
+      const formatMap: Record<string, any> = {}
+      
+      for (const [addr, cellData] of Object.entries(cellValues)) {
+        if (typeof cellData === 'object' && cellData !== null) {
+          valueMap[addr] = (cellData as any).value || ''
+          formatMap[addr] = (cellData as any).format || {}
+        } else {
+          valueMap[addr] = String(cellData || '')
         }
       }
+      
+      // Also extract formats from structure cells
+      if (structure.cells) {
+        for (const cellInfo of structure.cells) {
+          const addr = cellInfo.address
+          if (cellInfo.format && !formatMap[addr]) {
+            formatMap[addr] = cellInfo.format
+          }
+        }
+      }
+      
+      console.log('[Numbers Table] Value map size:', Object.keys(valueMap).length, 'Format map size:', Object.keys(formatMap).length)
+
+      // Build matrix row by row with values and formats
+      for (let r = 0; r < maxRow; r++) {
+        const row: any[] = []
+        for (let c = 0; c < maxCol; c++) {
+          // Convert column index to letter (A, B, C, ...)
+          const colLetter = (() => {
+            let s = ''
+            let i = c
+            while (i >= 0) {
+              s = String.fromCharCode(65 + (i % 26)) + s
+              i = Math.floor(i / 26) - 1
+            }
+            return s
+          })()
+          const addr = `${colLetter}${r + 1}`
+          // Get value from cellValues, or from structure cells if available
+          let cellValue = valueMap[addr]
+          if (cellValue === undefined) {
+            // Check if structure has this cell defined
+            const cellInfo = structure.cells?.find((cell: any) => cell.address === addr)
+            if (cellInfo) {
+              cellValue = cellInfo.value || ''
+            } else {
+              cellValue = ''
+            }
+          }
+          // Store cell data with format
+          row.push({
+            value: cellValue,
+            format: formatMap[addr] || {},
+            address: addr
+          })
+        }
+        rows.push(row)
+      }
+
+      console.log('[Numbers Table] Matrix built:', rows.length, 'rows, first row:', rows[0]?.slice(0, 5))
+      setAddressesData(rows)
+      console.log('[Numbers Table] addressesData set, loading complete')
     } catch (e: any) {
-      console.error('[Addresses] error', e)
+      console.error('[Numbers Table] error', e)
       setAddressesError(String(e?.message || e))
       setAddressesData(null)
     } finally {
       setAddressesLoading(false)
     }
-  }, [addressRange, propertyId])
+  }, [propertyId, excelTemplate])
+
+  // Auto-load Numbers table when template is selected
+  useEffect(() => {
+    if (!excelTemplate || !propertyId) return
+    // Wait a bit for import to complete, then load table structure and values
+    const timer = setTimeout(() => {
+      loadAddresses()
+    }, 2000) // 2 second delay to allow import to complete
+    return () => clearTimeout(timer)
+  }, [excelTemplate, propertyId, loadAddresses])
 
   // Auto-show addresses by default when Excel panel/template is active
-  // Always show addresses by default when propertyId is available; reload when propertyId changes
+  // Reload when template changes (loadAddresses already handles propertyId and excelTemplate)
   useEffect(() => {
     setShowAddresses(true)
-    if (propertyId) loadAddresses()
-  }, [propertyId, loadAddresses])
+  }, [excelTemplate])
 
-  // SSE realtime updates from backend
-  useEffect(() => {
-    if (!propertyId) return
-    const url = `${BACKEND_URL}/api/values/stream?property_id=${encodeURIComponent(propertyId)}`
-    const es = new EventSource(url)
-    es.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data || '{}')
-        if (msg && msg.type === 'valueChanged') {
-          // If the changed address is inside the current range, patch the matrix
-          const parsed = parseRange(addressRange)
-          if (!parsed || !addressesData) return
-          const { startCol, startRow, colCount, rowCount } = parsed
-          const [m, rstr] = [msg.address.match(/^([A-Za-z]+)(\d+)$/), msg.address]
-          if (!m) return
-          const col = m[1].toUpperCase()
-          const row = parseInt(m[2], 10)
-          // convert col to index
-          let colIdx = 0
-          for (let i = 0; i < col.length; i++) colIdx = colIdx*26 + (col.charCodeAt(i)-64)
-          colIdx -= 1
-          if (row >= startRow && row < startRow + rowCount && colIdx >= startCol && colIdx < startCol + colCount) {
-            const r = row - startRow
-            const c = colIdx - startCol
-            setAddressesData(prev => {
-              if (!prev) return prev
-              const next = prev.map(row => row.slice())
-              if (next[r]) next[r][c] = msg.value
-              return next
-            })
-            setExcelRefreshKey(Date.now())
-          }
-        }
-      } catch {}
-    }
-    es.onerror = () => {}
-    return () => { try { es.close() } catch {} }
-  }, [propertyId, addressRange, addressesData])
-
-  // Sync current mirrored matrix to the real workbook via Graph API
-  async function syncToExcel() {
-    if (!addressesData || !propertyId) return
-    const parsed = parseRange(addressRange)
-    if (!parsed) return
-    // If we treat first row and first column as headers, write the submatrix excluding them
-    const hasHeaders = addressesData.length > 0 && addressesData[0].length > 0
-    let targetAddress = addressRange
-    let valuesToWrite = addressesData
-    if (hasHeaders) {
-      // write area starting at one row and one column after the displayed range start
-      const startCol = parsed.startCol + 1
-      const startRow = parsed.startRow + 1
-      const colLabelStart = colLabel(startCol)
-      targetAddress = `${colLabelStart}${startRow}`
-      valuesToWrite = addressesData.slice(1).map(r => r.slice(1))
-    }
-    try {
-      const resp = await fetch(`/api/excel/setRange`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ worksheet: worksheetName, address: targetAddress, values: valuesToWrite })
-      })
-      const data = await resp.json().catch(() => null)
-      if (!resp.ok || !data?.ok) {
-        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `⚠️ Error sincronizando con Excel: ${data?.error || resp.status}` }])
-      } else {
-        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `✅ Sincronizado con Excel en ${targetAddress}` }])
-        // refresh iframe or bump key so any real workbook viewers refresh
-        await new Promise(r => setTimeout(r, 800))
-        setExcelRefreshKey(Date.now())
-      }
-    } catch (e) {
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `⚠️ Error sincronizando con Excel: ${String(e)}` }])
-    }
-  }
-
-  // Automatically detect header row and column from the fetched data
-  const detectHeaders = useCallback(async () => {
-    if (!propertyId) {
-      setAddressesError('No hay propertyId seleccionado')
-      return
-    }
-    try {
-      const parsed = parseRange(addressRange)
-      if (!parsed) {
-        setAddressesError('Rango inválido para detectar cabeceras')
-        return
-      }
-      const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(addressRange)}`)
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => '')
-        setAddressesError(`API error: ${resp.status} ${text.slice(0,200)}`)
-        return
-      }
-      const payload = await resp.json()
-      if (!(payload?.ok && payload?.data)) {
-        setAddressesError('No se obtuvieron datos para detectar cabeceras')
-        return
-      }
-      const dataMap = payload.data || {}
-      const { startCol, startRow, colCount, rowCount } = parsed
-      // helper to get value at row/col index (0-based)
-      const getVal = (rIdx: number, cIdx: number) => {
-        const col = colLabel(startCol + cIdx)
-        const addr = `${col}${startRow + rIdx}`
-        return dataMap[addr]
-      }
-      const isLabel = (v: any) => (typeof v === 'string' && v.trim() !== '' && isNaN(Number(String(v).replace(',', '.'))))
-      // detect header row: find first row with at least one label-like value
-      let detectedRow = null
-      for (let r = 0; r < rowCount; r++) {
-        let found = false
-        for (let c = 0; c < colCount; c++) {
-          const v = getVal(r, c)
-          if (isLabel(v)) { found = true; break }
-        }
-        if (found) { detectedRow = startRow + r; break }
-      }
-      // detect header col: find first column with at least one label-like value
-      let detectedColIdx = null
-      for (let c = 0; c < colCount; c++) {
-        let found = false
-        for (let r = 0; r < rowCount; r++) {
-          const v = getVal(r, c)
-          if (isLabel(v)) { found = true; break }
-        }
-        if (found) { detectedColIdx = startCol + c; break }
-      }
-      if (detectedRow) setHeaderRowInput(String(detectedRow))
-      if (detectedColIdx !== null) setHeaderColInput(colLabel(detectedColIdx))
-      // reload addresses to apply headers
-      await loadAddresses()
-    } catch (e:any) {
-      setAddressesError(String(e?.message || e))
-    }
-  }, [addressRange, propertyId, loadAddresses])
-
-  // helper: convert zero-based column index to Excel column label (A, B, ..., Z, AA, AB, ...)
-  const colLabel = (idx: number) => {
-    let s = ''
-    let i = idx
-    while (i >= 0) {
-      s = String.fromCharCode(65 + (i % 26)) + s
-      i = Math.floor(i / 26) - 1
-    }
-    return s
-  }
-
-  // parse addressRange like A1:E10 into startColIndex (0-based) and startRow (1-based) and colCount, rowCount
-  const parseRange = (range: string) => {
-    try {
-      const parts = range.split(':')
-      const parseCell = (c: string) => {
-        const m = c.match(/^([A-Za-z]+)(\d+)$/)
-        if (!m) return null
-        const col = m[1].toUpperCase()
-        const row = parseInt(m[2], 10)
-        // convert col letters to index
-        let idx = 0
-        for (let i = 0; i < col.length; i++) {
-          idx = idx * 26 + (col.charCodeAt(i) - 64)
-        }
-        return { colIndex: idx - 1, row }
-      }
-      const a = parseCell(parts[0])
-      const b = parts[1] ? parseCell(parts[1]) : null
-      if (!a) return null
-      const startCol = a.colIndex
-      const startRow = a.row
-      const endCol = b ? b.colIndex : startCol
-      const endRow = b ? b.row : startRow
-      return { startCol, startRow, colCount: endCol - startCol + 1, rowCount: endRow - startRow + 1 }
-    } catch (e) {
-      return null
-    }
-  }
+  // SSE realtime updates removed - Numbers Table uses direct API calls
 
   const setCellValue = useCallback(async (addr: string) => {
     setSelectedCell(addr)
@@ -531,7 +453,7 @@ export default function ChatPage() {
         setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `✅ He escrito ${valueToWrite} en ${addr}` }])
         await loadAddresses()
         // auto sync full matrix if enabled
-        try { if (autoSync) await syncToExcel() } catch {}
+        // Auto-sync removed - all changes are saved directly to DB
       }
     } catch (e) {
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `❌ Error escribiendo ${addr}: ${String(e)}` }])
@@ -916,7 +838,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
         </div>
         
         {/* Excel iframe - shows actual Excel from OneDrive */}
-          <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
+        <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
           <div className="absolute top-2 right-2 z-10 px-3 py-1.5 rounded-lg bg-[color:var(--c-green-100)] text-[color:var(--c-green-800)] text-xs font-semibold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[color:var(--c-green-500)] animate-pulse"></span>
             <span>Sincronizado</span>
@@ -931,71 +853,132 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                     data={addressesData}
                     addressRange={addressRange}
                     selected={selectedCell}
+                    showAddresses={false}
                     onCellClick={(addr) => {
                       setSelectedCell(addr)
                       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
                     }}
                   />
+                ) : addressesError ? (
+                  <div className={`p-4 ${addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'text-red-600' : 'text-[color:var(--c-green-700)]'}`}>
+                    <div className="font-semibold mb-2">
+                      {addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'Error:' : 'Importando...'}
+                    </div>
+                    <div className="whitespace-pre-wrap">{addressesError}</div>
+                    {(addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido')) && (
+                      <button 
+                        onClick={() => loadAddresses()} 
+                        className="mt-2 px-3 py-1 rounded bg-[color:var(--c-green-700)] text-white text-sm"
+                      >
+                        Reintentar
+                      </button>
+                    )}
+                  </div>
+                ) : addressesLoading ? (
+                  <div className="text-[color:var(--c-green-700)] flex items-center justify-center h-full">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[color:var(--c-green-600)] mx-auto mb-2"></div>
+                      <div>Cargando datos...</div>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="text-[color:var(--c-green-700)]">Cargando datos...</div>
+                  <div className="text-[color:var(--c-green-700)] flex items-center justify-center h-full">
+                    <div className="text-center p-8">
+                      <div className="text-4xl mb-4">📊</div>
+                      <div className="font-semibold mb-2">Sube el archivo Excel R2B</div>
+                      <div className="text-sm text-[color:var(--c-green-600)]">
+                        Haz clic en "Subir Excel R2B" para comenzar
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-              <div className="px-4 py-2 bg-white border-t flex gap-2 items-center flex-wrap">
-                <input value={addressRange} onChange={(e) => setAddressRange(e.target.value)} className="border px-2 py-1 rounded" />
-                <button onClick={loadAddresses} className="px-3 py-1 rounded bg-[color:var(--c-green-600)] text-white">Cargar</button>
-                <button onClick={detectHeaders} className="px-3 py-1 rounded border bg-white text-[color:var(--c-green-700)]">Detect headers</button>
-                <button onClick={async () => {
-                  // Auto-detect full template: scan a wide area and compute bounding box of non-empty cells
-                  if (!propertyId) { setAddressesError('No property selected'); return }
-                  try {
-                    const scanRange = 'A1:Z100'
-                    const resp = await fetch(`${BACKEND_URL}/api/values?property_id=${encodeURIComponent(propertyId)}&address_range=${encodeURIComponent(scanRange)}`)
-                    if (!resp.ok) { setAddressesError(`Scan error: ${resp.status}`); return }
-                    const payload = await resp.json()
-                    if (!payload?.ok || !payload?.data) { setAddressesError('No data from scan'); return }
-                    const map = payload.data
-                    // find bounding box of non-empty addresses within scanRange
-                    const cols = 26 // A..Z
-                    const rows = 100
-                    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity
-                    const colForIndex = (i:number) => {
-                      let s = '', n=i
-                      while (n>=0) { s = String.fromCharCode(65+(n%26))+s; n = Math.floor(n/26)-1 }
-                      return s
-                    }
-                    for (let r=1;r<=rows;r++){
-                      for (let c=0;c<cols;c++){
-                        const addr = `${colForIndex(c)}${r}`
-                        const v = map[addr]
-                        if (v !== undefined && v !== null && String(v).toString().trim() !== '') {
-                          minR = Math.min(minR, r); maxR = Math.max(maxR, r)
-                          minC = Math.min(minC, c); maxC = Math.max(maxC, c)
+              <div className="px-4 py-2 bg-white border-t flex gap-2 items-center justify-between">
+                <div className="flex gap-2 items-center">
+                  <input 
+                    type="file" 
+                    accept=".xlsx,.xls" 
+                    id="excel-upload-input"
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0]
+                      if (!file || !propertyId || !excelTemplate) return
+                      
+                      setAddressesLoading(true)
+                      setAddressesError('Subiendo y procesando archivo Excel...')
+                      
+                      try {
+                        const formData = new FormData()
+                        formData.append('property_id', propertyId)
+                        formData.append('template_key', excelTemplate)
+                        formData.append('excel_file', file, file.name)
+                        
+                        const res = await fetch(`${BACKEND_URL}/api/numbers/import-template`, {
+                          method: 'POST',
+                          body: formData
+                        })
+                        
+                        const data = await res.json()
+                        
+                        if (data?.ok) {
+                          setAddressesError(null)
+                          setAddressesLoading(true) // Keep loading while we fetch the data
+                          // Reload addresses immediately after successful import
+                          console.log('[Numbers Table] Import successful, reloading addresses...')
+                          await loadAddresses()
+                        } else {
+                          setAddressesError(`Error: ${data?.error || 'Error desconocido'}`)
+                          setAddressesLoading(false)
                         }
+                      } catch (err: any) {
+                        setAddressesError(`Error al subir archivo: ${err?.message || String(err)}`)
+                        setAddressesLoading(false)
                       }
-                    }
-                    if (minR===Infinity) { setAddressesError('No non-empty cells found in scan'); return }
-                    const startColLabel = colForIndex(minC)
-                    const endColLabel = colForIndex(maxC)
-                    const newRange = `${startColLabel}${minR}:${endColLabel}${maxR}`
-                    setAddressRange(newRange)
-                    setHeaderRowInput(String(minR))
-                    setHeaderColInput(startColLabel)
-                    await loadAddresses()
-                  } catch (e:any) {
-                    setAddressesError(String(e?.message||e))
-                  }
-                }} className="px-3 py-1 rounded border bg-white text-[color:var(--c-green-700)]">Detect template</button>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm">Header row:</label>
-                  <input value={headerRowInput} onChange={(e)=>setHeaderRowInput(e.target.value)} className="border px-2 py-1 rounded w-20" />
+                      
+                      // Reset input
+                      e.target.value = ''
+                    }}
+                  />
+                  <label 
+                    htmlFor="excel-upload-input"
+                    className="px-4 py-2 rounded bg-[color:var(--c-green-600)] text-white cursor-pointer hover:bg-[color:var(--c-green-700)] font-semibold"
+                  >
+                    📤 Subir Excel R2B
+                  </label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm">Header col:</label>
-                  <input value={headerColInput} onChange={(e)=>setHeaderColInput(e.target.value)} className="border px-2 py-1 rounded w-20" />
-                </div>
-                <button onClick={syncToExcel} className="px-3 py-1 rounded bg-[color:var(--c-blue-600)] text-white">Sync to Excel</button>
-                <label className="ml-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={autoSync} onChange={(e)=>setAutoSync(e.target.checked)} /> Auto-sync</label>
-                <div className="ml-auto text-xs text-[color:var(--c-green-700)]">Mirrored view (DB + SSE) — Excel iframe still available via "Abrir en pestaña"</div>
+                
+                {addressesData && (
+                  <button
+                    onClick={async () => {
+                      if (!propertyId || !excelTemplate) return
+                      try {
+                        setAddressesLoading(true)
+                        const res = await fetch(`${BACKEND_URL}/api/numbers/export?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
+                        if (!res.ok) {
+                          setAddressesError(`Error al exportar: ${res.status}`)
+                          setAddressesLoading(false)
+                          return
+                        }
+                        const blob = await res.blob()
+                        const url = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `numbers_table_${excelTemplate}_${propertyId.slice(0, 8)}.xlsx`
+                        document.body.appendChild(a)
+                        a.click()
+                        window.URL.revokeObjectURL(url)
+                        document.body.removeChild(a)
+                        setAddressesLoading(false)
+                      } catch (err: any) {
+                        setAddressesError(`Error al exportar: ${err?.message || String(err)}`)
+                        setAddressesLoading(false)
+                      }
+                    }}
+                    className="px-4 py-2 rounded bg-[color:var(--c-green-600)] text-white hover:bg-[color:var(--c-green-700)] font-semibold"
+                  >
+                    📥 Exportar Excel
+                  </button>
+                )}
               </div>
             </div>
           ) : (

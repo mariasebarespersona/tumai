@@ -31,6 +31,7 @@ from .numbers_tools import (
 from .numbers_agent import (
     compute_and_log as _numbers_compute_and_log,
     generate_numbers_excel as _numbers_excel,
+    generate_numbers_table_excel as _numbers_table_excel,
     what_if as _numbers_what_if,
     sensitivity_grid as _numbers_sensitivity,
     break_even_precio as _numbers_break_even,
@@ -299,6 +300,16 @@ def numbers_excel_export_tool(property_id: str) -> Dict:
     return {"filename": "numbers_framework.xlsx", "bytes_b64": base64.b64encode(data).decode("utf-8")}
 
 
+@tool("export_numbers_table")
+def export_numbers_table_tool(property_id: str, template_key: str = "R2B") -> Dict:
+    """Export the Numbers table as an Excel file with the exact structure (headers, labels, format, values).
+    This recreates the original Excel template with all current values from the database.
+    Returns {filename, bytes_b64}."""
+    import base64
+    data = _numbers_table_excel(property_id, template_key)
+    return {"filename": f"numbers_table_{template_key}.xlsx", "bytes_b64": base64.b64encode(data).decode("utf-8")}
+
+
 # --- Scenarios ---
 class NumbersWhatIfInput(BaseModel):
     property_id: str
@@ -369,17 +380,43 @@ class SetNumbersTemplateInput(BaseModel):
 
 @tool("set_numbers_template")
 def set_numbers_template_tool(property_id: str, template_key: str) -> Dict:
-    """Set the active Numbers template for this property/session. This will clear all existing values and start fresh."""
+    """Set the active Numbers template for this property/session. 
+    If the template doesn't exist in the database, it will be automatically imported from Excel.
+    This will clear all existing values and start fresh."""
+    from .numbers_tools import clear_numbers, initialize_template_structure, get_numbers_table_structure, import_excel_template
+    import os
+    
+    # Check if structure already exists in DB
+    structure = get_numbers_table_structure(property_id, template_key)
+    
+    # If structure exists and has cells, we're done
+    if structure and structure.get("cells"):
+        logger.info(f"Template {template_key} already exists in DB for property {property_id}")
+        return {"property_id": property_id, "template_key": template_key, "values_cleared": True, "imported": False}
+    
+    # Structure doesn't exist - try to import or initialize
+    # For R2B template, try to import from Excel file upload (user must upload via UI)
+    # For other templates or if import not available, use legacy initialization
+    if template_key == "R2B":
+        logger.info(f"Template {template_key} not found in DB. User should upload Excel file via UI button.")
+        # Don't try Graph API import - user should upload file directly
+        # The UI will show upload button and handle import
+    else:
+        # For non-R2B templates, use legacy initialization
+        try:
+            logger.info(f"Using legacy initialization for template {template_key}")
+            initialize_template_structure(property_id, template_key)
+        except Exception as e:
+            logger.warning(f"Legacy initialization failed: {e}")
+    
     # Clear all existing number values when selecting a new template
-    from .numbers_tools import clear_numbers, initialize_template_structure
     try:
         clear_numbers(property_id)
-        # Initialize the template structure (this ensures the structure exists even if values are NULL)
-        initialize_template_structure(property_id, template_key)
-    except Exception:
-        # If clearing/initializing fails, continue anyway - template selection is the priority
+    except:
+        # If clearing fails, continue anyway - template selection is the priority
         pass
-    return {"property_id": property_id, "template_key": template_key, "values_cleared": True}
+    
+    return {"property_id": property_id, "template_key": template_key, "values_cleared": True, "imported": structure is None or not structure.get("cells")}
 
 
 class GetSummarySpecInput(BaseModel):

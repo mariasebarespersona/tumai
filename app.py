@@ -19,9 +19,11 @@ from tools.summary_ppt import build_summary_ppt
 from tools.property_tools import get_property as db_get_property
 from tools.supabase_client import sb, BUCKET
 from tools.numbers_tools import get_numbers, set_number, calc_numbers
+from tools.numbers_tools import import_excel_template, get_numbers_table_structure, get_numbers_table_values, set_numbers_table_cell
 from tools.numbers_agent import (
     compute_and_log as numbers_compute_and_log,
     generate_numbers_excel,
+    generate_numbers_table_excel,
     what_if as numbers_what_if,
     sensitivity_grid as numbers_sensitivity_grid,
     break_even_precio as numbers_break_even,
@@ -882,6 +884,17 @@ app.add_middleware(
 @app.get("/")
 async def healthcheck():
     return {"status": "ok", "app": "RAMA AI Backend"}
+
+@app.get("/debug/excel-config")
+async def debug_excel_config():
+    """Debug endpoint to check Excel configuration (without exposing tokens)"""
+    excel_file_id = os.getenv("EXCEL_FILE_ID")
+    has_token = bool(os.getenv("GRAPH_ACCESS_TOKEN"))
+    return {
+        "excel_file_id": excel_file_id,
+        "has_access_token": has_token,
+        "token_length": len(os.getenv("GRAPH_ACCESS_TOKEN", "")) if has_token else 0
+    }
 
 @app.post("/ui_chat")
 async def ui_chat(
@@ -2193,6 +2206,167 @@ async def values_stream(request: Request, property_id: str):
 
     return StreamingResponse(event_generator(), media_type='text/event-stream')
 
+
+# ==================== Numbers Table Framework Endpoints ====================
+
+@app.get("/api/numbers/template-structure")
+async def api_get_template_structure(property_id: str, template_key: str):
+    """Get the structure JSON for a Numbers template."""
+    try:
+        structure = get_numbers_table_structure(property_id, template_key)
+        # Log for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Template structure request: property_id={property_id}, template_key={template_key}, structure_keys={list(structure.keys()) if structure else 'empty'}")
+        return JSONResponse({"ok": True, "structure": structure})
+    except Exception as e:
+        import logging
+        logging.error(f"Error getting template structure: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/numbers/table-values")
+async def api_get_table_values(property_id: str, template_key: str):
+    """Get all cell values for a property's Numbers table."""
+    try:
+        values = get_numbers_table_values(property_id, template_key)
+        return JSONResponse({"ok": True, "values": values})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/set-cell-value")
+async def api_set_cell_value(
+    request: Request,
+    property_id: str = Form(None),
+    template_key: str = Form(None),
+    cell_address: str = Form(None),
+    value: str = Form(None),
+    row_label: str | None = Form(None),
+    col_label: str | None = Form(None)
+):
+    """Set a cell value in the Numbers table.
+    Supports both form data and JSON body."""
+    try:
+        # Support JSON body (for Next.js import endpoint)
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("application/json"):
+            data = await request.json()
+            property_id = data.get("property_id") or property_id
+            template_key = data.get("template_key") or template_key
+            cell_address = data.get("cell_address") or cell_address
+            value = data.get("value") or value
+            row_label = data.get("row_label") or row_label
+            col_label = data.get("col_label") or col_label
+            format_json = data.get("format_json")
+        else:
+            format_json = None
+        
+        if not property_id or not template_key or not cell_address:
+            return JSONResponse({"ok": False, "error": "property_id, template_key, and cell_address are required"}, status_code=400)
+        
+        result = set_numbers_table_cell(property_id, template_key, cell_address, value or "", row_label, col_label, format_json)
+        if result.get("ok"):
+            return JSONResponse(result)
+        else:
+            return JSONResponse(result, status_code=500)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/save-template-structure")
+async def api_save_template_structure(request: Request):
+    """Save template structure JSON to Supabase.
+    This endpoint is called by Next.js import-template route after reading Excel."""
+    try:
+        data = await request.json()
+        property_id = data.get("property_id")
+        template_key = data.get("template_key")
+        structure_json = data.get("structure_json")
+        
+        if not property_id or not template_key or not structure_json:
+            return JSONResponse({
+                "ok": False,
+                "error": "property_id, template_key, and structure_json are required"
+            }, status_code=400)
+        
+        # Save to Supabase
+        from tools.supabase_client import get_supabase_client
+        sb = get_supabase_client()
+        sb.postgrest.schema = "public"
+        
+        template_data = {
+            "template_key": template_key,
+            "property_id": property_id,
+            "structure_json": structure_json
+        }
+        
+        # Upsert template
+        existing = sb.table("numbers_templates").select("id").eq("template_key", template_key).eq("property_id", property_id).execute()
+        if existing.data:
+            sb.table("numbers_templates").update(template_data).eq("id", existing.data[0]["id"]).execute()
+        else:
+            sb.table("numbers_templates").insert(template_data).execute()
+        
+        return JSONResponse({"ok": True, "message": "Template structure saved"})
+    except Exception as e:
+        import logging
+        logging.error(f"Error saving template structure: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/import-template")
+async def api_import_template(
+    property_id: str = Form(...),
+    template_key: str = Form(...),
+    excel_file_id: str = Form(""),
+    access_token: str = Form(""),
+    excel_file: UploadFile = File(None)
+):
+    """Import Excel template structure.
+    Supports two methods:
+    1. Upload Excel file directly (preferred - no auth needed)
+    2. Import from Microsoft Graph API (requires excel_file_id and access_token)
+    """
+    import os
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Method 1: Upload Excel file directly (preferred)
+        if excel_file and excel_file.filename:
+            logger.info(f"Importing from uploaded file: {excel_file.filename}")
+            file_bytes = await excel_file.read()
+            from tools.numbers_tools import import_excel_from_file
+            result = import_excel_from_file(file_bytes, property_id, template_key)
+            logger.info(f"File import result: ok={result.get('ok')}, cells={result.get('cells_imported', 0)}")
+            if result.get("ok"):
+                return JSONResponse(result)
+            else:
+                return JSONResponse(result, status_code=500)
+        
+        # Method 2: Import from Graph API (fallback)
+        if not excel_file_id:
+            excel_file_id = os.getenv("EXCEL_FILE_ID", "")
+        if not access_token:
+            access_token = os.getenv("GRAPH_ACCESS_TOKEN", "")
+        
+        if not excel_file_id or not access_token:
+            return JSONResponse({
+                "ok": False, 
+                "error": "Either upload an Excel file, or configure EXCEL_FILE_ID and GRAPH_ACCESS_TOKEN in backend .env file"
+            }, status_code=400)
+        
+        result = import_excel_template(property_id, template_key, excel_file_id, access_token)
+        if result.get("ok"):
+            return JSONResponse(result)
+        else:
+            return JSONResponse(result, status_code=500)
+    except Exception as e:
+        logger.error(f"Error in import-template endpoint: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/numbers/compute")
 async def numbers_compute(property_id: str = Form(...)):
     try:
@@ -2211,6 +2385,24 @@ async def numbers_excel(property_id: str):
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/numbers/export")
+async def api_export_numbers_table(property_id: str, template_key: str = "R2B"):
+    """Export the Numbers table as an Excel file."""
+    try:
+        data = generate_numbers_table_excel(property_id, template_key)
+        return Response(
+            content=data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename=numbers_table_{template_key}_{property_id[:8]}.xlsx"
+            }
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Error exporting numbers table: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.post("/numbers/what_if")

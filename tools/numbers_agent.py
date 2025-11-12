@@ -209,6 +209,107 @@ def generate_numbers_excel(property_id: str) -> bytes:
     return buf.getvalue()
 
 
+def generate_numbers_table_excel(property_id: str, template_key: str = "R2B") -> bytes:
+    """Create an Excel workbook from the Numbers table structure and values.
+    Recreates the exact Excel structure with headers, labels, format, and values.
+    Returns bytes."""
+    from .numbers_tools import get_numbers_table_structure, get_numbers_table_values
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    import io
+    
+    try:
+        # Get structure and values
+        structure = get_numbers_table_structure(property_id, template_key)
+        values = get_numbers_table_values(property_id, template_key)
+        
+        if not structure or not structure.get("cells"):
+            # Fallback to old method if no structure
+            return generate_numbers_excel(property_id)
+        
+        # Create workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        
+        # Build cell map from values
+        cell_map = {}
+        for cell_addr, cell_data in values.items():
+            if isinstance(cell_data, dict):
+                cell_map[cell_addr] = {
+                    "value": cell_data.get("value", ""),
+                    "format": cell_data.get("format", {})
+                }
+            else:
+                # Legacy format: just value
+                cell_map[cell_addr] = {"value": str(cell_data), "format": {}}
+        
+        # Write cells from structure
+        for cell_info in structure.get("cells", []):
+            cell_addr = cell_info.get("address")
+            row = cell_info.get("row", 1)
+            col = cell_info.get("col", 1)
+            col_letter = cell_info.get("col_letter") or get_column_letter(col)
+            
+            # Get value (prefer from cell_map, fallback to structure)
+            value = cell_map.get(cell_addr, {}).get("value") if cell_addr in cell_map else cell_info.get("value")
+            if value is None:
+                value = ""
+            
+            # Write value
+            cell = ws[f"{col_letter}{row}"]
+            # Try to convert to number if possible
+            try:
+                if isinstance(value, str) and value.strip() and not value.startswith("="):
+                    num_val = float(value.replace(",", "."))
+                    cell.value = num_val
+                else:
+                    cell.value = value
+            except (ValueError, TypeError):
+                cell.value = str(value)
+            
+            # Apply format
+            cell_format = cell_map.get(cell_addr, {}).get("format") or cell_info.get("format", {})
+            if cell_format:
+                # Background color
+                if cell_format.get("bg_color"):
+                    bg_color = cell_format["bg_color"]
+                    if isinstance(bg_color, str):
+                        # Convert hex to RGB if needed
+                        if bg_color.startswith("#"):
+                            bg_color = bg_color[1:]
+                        try:
+                            fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+                            cell.fill = fill
+                        except:
+                            pass
+                
+                # Font
+                font_kwargs = {}
+                if cell_format.get("font_color"):
+                    font_kwargs["color"] = cell_format["font_color"]
+                if cell_format.get("bold"):
+                    font_kwargs["bold"] = True
+                if font_kwargs:
+                    cell.font = Font(**font_kwargs)
+        
+        # Set column widths (basic)
+        for col_idx in range(1, structure.get("columns", 5) + 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 15
+        
+        # Save to bytes
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+        
+    except Exception as e:
+        import logging
+        logging.error(f"Error generating Numbers table Excel: {e}", exc_info=True)
+        # Fallback to old method
+        return generate_numbers_excel(property_id)
+
+
 # ------------------ Scenarios & Sensitivity ------------------
 def apply_deltas(base: Dict[str, float], deltas: Dict[str, float]) -> Dict[str, float]:
     """Apply multiplicative deltas to base (e.g., {precio_venta: -0.1} means -10%)."""
