@@ -335,21 +335,21 @@ export default function ChatPage() {
       console.log('[Numbers Table] parsed structure:', structure, 'keys:', Object.keys(structure))
       
       // Check if structure is empty (template not imported yet)
-      if (!structure || Object.keys(structure).length === 0 || !structure.cells || structure.cells.length === 0) {
-        console.log('[Numbers Table] Structure is empty, triggering import...')
+      const structureIsEmpty = !structure || Object.keys(structure).length === 0 || !structure.cells || structure.cells.length === 0
+      
+      if (structureIsEmpty) {
+        console.log('[Numbers Table] Structure is empty - template not imported yet')
         console.log('[Numbers Table] Structure keys:', Object.keys(structure))
-        setAddressesLoading(true)
-        setAddressesError('Importando template desde Excel... Por favor espera.')
-        
-        // Show file upload prompt
-        setAddressesError('Para importar la plantilla R2B, por favor sube el archivo Excel directamente usando el botón "Subir Excel R2B" abajo.')
+        // Structure doesn't exist - show upload prompt
+        setAddressesData(null)
+        setAddressesError(null) // Clear any previous errors
         setAddressesLoading(false)
-        return
+        return // Return early - can't build matrix without structure
       }
       
       console.log('[Numbers Table] structure loaded', structure, 'cells:', structure.cells?.length)
 
-      // Load values from new Numbers Table API
+      // Load values from new Numbers Table API (always load to get saved values)
       const valuesRes = await fetch(`${BACKEND_URL}/api/numbers/table-values?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
       let cellValues: Record<string, any> = {}
       if (valuesRes.ok) {
@@ -358,7 +358,7 @@ export default function ChatPage() {
           const valuesData = await valuesRes.json()
           if (valuesData?.ok && valuesData?.values) {
             cellValues = valuesData.values
-            console.log('[Numbers Table] values loaded', Object.keys(cellValues).length, 'cells')
+            console.log('[Numbers Table] ✅ values loaded from DB:', Object.keys(cellValues).length, 'cells with saved values')
           }
         } else {
           console.warn('[Numbers Table] Values response is not JSON:', contentType)
@@ -367,7 +367,7 @@ export default function ChatPage() {
         console.warn('[Numbers Table] Failed to load values:', valuesRes.status)
       }
 
-      // Build matrix from structure
+      // Build matrix from structure (structure exists, so we can build it)
       const maxRow = structure.rows || 30
       const maxCol = structure.columns || 5
       console.log('[Numbers Table] Building matrix:', maxRow, 'rows x', maxCol, 'cols')
@@ -1051,8 +1051,11 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                     <div className="text-center p-8">
                       <div className="text-4xl mb-4">📊</div>
                       <div className="font-semibold mb-2">Sube el archivo Excel R2B</div>
-                      <div className="text-sm text-[color:var(--c-green-600)]">
+                      <div className="text-sm text-[color:var(--c-green-600)] mb-4">
                         Haz clic en "Subir Excel R2B" para comenzar
+                      </div>
+                      <div className="text-xs text-[color:var(--c-green-500)]">
+                        Solo necesitas subirlo una vez. Los valores que añadas se guardarán automáticamente.
                       </div>
                     </div>
                   </div>
