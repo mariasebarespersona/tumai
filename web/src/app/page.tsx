@@ -177,16 +177,40 @@ export default function ChatPage() {
       const resp = await fetch('/api/chat', { method: 'POST', body: form })
       if (!resp.ok) {
         const text = await resp.text().catch(() => '')
+        // Check if it's an HTML error page (404, 500, etc.)
+        if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
+          throw new Error(`Error ${resp.status}: El servidor backend no está disponible o la ruta no existe. Por favor, verifica que el backend esté corriendo en ${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'}`)
+        }
         throw new Error(`Request failed: ${resp.status} ${text.slice(0, 200)}`)
       }
       const contentType = resp.headers.get('content-type') || ''
       if (!contentType.includes('application/json')) {
         const text = await resp.text().catch(() => '')
+        // Check if it's an HTML error page
+        if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
+          throw new Error(`Error: El servidor devolvió HTML en lugar de JSON. Esto puede indicar que la ruta /api/chat no existe o hay un problema con el servidor.`)
+        }
         throw new Error(`Expected JSON but got ${contentType}. Response: ${text.slice(0, 200)}`)
       }
       const data = await resp.json()
       const answer = String(data?.answer ?? '')
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
+      
+      // Auto-reload Numbers table if agent confirms a value update
+      if (excelTemplate && propertyId) {
+        const updateKeywords = ['actualizado', 'guardado', 'he actualizado', 'he guardado', 'valor actualizado', 'valor guardado', 'actualicé', 'guardé']
+        const answerLower = answer.toLowerCase()
+        const hasUpdate = updateKeywords.some(keyword => answerLower.includes(keyword))
+        
+        if (hasUpdate) {
+          console.log('[Numbers Table] 🔄 Detected value update in chat response, reloading table...')
+          // Small delay to ensure backend has saved the value, but don't show progress bar
+          setTimeout(() => {
+            loadAddresses(false)
+          }, 500)
+        }
+      }
+      
       // Post-process: if assistant confirms a write, perform it for real
       try {
         // ejemplos: "valor de 1000 ha sido establecido en la celda D2"
@@ -256,6 +280,10 @@ export default function ChatPage() {
   const [selectedCell, setSelectedCell] = useState<string | null>(null)
   const [excelRefreshKey, setExcelRefreshKey] = useState<number>(0)
   const [worksheetName] = useState<string>('Sheet1')
+  // Progress bar states
+  const [importProgress, setImportProgress] = useState(0) // 0-100
+  const [timeRemaining, setTimeRemaining] = useState(0) // seconds
+  const [estimatedTime, setEstimatedTime] = useState(0) // total estimated seconds
   // autoSync removed - all changes are saved directly to DB
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
@@ -264,15 +292,18 @@ export default function ChatPage() {
   const BASE_W = 1600
   const BASE_H = 1000
 
-  const loadAddresses = useCallback(async () => {
+  const loadAddresses = useCallback(async (showProgress = false) => {
     if (!propertyId || !excelTemplate) {
       setAddressesError('No hay propertyId o template seleccionado')
       return
     }
     try {
-      setAddressesLoading(true)
+      // Only show progress bar if explicitly requested (e.g., during file upload)
+      if (showProgress) {
+        setAddressesLoading(true)
+      }
       setAddressesError(null)
-      console.log('[Numbers Table] loading template', excelTemplate, 'for', propertyId)
+      console.log('[Numbers Table] loading template', excelTemplate, 'for', propertyId, 'showProgress:', showProgress)
 
       // Load structure from new Numbers Table API
       const structureRes = await fetch(`${BACKEND_URL}/api/numbers/template-structure?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
@@ -405,32 +436,120 @@ export default function ChatPage() {
       }
 
       console.log('[Numbers Table] Matrix built:', rows.length, 'rows, first row:', rows[0]?.slice(0, 5))
-      setAddressesData(rows)
-      console.log('[Numbers Table] addressesData set, loading complete')
+      
+      // Verify data was set correctly before setting state
+      if (rows.length === 0) {
+        console.warn('[Numbers Table] WARNING: Matrix is empty after building!')
+        setAddressesError('La tabla se cargó pero está vacía. Por favor, verifica que el archivo Excel tenga datos.')
+        setAddressesData(null)
+      } else {
+        setAddressesData(rows)
+        console.log('[Numbers Table] ✅ addressesData set successfully! Rows:', rows.length, 'First row sample:', rows[0]?.slice(0, 3))
+      }
     } catch (e: any) {
       console.error('[Numbers Table] error', e)
       setAddressesError(String(e?.message || e))
       setAddressesData(null)
     } finally {
-      setAddressesLoading(false)
+      // Only hide progress bar if it was shown
+      if (showProgress) {
+        setAddressesLoading(false)
+      }
+      console.log('[Numbers Table] loadAddresses finished, addressesLoading set to false (showProgress:', showProgress, ')')
     }
   }, [propertyId, excelTemplate])
 
-  // Auto-load Numbers table when template is selected
+  // Auto-load Numbers table when template is selected (only if we don't have data)
+  // This also handles reload scenarios - if template is set, try to load data
   useEffect(() => {
     if (!excelTemplate || !propertyId) return
-    // Wait a bit for import to complete, then load table structure and values
-    const timer = setTimeout(() => {
-      loadAddresses()
-    }, 2000) // 2 second delay to allow import to complete
-    return () => clearTimeout(timer)
-  }, [excelTemplate, propertyId, loadAddresses])
+    
+    // Check localStorage to see if we recently uploaded a file
+    const recentlyUploaded = localStorage.getItem(`excel_uploaded_${propertyId}_${excelTemplate}`)
+    
+    // Only auto-load if:
+    // 1. We don't have data AND we're not currently loading AND no error
+    // 2. OR we recently uploaded (but only once)
+    const shouldLoad = (!addressesData || addressesData.length === 0) && !addressesLoading && !addressesError
+    
+    if (shouldLoad || recentlyUploaded) {
+      if (recentlyUploaded) {
+        // Clear the flag immediately to prevent re-triggering
+        localStorage.removeItem(`excel_uploaded_${propertyId}_${excelTemplate}`)
+      }
+      console.log('[Numbers Table] Auto-loading triggered:', { shouldLoad, recentlyUploaded: !!recentlyUploaded, hasData: !!addressesData })
+      // Initial load should not show progress bar
+      loadAddresses(false)
+    }
+  }, [excelTemplate, propertyId]) // Removed addressesData, addressesLoading, addressesError from dependencies to prevent loops
+
+  // Auto-reload table when messages change and contain update confirmations
+  // Use a ref to track the last message we processed to avoid duplicate reloads
+  const lastProcessedMessageId = useRef<string | null>(null)
+  
+  useEffect(() => {
+    if (!excelTemplate || !propertyId || !addressesData || messages.length === 0) return
+    
+    const lastMessage = messages[messages.length - 1]
+    if (!lastMessage || lastMessage.role !== 'assistant') return
+    
+    // Skip if we already processed this message
+    if (lastProcessedMessageId.current === lastMessage.id) return
+    
+    const updateKeywords = ['actualizado', 'guardado', 'he actualizado', 'he guardado', 'valor actualizado', 'valor guardado', 'actualicé', 'guardé']
+    const answerLower = lastMessage.content.toLowerCase()
+    const hasUpdate = updateKeywords.some(keyword => answerLower.includes(keyword))
+    
+      if (hasUpdate) {
+        console.log('[Numbers Table] 🔄 Auto-reload triggered by assistant update confirmation:', lastMessage.content.substring(0, 50))
+        // Mark this message as processed
+        lastProcessedMessageId.current = lastMessage.id
+        // Delay to ensure backend has saved the value, but DON'T show loading state
+        const timeoutId = setTimeout(() => {
+          // Reload without showing progress bar (silent reload)
+          loadAddresses(false)
+        }, 800)
+        return () => clearTimeout(timeoutId)
+      }
+  }, [messages, excelTemplate, propertyId, addressesData, loadAddresses])
 
   // Auto-show addresses by default when Excel panel/template is active
   // Reload when template changes (loadAddresses already handles propertyId and excelTemplate)
   useEffect(() => {
     setShowAddresses(true)
   }, [excelTemplate])
+
+  // Progress bar countdown timer
+  useEffect(() => {
+    if (!addressesLoading || estimatedTime === 0) {
+      // Don't reset progress if we're still loading but timer ran out
+      if (!addressesLoading) {
+        setImportProgress(0)
+        setTimeRemaining(0)
+      }
+      return
+    }
+
+    const interval = setInterval(() => {
+      setTimeRemaining(prev => {
+        if (prev <= 1) {
+          // Don't clear interval if still loading - let it continue
+          if (!addressesLoading) {
+            clearInterval(interval)
+            return 0
+          }
+          return 0
+        }
+        const newTime = prev - 1
+        const progress = ((estimatedTime - newTime) / estimatedTime) * 100
+        // Only update progress if we haven't manually set it higher (e.g., 80% after import)
+        setImportProgress(current => Math.max(current, Math.min(progress, 95)))
+        return newTime
+      })
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [addressesLoading, estimatedTime])
 
   // SSE realtime updates removed - Numbers Table uses direct API calls
 
@@ -823,7 +942,12 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
               <button onClick={() => setZoom(z => Math.min(1.2, Math.round((z+0.1)*100)/100))} className="px-2 py-1 text-white/90 hover:text-white">＋</button>
             </div>
             <button 
-              onClick={() => setExcelRefreshKey(Date.now())}
+              onClick={() => {
+                console.log('[Numbers Table] 🔄 Manual reload triggered')
+                setExcelRefreshKey(Date.now())
+                // Manual reload should show progress briefly
+                loadAddresses(true)
+              }}
               className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105"
             >
               ↻ Recargar
@@ -847,11 +971,59 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
           {excelUrl ? (
             // Show mirrored in-app Spreadsheet for realtime editing/viewing
             <div className="relative w-full h-[70vh] flex flex-col">
-              <div className="flex-1 overflow-auto p-4">
-                {addressesData ? (
+              <div className="flex-1 overflow-auto p-4 relative" style={{ minHeight: '400px' }}>
+                {/* Progress bar overlay - ALWAYS show when addressesLoading is true */}
+                {addressesLoading ? (
+                  <div 
+                    className="absolute inset-0 flex items-center justify-center"
+                    style={{ 
+                      zIndex: 9999,
+                      backgroundColor: 'rgba(255, 255, 255, 0.98)',
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0
+                    }}
+                  >
+                    <div className="text-center w-full max-w-lg px-8 py-6 bg-white rounded-lg shadow-2xl border-4 border-blue-500">
+                      <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto mb-6"></div>
+                      <div className="font-bold mb-6 text-2xl text-gray-800">Procesando archivo Excel...</div>
+                      
+                      {/* Progress Bar - BLUE and VERY visible */}
+                      <div className="w-full bg-gray-300 rounded-full h-8 mb-6 overflow-hidden shadow-xl border-4 border-gray-400" style={{ minHeight: '32px' }}>
+                        <div 
+                          className="bg-gradient-to-r from-blue-500 via-blue-600 to-blue-700 h-full rounded-full transition-all duration-300 ease-out shadow-lg flex items-center justify-end pr-2"
+                          style={{ width: `${Math.max(10, Math.min(100, importProgress))}%` }}
+                        >
+                          {importProgress >= 15 && (
+                            <span className="text-white text-xs font-bold">{Math.round(importProgress)}%</span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Progress percentage - Large and blue */}
+                      <div className="text-4xl text-blue-600 mt-6 font-black mb-4" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                        {Math.round(Math.max(10, Math.min(100, importProgress)))}%
+                      </div>
+                      
+                      {/* Time remaining */}
+                      {timeRemaining > 0 && (
+                        <div className="text-lg text-gray-700 font-semibold">
+                          {timeRemaining > 1 
+                            ? `⏱️ Tiempo estimado: ${timeRemaining} segundos`
+                            : '⏱️ Finalizando...'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+                
+                {/* Main content */}
+                {addressesData && addressesData.length > 0 ? (
                   <Spreadsheet
                     data={addressesData}
-                    addressRange={addressRange}
+                    addressRange="A1"
                     selected={selectedCell}
                     showAddresses={false}
                     onCellClick={(addr) => {
@@ -859,10 +1031,10 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
                     }}
                   />
-                ) : addressesError ? (
+                ) : !addressesLoading && addressesError ? (
                   <div className={`p-4 ${addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'text-red-600' : 'text-[color:var(--c-green-700)]'}`}>
                     <div className="font-semibold mb-2">
-                      {addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'Error:' : 'Importando...'}
+                      {addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'Error:' : 'Información:'}
                     </div>
                     <div className="whitespace-pre-wrap">{addressesError}</div>
                     {(addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido')) && (
@@ -873,13 +1045,6 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                         Reintentar
                       </button>
                     )}
-                  </div>
-                ) : addressesLoading ? (
-                  <div className="text-[color:var(--c-green-700)] flex items-center justify-center h-full">
-                    <div className="text-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[color:var(--c-green-600)] mx-auto mb-2"></div>
-                      <div>Cargando datos...</div>
-                    </div>
                   </div>
                 ) : (
                   <div className="text-[color:var(--c-green-700)] flex items-center justify-center h-full">
@@ -895,6 +1060,24 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
               </div>
               <div className="px-4 py-2 bg-white border-t flex gap-2 items-center justify-between">
                 <div className="flex gap-2 items-center">
+                  {/* TEST BUTTON - Remove after testing */}
+                  <button
+                    onClick={() => {
+                      console.log('[TEST] Setting addressesLoading to true, importProgress to 50')
+                      setAddressesLoading(true)
+                      setImportProgress(50)
+                      setTimeRemaining(5)
+                      setEstimatedTime(10)
+                      setTimeout(() => {
+                        console.log('[TEST] Hiding progress bar after 5 seconds')
+                        setAddressesLoading(false)
+                        setImportProgress(0)
+                      }, 5000)
+                    }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-md"
+                  >
+                    🧪 TEST Progress Bar
+                  </button>
                   <input 
                     type="file" 
                     accept=".xlsx,.xls" 
@@ -904,8 +1087,36 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                       const file = e.target.files?.[0]
                       if (!file || !propertyId || !excelTemplate) return
                       
+                      // Estimate time based on file size (roughly 1 second per 100KB, minimum 5 seconds)
+                      const fileSizeKB = file.size / 1024
+                      const estimatedSeconds = Math.max(5, Math.ceil(fileSizeKB / 100) + 3) // +3 for processing
+                      console.log('[Numbers Table] 📤 Starting file upload:', file.name, 'Size:', fileSizeKB.toFixed(2), 'KB, Estimated time:', estimatedSeconds, 's')
+                      
+                      // CRITICAL: Set loading state FIRST, before anything else
+                      // This ensures the progress bar appears immediately
                       setAddressesLoading(true)
-                      setAddressesError('Subiendo y procesando archivo Excel...')
+                      
+                      // Clear previous data and errors
+                      setAddressesData(null)
+                      setAddressesError(null)
+                      
+                      // Set progress states
+                      setEstimatedTime(estimatedSeconds)
+                      setTimeRemaining(estimatedSeconds)
+                      setImportProgress(15) // Start at 15% to show progress immediately
+                      
+                      console.log('[Numbers Table] ✅ Loading state set to true, progress bar should be visible NOW')
+                      
+                      // Force React to flush state updates - use multiple frames to ensure render
+                      await new Promise(resolve => {
+                        requestAnimationFrame(() => {
+                          requestAnimationFrame(() => {
+                            setTimeout(resolve, 150) // Give React plenty of time to render
+                          })
+                        })
+                      })
+                      
+                      console.log('[Numbers Table] ✅ After delay, addressesLoading should be true and progress bar visible')
                       
                       try {
                         const formData = new FormData()
@@ -919,20 +1130,135 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                         })
                         
                         const data = await res.json()
+                        console.log('[Numbers Table] 📥 Upload response:', data?.ok ? 'OK' : 'ERROR', data)
                         
                         if (data?.ok) {
                           setAddressesError(null)
-                          setAddressesLoading(true) // Keep loading while we fetch the data
-                          // Reload addresses immediately after successful import
-                          console.log('[Numbers Table] Import successful, reloading addresses...')
-                          await loadAddresses()
+                          // Update progress to 80% after successful upload
+                          setImportProgress(80)
+                          setTimeRemaining(Math.max(1, Math.ceil(estimatedSeconds * 0.2))) // 20% remaining
+                          console.log('[Numbers Table] ✅ File uploaded successfully, progress at 80%, now loading data...')
+                          // Mark in localStorage that we just uploaded (for reload scenarios)
+                          localStorage.setItem(`excel_uploaded_${propertyId}_${excelTemplate}`, Date.now().toString())
+                          
+                          // Load data directly without calling loadAddresses (which would reset loading state)
+                          try {
+                            // Ensure loading state stays true
+                            setAddressesLoading(true)
+                            
+                            // Load structure
+                            const structureRes = await fetch(`${BACKEND_URL}/api/numbers/template-structure?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
+                            if (!structureRes.ok) throw new Error(`Failed to load structure: ${structureRes.status}`)
+                            const structureData = await structureRes.json()
+                            let structure = structureData?.ok && structureData?.structure ? structureData.structure : (structureData?.structure || structureData)
+                            
+                            if (!structure || Object.keys(structure).length === 0 || !structure.cells || structure.cells.length === 0) {
+                              throw new Error('Structure is empty after import')
+                            }
+                            
+                            // Update progress to 90%
+                            setImportProgress(90)
+                            
+                            // Load values
+                            const valuesRes = await fetch(`${BACKEND_URL}/api/numbers/table-values?property_id=${encodeURIComponent(propertyId)}&template_key=${encodeURIComponent(excelTemplate)}`)
+                            let cellValues: Record<string, any> = {}
+                            if (valuesRes.ok) {
+                              const valuesData = await valuesRes.json()
+                              if (valuesData?.ok && valuesData?.values) {
+                                cellValues = valuesData.values
+                              }
+                            }
+                            
+                            // Build matrix
+                            const maxRow = structure.rows || 30
+                            const maxCol = structure.columns || 5
+                            const rows: any[][] = []
+                            const valueMap: Record<string, string> = {}
+                            const formatMap: Record<string, any> = {}
+                            
+                            for (const [addr, cellData] of Object.entries(cellValues)) {
+                              if (typeof cellData === 'object' && cellData !== null) {
+                                valueMap[addr] = (cellData as any).value || ''
+                                formatMap[addr] = (cellData as any).format || {}
+                              } else {
+                                valueMap[addr] = String(cellData || '')
+                              }
+                            }
+                            
+                            if (structure.cells) {
+                              for (const cellInfo of structure.cells) {
+                                const addr = cellInfo.address
+                                if (cellInfo.format && !formatMap[addr]) {
+                                  formatMap[addr] = cellInfo.format
+                                }
+                              }
+                            }
+                            
+                            for (let r = 0; r < maxRow; r++) {
+                              const row: any[] = []
+                              for (let c = 0; c < maxCol; c++) {
+                                const colLetter = (() => {
+                                  let s = ''
+                                  let i = c
+                                  while (i >= 0) {
+                                    s = String.fromCharCode(65 + (i % 26)) + s
+                                    i = Math.floor(i / 26) - 1
+                                  }
+                                  return s
+                                })()
+                                const addr = `${colLetter}${r + 1}`
+                                let cellValue = valueMap[addr]
+                                if (cellValue === undefined) {
+                                  const cellInfo = structure.cells?.find((cell: any) => cell.address === addr)
+                                  cellValue = cellInfo?.value || ''
+                                }
+                                row.push({
+                                  value: cellValue,
+                                  format: formatMap[addr] || {},
+                                  address: addr
+                                })
+                              }
+                              rows.push(row)
+                            }
+                            
+                            if (rows.length === 0) {
+                              throw new Error('Table is empty after import')
+                            }
+                            
+                            // Set data and show 100%
+                            setAddressesData(rows)
+                            setImportProgress(100)
+                            setTimeRemaining(0)
+                            console.log('[Numbers Table] ✅ Data loaded, setting progress to 100%')
+                            
+                            // Small delay to show 100% before hiding
+                            setTimeout(() => {
+                              setAddressesLoading(false)
+                              setImportProgress(0)
+                              setEstimatedTime(0)
+                              console.log('[Numbers Table] ✅ Loading complete, table should be visible now')
+                            }, 1000) // Show 100% for 1 second
+                          } catch (loadErr: any) {
+                            console.error('[Numbers Table] ❌ Error reloading addresses after import:', loadErr)
+                            setAddressesError(`Error al cargar datos después de importar: ${loadErr?.message || String(loadErr)}`)
+                            setAddressesLoading(false)
+                            setImportProgress(0)
+                            setTimeRemaining(0)
+                            setEstimatedTime(0)
+                          }
                         } else {
                           setAddressesError(`Error: ${data?.error || 'Error desconocido'}`)
                           setAddressesLoading(false)
+                          setImportProgress(0)
+                          setTimeRemaining(0)
+                          setEstimatedTime(0)
                         }
                       } catch (err: any) {
                         setAddressesError(`Error al subir archivo: ${err?.message || String(err)}`)
                         setAddressesLoading(false)
+                        setImportProgress(0)
+                        setTimeRemaining(0)
+                        setEstimatedTime(0)
                       }
                       
                       // Reset input
@@ -1003,7 +1329,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
         </div>
       </div>
     )
-  }, [excelTemplate, excelUrl, excelRefreshKey])
+  }, [excelTemplate, excelUrl, excelRefreshKey, addressesLoading, addressesData, addressesError, importProgress, timeRemaining, estimatedTime, selectedCell, propertyId])
 
   // Layout: two columns when Excel is open, single column otherwise
   const hasExcel = !!excelTemplate

@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import List, Dict, Optional, Union
 from pydantic import BaseModel, Field
 from langchain_core.tools import tool
+import logging
+
+logger = logging.getLogger(__name__)
 
 # import your pure functions
 from .property_tools import add_property as _add_property, list_frameworks as _list_frameworks
@@ -27,6 +30,7 @@ from .numbers_tools import (
     calc_numbers as _calc_numbers,
     clear_number as _clear_number,
     find_item_by_value as _find_item_by_value,
+    set_numbers_table_cell as _set_numbers_table_cell,
 )
 from .numbers_agent import (
     compute_and_log as _numbers_compute_and_log,
@@ -257,6 +261,21 @@ class FindItemByValueInput(BaseModel):
 def find_item_by_value_tool(property_id: str, search_value: Optional[float] = None, search_label: Optional[str] = None) -> Optional[Dict]:
     """Find an item in the numbers framework by value or label. Useful for commands like 'borra IVA 10%'."""
     return _find_item_by_value(property_id, search_value, search_label)
+
+
+class SetNumbersTableCellInput(BaseModel):
+    property_id: str
+    template_key: str = Field(default="R2B", description="Template key (usually 'R2B')")
+    cell_address: str = Field(..., description="Excel cell address like 'B5', 'C10', etc.")
+    value: str = Field(..., description="Value to set in the cell (as string)")
+
+@tool("set_numbers_table_cell")
+def set_numbers_table_cell_tool(property_id: str, template_key: str, cell_address: str, value: str) -> Dict:
+    """Set a cell value in the Numbers Table (R2B template) using Excel cell addresses like 'B5', 'C10', etc.
+    This is the correct tool to use when working with the Numbers Table Framework.
+    Example: set_numbers_table_cell(property_id='...', template_key='R2B', cell_address='B5', value='5000')
+    """
+    return _set_numbers_table_cell(property_id, template_key, cell_address, value)
 
 
 class GetNumbersInput(BaseModel):
@@ -719,6 +738,7 @@ TOOLS = [
     set_number_tool,
     clear_number_tool,  # NEW - Clear/delete a specific number value
     find_item_by_value_tool,  # NEW - Find item by value or label
+    set_numbers_table_cell_tool,  # NEW - Set cell value in Numbers Table (R2B) using Excel addresses
     set_numbers_template_tool,  # NEW - Set Numbers template selection
     get_numbers_tool,
     calc_numbers_tool,

@@ -2236,34 +2236,52 @@ async def api_get_table_values(property_id: str, template_key: str):
 
 
 @app.post("/api/numbers/set-cell-value")
-async def api_set_cell_value(
-    request: Request,
-    property_id: str = Form(None),
-    template_key: str = Form(None),
-    cell_address: str = Form(None),
-    value: str = Form(None),
-    row_label: str | None = Form(None),
-    col_label: str | None = Form(None)
-):
+async def api_set_cell_value(request: Request):
     """Set a cell value in the Numbers table.
     Supports both form data and JSON body."""
     try:
-        # Support JSON body (for Next.js import endpoint)
         content_type = request.headers.get("content-type", "")
+        
+        # Support JSON body (for Next.js import endpoint)
         if content_type.startswith("application/json"):
             data = await request.json()
-            property_id = data.get("property_id") or property_id
-            template_key = data.get("template_key") or template_key
-            cell_address = data.get("cell_address") or cell_address
-            value = data.get("value") or value
-            row_label = data.get("row_label") or row_label
-            col_label = data.get("col_label") or col_label
+            property_id = data.get("property_id")
+            template_key = data.get("template_key")
+            cell_address = data.get("cell_address")
+            value = data.get("value")
+            row_label = data.get("row_label")
+            col_label = data.get("col_label")
             format_json = data.get("format_json")
         else:
+            # Support FormData
+            form_data = await request.form()
+            property_id = form_data.get("property_id")
+            template_key = form_data.get("template_key")
+            cell_address = form_data.get("cell_address")
+            value = form_data.get("value")
+            row_label = form_data.get("row_label")
+            col_label = form_data.get("col_label")
             format_json = None
+            
+            # Convert to strings if they exist
+            if property_id:
+                property_id = str(property_id)
+            if template_key:
+                template_key = str(template_key)
+            if cell_address:
+                cell_address = str(cell_address)
+            if value is not None:
+                value = str(value)
+            if row_label:
+                row_label = str(row_label)
+            if col_label:
+                col_label = str(col_label)
         
         if not property_id or not template_key or not cell_address:
-            return JSONResponse({"ok": False, "error": "property_id, template_key, and cell_address are required"}, status_code=400)
+            return JSONResponse({
+                "ok": False, 
+                "error": f"property_id, template_key, and cell_address are required. Got: property_id={property_id}, template_key={template_key}, cell_address={cell_address}"
+            }, status_code=400)
         
         result = set_numbers_table_cell(property_id, template_key, cell_address, value or "", row_label, col_label, format_json)
         if result.get("ok"):
@@ -2271,6 +2289,8 @@ async def api_set_cell_value(
         else:
             return JSONResponse(result, status_code=500)
     except Exception as e:
+        import logging
+        logging.error(f"Error in api_set_cell_value: {e}", exc_info=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
