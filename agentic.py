@@ -202,7 +202,7 @@ HERRAMIENTAS (nombres exactos)
 - Propiedades: `add_property`, `list_frameworks`, `list_properties`, `find_property`, `search_properties`, `get_property`, `delete_property`.
 - Documentos: `propose_doc_slot`, `slot_exists`, `upload_and_link`, `list_docs`, `signed_url_for`, `summarize_document`, `qa_document`, `qa_payment_schedule`.
 - RAG: `rag_index_document`, `rag_index_all_documents`, `rag_qa_with_citations`.
-- Números: `get_numbers`, `set_number`, `set_numbers_table_cell` (para direcciones Excel como B5, C10), `calc_numbers`, `export_numbers_table`.
+- Números: `get_numbers`, `set_number`, `set_numbers_table_cell` (para direcciones Excel como B5, C10), `clear_numbers_table_cell` (para borrar valores de celdas como B7), `calc_numbers`, `export_numbers_table`, `send_numbers_table_email` (para enviar la plantilla Excel por email).
 - Resumen: `get_summary_spec`, `compute_summary`, `upsert_summary_value`, `build_summary_ppt`.
 - Comunicación/Voz: `send_email`, `transcribe_audio`, `synthesize_speech`, `process_voice_input`, `create_voice_response`.
 - **Recordatorios**: `create_reminder`, `extract_payment_date`, `list_reminders`, `cancel_reminder`.
@@ -274,6 +274,12 @@ FLUJO: NÚMEROS (Numbers Table Framework)
     * Si el usuario menciona una **dirección de celda Excel** (ej: "B5", "C10", "pon 5000 en B5", "actualiza la casilla B5", "pon en la celda B5 el valor 5000"), usa `set_numbers_table_cell(property_id, template_key='R2B', cell_address='B5', value='5000')` INMEDIATAMENTE.
     * Si el usuario menciona un **nombre de campo** (ej: "precio de venta", "Total pagado"), usa `set_number(property_id, item_key, amount)` como antes.
     * Los cambios se reflejan en la tabla en tiempo real.
+  - **BORRAR VALORES DE CELDAS:**
+    * Si el usuario dice "borra el valor de la celda B7", "elimina B7", "borra B7", "quita el valor de B7", "borra el valor de la casilla B7", etc., usa `clear_numbers_table_cell(property_id, template_key='R2B', cell_address='B7')` INMEDIATAMENTE.
+    * Después de borrar, SIEMPRE verifica el resultado:
+      - Si el resultado tiene `"ok": true` y `"validated": true` y `"cleared": true` → confirma: "✅ Borrado el valor de la celda B7"
+      - Si la validación falla → informa error: "⚠️ Error: el valor no se borró correctamente de la base de datos. Por favor, inténtalo de nuevo."
+    * El valor se borra permanentemente de la base de datos y la tabla se actualiza automáticamente.
   - **VALIDACIÓN OBLIGATORIA:** Después de cada `set_number`, SIEMPRE verifica el resultado:
     - Si el resultado tiene `"ok": true` y `"validated": true` → confirma éxito: "✅ Actualizado [item] a [valor]"
     - Si el resultado tiene `"ok": false` o `"validated": false` → informa error: "⚠️ Error: el valor no se guardó correctamente. Por favor, inténtalo de nuevo."
@@ -286,7 +292,32 @@ FLUJO: NÚMEROS (Numbers Table Framework)
     3. Si no encuentras el item, pregunta al usuario qué valor específico quiere borrar
   - **RESPUESTA INMEDIATA:** Después de actualizar o borrar un valor, confirma inmediatamente: "✅ Actualizado [item] a [valor]" o "✅ Borrado [item]"
   - **DETECCIÓN INTELIGENTE:** Usa `find_item_by_value` cuando el usuario mencione un valor específico de la tabla (ej: "borra IVA 10%" → busca por label="IVA" y value=10.0)
-  - **EXPORTAR:** Si el usuario pide "exporta la tabla", "descarga el excel de números", "envía la tabla por email", usa `export_numbers_table` para generar un Excel con la estructura exacta y todos los valores actuales
+  - **EXPORTAR:** Si el usuario pide "exporta la tabla", "descarga el excel de números", usa `export_numbers_table` para generar un Excel con la estructura exacta y todos los valores actuales
+  - **🚨 ENVIAR POR EMAIL (DETECCIÓN PRIORITARIA ABSOLUTA - VERIFICA ESTO ANTES QUE CUALQUIER OTRA COSA):** 
+    * **REGLA DE ORO:** Si el usuario dice "manda/envía/enviame/enviar/mandar/mandame" + "plantilla/tabla/excel" + "por email/por correo/por mail/como excel", esto es UNA SOLICITUD DE ENVÍO POR EMAIL, NO una solicitud de trabajar con la plantilla.
+    * **FRASES ESPECÍFICAS QUE DEBES DETECTAR:**
+      - "mandame la plantilla numeros R2B como excel por email"
+      - "manda esta plantilla por email"
+      - "envía el excel por correo"
+      - "manda la tabla por email"
+      - "enviame la plantilla por email"
+      - "quiero que me mandes la plantilla por email"
+      - "envía la plantilla de números por email"
+      - "manda el excel de números por correo"
+      - "envíame la plantilla como excel"
+      - "manda la plantilla por email"
+    * **ACCIÓN INMEDIATA (NO HAGAS NADA MÁS):**
+      1. **NO** entres en modo "plantilla números"
+      2. **NO** llames `set_numbers_template`
+      3. **NO** muestres la tabla
+      4. **NO** digas "Usaremos la plantilla de Números"
+      5. Si no tienes el email del usuario, pregunta: "¿A qué dirección de email quieres que envíe la plantilla?"
+      6. Una vez tengas el email, llama INMEDIATAMENTE `send_numbers_table_email(property_id, template_key='R2B', to=[email_del_usuario], subject='Plantilla de Números R2B')`
+      7. Confirma: "✅ He enviado la plantilla de números R2B por email a [email]"
+      8. Si hay un error, informa: "⚠️ Error al enviar el email: [error]"
+    * **DIFERENCIA CRÍTICA:** 
+      - "quiero trabajar con la plantilla" = trabajar con la tabla → usa `set_numbers_template`
+      - "manda/envía/mandame la plantilla por email" = enviar por email → usa `send_numbers_table_email` (NO uses `set_numbers_template`)
 
 - **EJEMPLOS (few‑shot): NÚMEROS**
   ❌ MAL:
@@ -314,9 +345,30 @@ FLUJO: NÚMEROS (Numbers Table Framework)
       Si resultado tiene `"ok": true` y `"validated": true` → "✅ Actualizado la casilla B5 con el valor 5000."
       Si validación falla → "⚠️ Error: el valor no se guardó correctamente. Por favor, inténtalo de nuevo."
 
+  ✅ BIEN (3c) - Borrar valor de celda:
+  Usuario: "borra el valor de la celda B7" o "elimina B7" o "borra B7"
+  Tú: [llama `clear_numbers_table_cell(property_id, template_key='R2B', cell_address='B7')`] →
+      Si resultado tiene `"ok": true` y `"validated": true` y `"cleared": true` → "✅ Borrado el valor de la celda B7"
+      Si validación falla → "⚠️ Error: el valor no se borró correctamente de la base de datos. Por favor, inténtalo de nuevo."
+
   ✅ BIEN (4) - Sugerencia después de varios cambios:
   Usuario: [ha hecho 4 cambios exitosos]
   Tú: "✅ Actualizado [último item] a [valor]. 💡 ¿Quieres exportar la tabla como Excel ahora? Solo dime 'exporta' o 'descarga'."
+
+  ✅ BIEN (5) - Enviar plantilla por email (DETECCIÓN CORRECTA):
+  Usuario: "mandame la plantilla numeros R2B como excel por email" o "manda la plantilla de números por email" o "envía el excel por correo"
+  Tú: [🚨 DETECTA INMEDIATAMENTE que es una solicitud de ENVÍO POR EMAIL, NO de seleccionar plantilla]
+      [NO llames `set_numbers_template`]
+      [NO digas "Usaremos la plantilla de Números: R2B"]
+      [Si no tienes el email del usuario, pregunta: "¿A qué dirección de email quieres que envíe la plantilla?"]
+      [Una vez tengas el email, llama `send_numbers_table_email(property_id, template_key='R2B', to=['email@example.com'], subject='Plantilla de Números R2B')`] →
+      Si resultado tiene `"ok": true` y `"sent": true` → "✅ He enviado la plantilla de números R2B por email a email@example.com"
+      Si hay error → "⚠️ Error al enviar el email: [error]"
+
+  ❌ MAL (5) - Confusión con trabajar en plantilla:
+  Usuario: "mandame la plantilla numeros R2B como excel por email"
+  Tú: "✅ Usaremos la plantilla de Números: R2B..." [INCORRECTO - esto es para trabajar con la plantilla, no para enviarla]
+  → CORRECTO: Debes detectar "mandame/envía por email" y enviar directamente usando `send_numbers_table_email`, sin llamar `set_numbers_template`.
 
 **EJEMPLOS (few‑shot): FACTURAS / PLACEHOLDERS**
 ✅ BIEN (1):
@@ -913,34 +965,50 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             }])
             return {"messages": [forced_call], "last_llm_timestamp": time.time()}
         # Handle entering the Numbers workflow.
-        # If the user explicitly names a template (e.g. "R2B"), force set_numbers_template so the frontend opens the Excel.
-        # If the user only says "números" / "quiero completar la plantilla de Números", ASK them to choose among the 4 options
-        template_map = {
-            "r2b": "R2B",
-            "r2b+pm": "R2B + PM",
-            "r2b + pm": "R2B + PM",
-            "r2b+pm+venta certs": "R2B + PM + Venta certs",
-            "r2b + pm + venta certs": "R2B + PM + Venta certs",
-            "promocion": "Promoción",
-            "promoción": "Promoción",
-        }
-
-        numbers_keywords = ["número", "numeros", "números", "plantilla", "números"]
-        mentioned_numbers = any(kw in last_user_text for kw in numbers_keywords)
-
+        # CRITICAL: Exclude email sending requests - they should NOT trigger template selection
+        email_sending_verbs = ["manda", "envía", "enviame", "enviar", "mandar", "mandame", "envío", "envio", "envíame"]
+        email_destinations = ["por email", "por correo", "por mail", "via email", "vía email", "como excel"]
+        email_objects = ["plantilla", "tabla", "excel", "numeros", "números"]
+        
+        has_email_verb = any(verb in last_user_text for verb in email_sending_verbs)
+        has_email_destination = any(dest in last_user_text for dest in email_destinations)
+        has_email_object = any(obj in last_user_text for obj in email_objects)
+        
+        is_email_request = has_email_verb and (has_email_destination or "como excel" in last_user_text) and has_email_object
+        
+        # Initialize variables that might be used later
+        mentioned_numbers = False
         selected_tpl = None
-        for key, val in template_map.items():
-            if key in last_user_text:
-                selected_tpl = val
-                break
+        
+        # If it's an email request, DO NOT trigger template selection - let the agent handle it via send_numbers_table_email
+        if not is_email_request:
+            # If the user explicitly names a template (e.g. "R2B"), force set_numbers_template so the frontend opens the Excel.
+            # If the user only says "números" / "quiero completar la plantilla de Números", ASK them to choose among the 4 options
+            template_map = {
+                "r2b": "R2B",
+                "r2b+pm": "R2B + PM",
+                "r2b + pm": "R2B + PM",
+                "r2b+pm+venta certs": "R2B + PM + Venta certs",
+                "r2b + pm + venta certs": "R2B + PM + Venta certs",
+                "promocion": "Promoción",
+                "promoción": "Promoción",
+            }
 
-        if selected_tpl and state.get("property_id"):
-            forced_set_tpl = AIMessage(content="", tool_calls=[{
-                "name": "set_numbers_template",
-                "args": {"property_id": state.get("property_id"), "template_key": selected_tpl},
-                "id": "force_set_numbers_template"
-            }])
-            return {"messages": [forced_set_tpl], "last_llm_timestamp": time.time()}
+            numbers_keywords = ["número", "numeros", "números", "plantilla", "números"]
+            mentioned_numbers = any(kw in last_user_text for kw in numbers_keywords)
+
+            for key, val in template_map.items():
+                if key in last_user_text:
+                    selected_tpl = val
+                    break
+
+            if selected_tpl and state.get("property_id"):
+                forced_set_tpl = AIMessage(content="", tool_calls=[{
+                    "name": "set_numbers_template",
+                    "args": {"property_id": state.get("property_id"), "template_key": selected_tpl},
+                    "id": "force_set_numbers_template"
+                }])
+                return {"messages": [forced_set_tpl], "last_llm_timestamp": time.time()}
 
         if mentioned_numbers and not selected_tpl:
             ask_msg = AIMessage(content=(

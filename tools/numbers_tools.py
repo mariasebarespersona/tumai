@@ -387,15 +387,11 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
             header_col.append(str(cell.value) if cell.value else "")
         structure["header_col"] = header_col
         
-        # Extract all cells with values, formulas, and format
+        # Extract ALL cells (including empty ones) to preserve exact Excel structure
         cell_values = {}
         for row in range(1, max_row + 1):
             for col in range(1, max_col + 1):
                 cell = ws.cell(row=row, column=col)
-                
-                # Skip empty cells
-                if cell.value is None and not cell.data_type == 'f':  # f = formula
-                    continue
                 
                 # Convert column number to letter (A, B, ..., Z, AA, AB, ...)
                 col_letter = ""
@@ -407,7 +403,7 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                 
                 cell_address = f"{col_letter}{row}"
                 
-                # Get value
+                # Get value (even if empty)
                 value = cell.value
                 formula = None
                 if cell.data_type == 'f':
@@ -434,6 +430,30 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                 else:
                     cell_format["bold"] = False
                 
+                # Get borders if present
+                if cell.border:
+                    borders = {}
+                    if cell.border.left:
+                        borders["left"] = str(cell.border.left.style) if cell.border.left.style else None
+                    if cell.border.right:
+                        borders["right"] = str(cell.border.right.style) if cell.border.right.style else None
+                    if cell.border.top:
+                        borders["top"] = str(cell.border.top.style) if cell.border.top.style else None
+                    if cell.border.bottom:
+                        borders["bottom"] = str(cell.border.bottom.style) if cell.border.bottom.style else None
+                    if borders:
+                        cell_format["borders"] = borders
+                
+                # Get alignment if present
+                if cell.alignment:
+                    alignment = {}
+                    if cell.alignment.horizontal:
+                        alignment["horizontal"] = str(cell.alignment.horizontal)
+                    if cell.alignment.vertical:
+                        alignment["vertical"] = str(cell.alignment.vertical)
+                    if alignment:
+                        cell_format["alignment"] = alignment
+                
                 # Get row and column labels
                 row_label = None
                 col_label = None
@@ -443,10 +463,12 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                 if col > 1:  # Skip header column
                     col_label = header_row[col - 1] if col - 1 < len(header_row) else None
                 
+                # Store ALL cells in structure (including empty ones)
                 structure["cells"].append({
                     "address": cell_address,
                     "row": row,
                     "col": col,
+                    "col_letter": col_letter,
                     "value": str(value) if value is not None else "",
                     "formula": formula if formula and isinstance(formula, str) and formula.startswith("=") else None,
                     "format": cell_format,
@@ -454,10 +476,10 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                     "col_label": col_label
                 })
                 
-                # Store for values table
-                if value is not None:
+                # Store for values table (only if has value or formula)
+                if value is not None or formula:
                     cell_values[cell_address] = {
-                        "value": str(value),
+                        "value": str(value) if value is not None else "",
                         "row_label": row_label,
                         "col_label": col_label,
                         "format": cell_format
@@ -551,16 +573,22 @@ def get_numbers_table_structure(property_id: str, template_key: str) -> Dict:
 
 def get_numbers_table_values(property_id: str, template_key: str) -> Dict:
     """Get all cell values for a property's Numbers table."""
+    import logging
+    logger = logging.getLogger(__name__)
     try:
         sb.postgrest.schema = "public"
+        logger.info(f"[get_numbers_table_values] Fetching values for property_id={property_id}, template_key={template_key}")
         result = sb.rpc("get_numbers_table_values", {
             "p_property_id": property_id,
             "p_template_key": template_key
         }).execute()
-        return result.data if result.data else {}
+        values = result.data if result.data else {}
+        logger.info(f"[get_numbers_table_values] Retrieved {len(values)} values from DB")
+        if values:
+            logger.info(f"[get_numbers_table_values] Sample values: {dict(list(values.items())[:5])}")
+        return values
     except Exception as e:
-        import logging
-        logging.error(f"Error getting table values: {e}")
+        logger.error(f"[get_numbers_table_values] Error getting table values: {e}", exc_info=True)
         return {}
 
 
@@ -571,21 +599,32 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
     
     try:
         sb.postgrest.schema = "public"
+        # Normalize cell address to uppercase for consistent storage
+        normalized_cell_address = str(cell_address).upper().strip()
+        logger.info(f"[set_numbers_table_cell] Setting {normalized_cell_address} = '{value}' for property_id={property_id}, template_key={template_key}")
+        logger.info(f"[set_numbers_table_cell] property_id type: {type(property_id)}, value: {property_id}")
+        
+        # Ensure property_id is a valid UUID string
+        if not property_id:
+            raise ValueError("property_id is required")
+        
         result = sb.rpc("set_numbers_table_cell", {
             "p_property_id": property_id,
             "p_template_key": template_key,
-            "p_cell_address": cell_address,
+            "p_cell_address": normalized_cell_address,
             "p_value": str(value) if value is not None else "",
             "p_row_label": row_label,
             "p_col_label": col_label,
             "p_format_json": format_json or {}
         }).execute()
         
+        logger.info(f"[set_numbers_table_cell] RPC result: {result.data}")
+        
         # Validate that the value was saved correctly
         if result.data and result.data.get("ok"):
-            # Verify by reading back the value
+            # Verify by reading back the value (use normalized address)
             values = get_numbers_table_values(property_id, template_key)
-            saved_value = values.get(cell_address, {})
+            saved_value = values.get(normalized_cell_address, {})
             if isinstance(saved_value, dict):
                 saved_value_str = saved_value.get("value", "")
             else:
@@ -593,13 +632,56 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
             
             expected_value_str = str(value) if value is not None else ""
             if saved_value_str == expected_value_str:
-                logger.info(f"✅ Validated: {cell_address} = {value} saved correctly")
-                return {"ok": True, "cell_address": cell_address, "value": value, "validated": True}
+                logger.info(f"✅ Validated: {normalized_cell_address} = {value} saved correctly")
+                return {"ok": True, "cell_address": normalized_cell_address, "value": value, "validated": True}
             else:
                 logger.warning(f"⚠️ Validation failed: expected {expected_value_str}, got {saved_value_str}")
-                return {"ok": False, "cell_address": cell_address, "error": f"Validation failed: expected {expected_value_str}, got {saved_value_str}"}
+                return {"ok": False, "cell_address": normalized_cell_address, "error": f"Validation failed: expected {expected_value_str}, got {saved_value_str}"}
         
-        return result.data if result.data else {"ok": True, "cell_address": cell_address, "value": value, "validated": False}
+        return result.data if result.data else {"ok": True, "cell_address": normalized_cell_address, "value": value, "validated": False}
     except Exception as e:
         logger.error(f"Error setting cell value {cell_address}: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def clear_numbers_table_cell(property_id: str, template_key: str, cell_address: str) -> Dict:
+    """Clear/delete a cell value in the Numbers table. Returns validated result."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        sb.postgrest.schema = "public"
+        # Delete the cell value by setting it to empty string (or we can delete the row)
+        # Using set_numbers_table_cell with empty value to clear it
+        result = sb.rpc("set_numbers_table_cell", {
+            "p_property_id": property_id,
+            "p_template_key": template_key,
+            "p_cell_address": cell_address,
+            "p_value": "",  # Empty string to clear the value
+            "p_row_label": None,
+            "p_col_label": None,
+            "p_format_json": {}
+        }).execute()
+        
+        # Validate that the value was deleted correctly
+        if result.data and result.data.get("ok"):
+            # Verify by reading back the value - it should be empty or not exist
+            values = get_numbers_table_values(property_id, template_key)
+            saved_value = values.get(cell_address, {})
+            if isinstance(saved_value, dict):
+                saved_value_str = saved_value.get("value", "")
+            else:
+                saved_value_str = str(saved_value) if saved_value else ""
+            
+            # Value should be empty string or not exist
+            if saved_value_str == "" or saved_value_str is None:
+                logger.info(f"✅ Validated: {cell_address} cleared successfully")
+                return {"ok": True, "cell_address": cell_address, "cleared": True, "validated": True}
+            else:
+                logger.warning(f"⚠️ Validation failed: expected empty, got {saved_value_str}")
+                return {"ok": False, "cell_address": cell_address, "error": f"Validation failed: expected empty, got {saved_value_str}"}
+        
+        return result.data if result.data else {"ok": True, "cell_address": cell_address, "cleared": True, "validated": False}
+    except Exception as e:
+        logger.error(f"Error clearing cell value {cell_address}: {e}")
         return {"ok": False, "error": str(e)}

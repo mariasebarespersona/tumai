@@ -19,7 +19,7 @@ from tools.summary_ppt import build_summary_ppt
 from tools.property_tools import get_property as db_get_property
 from tools.supabase_client import sb, BUCKET
 from tools.numbers_tools import get_numbers, set_number, calc_numbers
-from tools.numbers_tools import import_excel_template, get_numbers_table_structure, get_numbers_table_values, set_numbers_table_cell
+from tools.numbers_tools import import_excel_template, get_numbers_table_structure, get_numbers_table_values, set_numbers_table_cell, clear_numbers_table_cell
 from tools.numbers_agent import (
     compute_and_log as numbers_compute_and_log,
     generate_numbers_excel,
@@ -880,6 +880,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Exception handler to catch validation errors before they reach our functions
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    """Catch FastAPI validation errors and log them before returning 422."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.error(f"[FastAPI Validation Error] Path: {request.url.path}")
+    logger.error(f"[FastAPI Validation Error] Method: {request.method}")
+    logger.error(f"[FastAPI Validation Error] Headers: {dict(request.headers)}")
+    logger.error(f"[FastAPI Validation Error] Error details: {exc.errors()}")
+    logger.error(f"[FastAPI Validation Error] Body: {await request.body() if hasattr(request, 'body') else 'N/A'}")
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "ok": False,
+            "error": "FastAPI validation error",
+            "details": exc.errors(),
+            "path": str(request.url.path)
+        }
+    )
 
 @app.get("/")
 async def healthcheck():
@@ -2236,51 +2261,31 @@ async def api_get_table_values(property_id: str, template_key: str):
 
 
 @app.post("/api/numbers/set-cell-value")
-async def api_set_cell_value(request: Request):
+async def api_set_cell_value(
+    property_id: str = Form(...),
+    template_key: str = Form(...),
+    cell_address: str = Form(...),
+    value: str = Form(""),
+    row_label: str | None = Form(None),
+    col_label: str | None = Form(None)
+):
     """Set a cell value in the Numbers table.
-    Supports both form data and JSON body."""
+    Accepts FormData with property_id, template_key, cell_address, and value."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"[api_set_cell_value] ⚡ Function called!")
+    logger.info(f"[api_set_cell_value] Received: property_id={property_id}, template_key={template_key}, cell_address={cell_address}, value={value}")
+    
     try:
-        content_type = request.headers.get("content-type", "")
-        
-        # Support JSON body (for Next.js import endpoint)
-        if content_type.startswith("application/json"):
-            data = await request.json()
-            property_id = data.get("property_id")
-            template_key = data.get("template_key")
-            cell_address = data.get("cell_address")
-            value = data.get("value")
-            row_label = data.get("row_label")
-            col_label = data.get("col_label")
-            format_json = data.get("format_json")
-        else:
-            # Support FormData
-            form_data = await request.form()
-            property_id = form_data.get("property_id")
-            template_key = form_data.get("template_key")
-            cell_address = form_data.get("cell_address")
-            value = form_data.get("value")
-            row_label = form_data.get("row_label")
-            col_label = form_data.get("col_label")
-            format_json = None
-            
-            # Convert to strings if they exist
-            if property_id:
-                property_id = str(property_id)
-            if template_key:
-                template_key = str(template_key)
-            if cell_address:
-                cell_address = str(cell_address)
-            if value is not None:
-                value = str(value)
-            if row_label:
-                row_label = str(row_label)
-            if col_label:
-                col_label = str(col_label)
+        format_json = None  # Can be added later if needed
         
         if not property_id or not template_key or not cell_address:
+            error_msg = f"property_id, template_key, and cell_address are required. Got: property_id={property_id}, template_key={template_key}, cell_address={cell_address}"
+            logger.error(f"[api_set_cell_value] {error_msg}")
             return JSONResponse({
                 "ok": False, 
-                "error": f"property_id, template_key, and cell_address are required. Got: property_id={property_id}, template_key={template_key}, cell_address={cell_address}"
+                "error": error_msg
             }, status_code=400)
         
         result = set_numbers_table_cell(property_id, template_key, cell_address, value or "", row_label, col_label, format_json)
@@ -2291,6 +2296,51 @@ async def api_set_cell_value(request: Request):
     except Exception as e:
         import logging
         logging.error(f"Error in api_set_cell_value: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/clear-cell-value")
+async def api_clear_cell_value(request: Request):
+    """Clear/delete a cell value in the Numbers table.
+    Supports both form data and JSON body."""
+    try:
+        content_type = request.headers.get("content-type", "")
+        
+        # Support JSON body
+        if content_type.startswith("application/json"):
+            data = await request.json()
+            property_id = data.get("property_id")
+            template_key = data.get("template_key")
+            cell_address = data.get("cell_address")
+        else:
+            # Support FormData
+            form_data = await request.form()
+            property_id = form_data.get("property_id")
+            template_key = form_data.get("template_key")
+            cell_address = form_data.get("cell_address")
+            
+            # Convert to strings if they exist
+            if property_id:
+                property_id = str(property_id)
+            if template_key:
+                template_key = str(template_key)
+            if cell_address:
+                cell_address = str(cell_address)
+        
+        if not property_id or not template_key or not cell_address:
+            return JSONResponse({
+                "ok": False, 
+                "error": f"property_id, template_key, and cell_address are required. Got: property_id={property_id}, template_key={template_key}, cell_address={cell_address}"
+            }, status_code=400)
+        
+        result = clear_numbers_table_cell(property_id, template_key, cell_address)
+        if result.get("ok"):
+            return JSONResponse(result)
+        else:
+            return JSONResponse(result, status_code=500)
+    except Exception as e:
+        import logging
+        logging.error(f"Error in api_clear_cell_value: {e}", exc_info=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
@@ -2422,6 +2472,62 @@ async def api_export_numbers_table(property_id: str, template_key: str = "R2B"):
     except Exception as e:
         import logging
         logging.error(f"Error exporting numbers table: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/numbers/debug-values")
+async def api_debug_values(property_id: str = None, template_key: str = "R2B"):
+    """Debug endpoint to see what values are stored in the database.
+    If property_id is not provided, returns all values from all properties."""
+    from tools.numbers_tools import get_numbers_table_values, get_numbers_table_structure
+    from tools.supabase_client import sb
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        if not property_id:
+            # Return all values from all properties
+            sb.postgrest.schema = "public"
+            result = sb.table("numbers_table_values").select("*").eq("template_key", template_key).execute()
+            all_values = {}
+            for row in result.data or []:
+                prop_id = str(row.get("property_id", ""))
+                cell_addr = str(row.get("cell_address", "")).upper()
+                if prop_id not in all_values:
+                    all_values[prop_id] = {}
+                all_values[prop_id][cell_addr] = {
+                    "value": row.get("value", ""),
+                    "row_label": row.get("row_label"),
+                    "col_label": row.get("col_label"),
+                    "format": row.get("format_json", {})
+                }
+            
+            return JSONResponse({
+                "ok": True,
+                "message": "All values from all properties",
+                "template_key": template_key,
+                "properties": all_values,
+                "property_count": len(all_values),
+                "total_values": sum(len(vals) for vals in all_values.values())
+            })
+        else:
+            # Return values for specific property
+            values = get_numbers_table_values(property_id, template_key)
+            structure = get_numbers_table_structure(property_id, template_key)
+            
+            logger.info(f"[debug-values] property_id={property_id}, template_key={template_key}, values_count={len(values)}")
+            
+            return JSONResponse({
+                "ok": True,
+                "property_id": property_id,
+                "template_key": template_key,
+                "values_count": len(values),
+                "values": values,
+                "structure_cells_count": len(structure.get("cells", [])) if structure else 0,
+                "sample_structure_cells": structure.get("cells", [])[:5] if structure else []
+            })
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}", exc_info=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 

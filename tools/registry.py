@@ -31,6 +31,7 @@ from .numbers_tools import (
     clear_number as _clear_number,
     find_item_by_value as _find_item_by_value,
     set_numbers_table_cell as _set_numbers_table_cell,
+    clear_numbers_table_cell as _clear_numbers_table_cell,
 )
 from .numbers_agent import (
     compute_and_log as _numbers_compute_and_log,
@@ -278,6 +279,20 @@ def set_numbers_table_cell_tool(property_id: str, template_key: str, cell_addres
     return _set_numbers_table_cell(property_id, template_key, cell_address, value)
 
 
+class ClearNumbersTableCellInput(BaseModel):
+    property_id: str
+    template_key: str = Field(default="R2B", description="Template key (usually 'R2B')")
+    cell_address: str = Field(..., description="Excel cell address like 'B5', 'C10', etc.")
+
+@tool("clear_numbers_table_cell")
+def clear_numbers_table_cell_tool(property_id: str, template_key: str, cell_address: str) -> Dict:
+    """Clear/delete a cell value in the Numbers Table (R2B template) using Excel cell addresses.
+    This permanently removes the value from the database.
+    Example: clear_numbers_table_cell(property_id='...', template_key='R2B', cell_address='B7')
+    """
+    return _clear_numbers_table_cell(property_id, template_key, cell_address)
+
+
 class GetNumbersInput(BaseModel):
     property_id: str
 
@@ -468,6 +483,76 @@ class SendEmailInput(BaseModel):
 def send_email_tool(to: List[str], subject: str, html: str) -> Dict:
     """Send an email (no attachments by default)."""
     return _send_email(to, subject, html)
+
+
+class SendNumbersTableEmailInput(BaseModel):
+    property_id: str
+    template_key: str = Field(default="R2B", description="Template key (usually 'R2B')")
+    to: List[str] = Field(..., description="List of email addresses to send to")
+    subject: Optional[str] = Field(default=None, description="Email subject (optional, will use default if not provided)")
+
+@tool("send_numbers_table_email")
+def send_numbers_table_email_tool(property_id: str, template_key: str, to: List[str], subject: Optional[str] = None) -> Dict:
+    """Send the Numbers table Excel file by email.
+    Generates the Excel file from the Numbers table and sends it as an attachment.
+    Example: send_numbers_table_email(property_id='...', template_key='R2B', to=['user@example.com'], subject='Plantilla R2B')
+    """
+    import base64
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"[send_numbers_table_email] Generating Excel for property_id={property_id}, template_key={template_key}")
+        # Generate Excel file using the Numbers Table Framework
+        excel_data = _numbers_table_excel(property_id, template_key)
+        
+        logger.info(f"[send_numbers_table_email] Excel generated successfully, size: {len(excel_data)} bytes")
+        
+        # Decode base64 if needed (export_numbers_table returns base64)
+        # Actually, _numbers_table_excel returns bytes directly, not base64
+        excel_bytes = excel_data
+        
+        # Generate filename
+        filename = f"numbers_table_{template_key}.xlsx"
+        
+        # Default subject if not provided
+        if not subject:
+            subject = f"Plantilla de Números {template_key}"
+        
+        # Create HTML email body
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif;">
+            <h2 style="color: #3d7435;">📊 Plantilla de Números {template_key}</h2>
+            <p>Adjunto encontrarás la plantilla de números {template_key} con todos los valores actuales.</p>
+            <p>Este archivo Excel contiene la estructura completa de la plantilla y todos los valores guardados.</p>
+            <hr>
+            <p style="color: #666; font-size: 12px;">
+                Este email fue generado automáticamente por RAMA Country Living.
+            </p>
+        </body>
+        </html>
+        """
+        
+        # Send email with attachment
+        result = _send_email(to, subject, html, attachments=[(filename, excel_bytes)])
+        
+        logger.info(f"✅ Numbers table Excel sent to {to}: {filename}")
+        return {
+            "ok": True,
+            "sent": True,
+            "to": to,
+            "subject": subject,
+            "filename": filename,
+            "message": f"Plantilla de números {template_key} enviada por email a {', '.join(to)}"
+        }
+    except Exception as e:
+        logger.error(f"Error sending Numbers table email: {e}", exc_info=True)
+        return {
+            "ok": False,
+            "error": str(e),
+            "message": f"Error al enviar la plantilla por email: {str(e)}"
+        }
 
 
 # --- compute_summary tool ---
@@ -739,6 +824,7 @@ TOOLS = [
     clear_number_tool,  # NEW - Clear/delete a specific number value
     find_item_by_value_tool,  # NEW - Find item by value or label
     set_numbers_table_cell_tool,  # NEW - Set cell value in Numbers Table (R2B) using Excel addresses
+    clear_numbers_table_cell_tool,  # NEW - Clear/delete cell value in Numbers Table (R2B) using Excel addresses
     set_numbers_template_tool,  # NEW - Set Numbers template selection
     get_numbers_tool,
     calc_numbers_tool,
@@ -753,6 +839,7 @@ TOOLS = [
     get_summary_spec_tool,
     upsert_summary_value_tool,
     send_email_tool,
+    send_numbers_table_email_tool,  # NEW - Send Numbers table Excel by email
     compute_summary_tool,          # NEW
     build_summary_ppt_tool,        # NEW - Generate PDF summary
     transcribe_audio_tool,         # NEW

@@ -217,6 +217,7 @@ def generate_numbers_table_excel(property_id: str, template_key: str = "R2B") ->
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles.borders import BORDER_THIN, BORDER_MEDIUM, BORDER_THICK
     import io
     
     try:
@@ -224,79 +225,304 @@ def generate_numbers_table_excel(property_id: str, template_key: str = "R2B") ->
         structure = get_numbers_table_structure(property_id, template_key)
         values = get_numbers_table_values(property_id, template_key)
         
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[generate_numbers_table_excel] property_id={property_id}, template_key={template_key}")
+        logger.info(f"[generate_numbers_table_excel] structure keys: {list(structure.keys()) if structure else 'None'}")
+        logger.info(f"[generate_numbers_table_excel] structure cells count: {len(structure.get('cells', [])) if structure else 0}")
+        logger.info(f"[generate_numbers_table_excel] values from DB: {values}")
+        logger.info(f"[generate_numbers_table_excel] values count: {len(values)}")
+        logger.info(f"[generate_numbers_table_excel] Sample values: {dict(list(values.items())[:5]) if values else 'No values'}")
+        
         if not structure or not structure.get("cells"):
-            # Fallback to old method if no structure
-            return generate_numbers_excel(property_id)
+            # DO NOT fallback to old method - raise error instead
+            error_msg = f"No se encontró la estructura de la plantilla {template_key} para la propiedad {property_id}. Por favor, importa primero la plantilla Excel."
+            logger.error(f"[generate_numbers_table_excel] {error_msg}")
+            raise ValueError(error_msg)
         
         # Create workbook
         wb = Workbook()
         ws = wb.active
         ws.title = "Sheet1"
         
-        # Build cell map from values
+        # Build cell map from values (values from DB - these are the updated values added via chat)
+        # CRITICAL: Normalize cell addresses to uppercase for consistent matching
         cell_map = {}
         for cell_addr, cell_data in values.items():
+            # Normalize cell address to uppercase (e.g., "b5" -> "B5")
+            normalized_addr = str(cell_addr).upper().strip()
+            
             if isinstance(cell_data, dict):
-                cell_map[cell_addr] = {
-                    "value": cell_data.get("value", ""),
+                cell_value = cell_data.get("value", "")
+                # Store value even if empty string (to distinguish from None)
+                cell_map[normalized_addr] = {
+                    "value": cell_value if cell_value is not None else "",
                     "format": cell_data.get("format", {})
                 }
+                logger.info(f"[generate_numbers_table_excel] Loaded value from DB: {normalized_addr} = '{cell_value}' (original: {cell_addr})")
             else:
                 # Legacy format: just value
-                cell_map[cell_addr] = {"value": str(cell_data), "format": {}}
+                cell_map[normalized_addr] = {"value": str(cell_data), "format": {}}
+                logger.info(f"[generate_numbers_table_excel] Loaded value from DB (legacy): {normalized_addr} = '{cell_data}' (original: {cell_addr})")
         
-        # Write cells from structure
+        logger.info(f"[generate_numbers_table_excel] Total values loaded from DB: {len(cell_map)}")
+        logger.info(f"[generate_numbers_table_excel] Cell addresses in DB: {sorted(list(cell_map.keys()))[:10]}")
+        
+        # Create a map of all cells by address for quick lookup
+        structure_cell_map = {}
+        for cell_info in structure.get("cells", []):
+            cell_addr = cell_info.get("address")
+            structure_cell_map[cell_addr] = cell_info
+        
+        # Write ALL cells from structure (preserve exact structure including empty cells)
+        cells_with_db_values = 0
+        cells_with_structure_values = 0
+        cells_with_formulas = 0
+        cells_empty = 0
+        
         for cell_info in structure.get("cells", []):
             cell_addr = cell_info.get("address")
             row = cell_info.get("row", 1)
             col = cell_info.get("col", 1)
             col_letter = cell_info.get("col_letter") or get_column_letter(col)
             
-            # Get value (prefer from cell_map, fallback to structure)
-            value = cell_map.get(cell_addr, {}).get("value") if cell_addr in cell_map else cell_info.get("value")
-            if value is None:
-                value = ""
-            
-            # Write value
             cell = ws[f"{col_letter}{row}"]
-            # Try to convert to number if possible
-            try:
-                if isinstance(value, str) and value.strip() and not value.startswith("="):
-                    num_val = float(value.replace(",", "."))
-                    cell.value = num_val
-                else:
-                    cell.value = value
-            except (ValueError, TypeError):
-                cell.value = str(value)
             
-            # Apply format
-            cell_format = cell_map.get(cell_addr, {}).get("format") or cell_info.get("format", {})
+            # Normalize cell address to uppercase for consistent matching
+            normalized_cell_addr = str(cell_addr).upper().strip()
+            
+            # Check if there's an updated value in cell_map (from DB)
+            updated_value_data = cell_map.get(normalized_cell_addr)
+            
+            # DEBUG: Log if we're looking for a specific cell
+            if normalized_cell_addr in ["B5", "C10", "D8"]:  # Common test cells
+                logger.info(f"[generate_numbers_table_excel] 🔍 Checking cell {normalized_cell_addr}: DB data = {updated_value_data}, structure value = {cell_info.get('value')}")
+            
+            # Priority: 1) Updated value from DB, 2) Formula from structure, 3) Original value from structure
+            if updated_value_data is not None:
+                # We have a value from DB (even if it's empty string, it means it was explicitly set)
+                if isinstance(updated_value_data, dict):
+                    value = updated_value_data.get("value", "")
+                else:
+                    value = str(updated_value_data)
+                
+                # Apply value from DB (this is the value added via chat)
+                # CRITICAL: Always apply DB values, even if they seem empty
+                logger.info(f"[generate_numbers_table_excel] ✅ DB value found for {normalized_cell_addr}: '{value}' (type: {type(value)})")
+                try:
+                    if isinstance(value, str) and value.strip() and not value.startswith("="):
+                        # Try to convert to number
+                        num_val = float(value.replace(",", "."))
+                        cell.value = num_val
+                        logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to number: {num_val}")
+                        cells_with_db_values += 1
+                    elif isinstance(value, str) and value.strip() == "":
+                        # Empty string from DB - set to empty
+                        cell.value = ""
+                        logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to empty string (from DB)")
+                        cells_with_db_values += 1
+                    else:
+                        cell.value = value
+                        logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to value: '{value}'")
+                        cells_with_db_values += 1
+                except (ValueError, TypeError) as e:
+                    cell.value = str(value) if value is not None else ""
+                    logger.warning(f"[generate_numbers_table_excel] ⚠️ Error converting value for {normalized_cell_addr}: {e}, set to string: '{value}'")
+                    cells_with_db_values += 1
+            elif cell_info.get("formula"):
+                # Preserve formula from original Excel
+                cell.value = cell_info.get("formula")
+                logger.debug(f"[generate_numbers_table_excel] Using formula for {normalized_cell_addr}: {cell_info.get('formula')}")
+                cells_with_formulas += 1
+            else:
+                # Use original value from structure
+                value = cell_info.get("value", "")
+                if value:
+                    try:
+                        if isinstance(value, str) and value.strip() and not value.startswith("="):
+                            num_val = float(value.replace(",", "."))
+                            cell.value = num_val
+                        else:
+                            cell.value = value
+                        cells_with_structure_values += 1
+                    except (ValueError, TypeError):
+                        cell.value = str(value)
+                        cells_with_structure_values += 1
+                else:
+                    # Empty cell - preserve as empty
+                    cell.value = None
+                    logger.debug(f"[generate_numbers_table_excel] Empty cell {normalized_cell_addr} (no DB value, no formula, no structure value)")
+                    cells_empty += 1
+            
+            # Apply format (prefer format from structure to preserve original formatting)
+            # Only use format from cell_map if it's more complete
+            structure_format = cell_info.get("format", {})
+            updated_format = cell_map.get(normalized_cell_addr, {}).get("format", {}) if isinstance(cell_map.get(normalized_cell_addr), dict) else {}
+            # Merge formats: structure format as base, updated format can override
+            cell_format = {**structure_format, **updated_format}
             if cell_format:
-                # Background color
+                # Background color - REMOVE ALL BLACK/DARK COLORS
                 if cell_format.get("bg_color"):
                     bg_color = cell_format["bg_color"]
                     if isinstance(bg_color, str):
-                        # Convert hex to RGB if needed
+                        # Remove # if present
                         if bg_color.startswith("#"):
                             bg_color = bg_color[1:]
+                        
+                        # Normalize to 6-char RGB format for comparison
+                        rgb_part = bg_color
+                        if len(bg_color) == 8:
+                            # ARGB format - extract RGB part (last 6 chars)
+                            rgb_part = bg_color[2:].upper()
+                        elif len(bg_color) == 6:
+                            rgb_part = bg_color.upper()
+                        
+                        # Check if color is black or very dark (all RGB values <= 5)
+                        # Convert hex to decimal to check darkness
                         try:
-                            fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
-                            cell.fill = fill
-                        except:
-                            pass
+                            r = int(rgb_part[0:2], 16)
+                            g = int(rgb_part[2:4], 16)
+                            b = int(rgb_part[4:6], 16)
+                            
+                            # Skip if all RGB components are <= 5 (very dark/black)
+                            if r <= 5 and g <= 5 and b <= 5:
+                                logger.info(f"[generate_numbers_table_excel] Skipping black/dark background color {rgb_part} (RGB: {r},{g},{b}) for cell {cell_addr}")
+                                # Remove bg_color from format to prevent application
+                                cell_format = {k: v for k, v in cell_format.items() if k != "bg_color"}
+                            else:
+                                # Apply color if not black/dark
+                                try:
+                                    if len(bg_color) == 6:
+                                        fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type="solid")
+                                        cell.fill = fill
+                                    elif len(bg_color) == 8:
+                                        # ARGB format - use last 6 chars (RGB)
+                                        fill = PatternFill(start_color=bg_color[2:], end_color=bg_color[2:], fill_type="solid")
+                                        cell.fill = fill
+                                except Exception as fill_error:
+                                    logger.warning(f"[generate_numbers_table_excel] Error applying background color {bg_color} to cell {cell_addr}: {fill_error}")
+                        except (ValueError, IndexError) as parse_error:
+                            logger.warning(f"[generate_numbers_table_excel] Could not parse color {bg_color} for cell {cell_addr}: {parse_error}")
+                            # Remove bg_color from format if we can't parse it
+                            cell_format = {k: v for k, v in cell_format.items() if k != "bg_color"}
                 
                 # Font
                 font_kwargs = {}
                 if cell_format.get("font_color"):
-                    font_kwargs["color"] = cell_format["font_color"]
+                    font_color = cell_format["font_color"]
+                    # Convert to aRGB hex format if needed
+                    # openpyxl expects aRGB hex (8 chars: AARRGGBB) or RGB hex (6 chars: RRGGBB)
+                    if isinstance(font_color, str):
+                        # Remove # if present
+                        if font_color.startswith("#"):
+                            font_color = font_color[1:]
+                        # If it's 6 chars (RGB), it's valid
+                        # If it's 8 chars (ARGB), it's valid
+                        # If it's something else, try to convert or skip
+                        if len(font_color) == 6:
+                            # RGB format - add FF for alpha to make it ARGB
+                            font_color = "FF" + font_color.upper()
+                        elif len(font_color) == 8:
+                            # Already ARGB format
+                            font_color = font_color.upper()
+                        else:
+                            # Invalid format - skip color
+                            logger.warning(f"[generate_numbers_table_excel] Invalid font_color format: {font_color}, skipping")
+                            font_color = None
+                        
+                        if font_color:
+                            font_kwargs["color"] = font_color
+                    else:
+                        # Not a string - skip
+                        logger.warning(f"[generate_numbers_table_excel] font_color is not a string: {type(font_color)}, skipping")
+                
                 if cell_format.get("bold"):
                     font_kwargs["bold"] = True
+                
                 if font_kwargs:
-                    cell.font = Font(**font_kwargs)
+                    try:
+                        cell.font = Font(**font_kwargs)
+                    except Exception as font_error:
+                        logger.warning(f"[generate_numbers_table_excel] Error applying font format: {font_error}, skipping font")
+                
+                # Apply borders if present
+                if cell_format.get("borders"):
+                    borders_dict = cell_format["borders"]
+                    border_style_map = {
+                        "thin": Side(style=BORDER_THIN),
+                        "medium": Side(style=BORDER_MEDIUM),
+                        "thick": Side(style=BORDER_THICK),
+                    }
+                    border_sides = {}
+                    for side_name in ["left", "right", "top", "bottom"]:
+                        if borders_dict.get(side_name):
+                            style_str = borders_dict[side_name].lower()
+                            border_sides[side_name] = border_style_map.get(style_str, Side(style=BORDER_THIN))
+                    if border_sides:
+                        try:
+                            cell.border = Border(**border_sides)
+                        except Exception as border_error:
+                            logger.warning(f"[generate_numbers_table_excel] Error applying border: {border_error}, skipping")
+                
+                # Apply alignment if present
+                if cell_format.get("alignment"):
+                    align_dict = cell_format["alignment"]
+                    try:
+                        alignment_kwargs = {}
+                        if align_dict.get("horizontal"):
+                            alignment_kwargs["horizontal"] = align_dict["horizontal"]
+                        if align_dict.get("vertical"):
+                            alignment_kwargs["vertical"] = align_dict["vertical"]
+                        if alignment_kwargs:
+                            cell.alignment = Alignment(**alignment_kwargs)
+                    except Exception as align_error:
+                        logger.warning(f"[generate_numbers_table_excel] Error applying alignment: {align_error}, skipping")
         
-        # Set column widths (basic)
-        for col_idx in range(1, structure.get("columns", 5) + 1):
-            ws.column_dimensions[get_column_letter(col_idx)].width = 15
+        # Set column widths (basic - could be improved by storing original widths)
+        max_col = structure.get("columns", 5)
+        for col_idx in range(1, max_col + 1):
+            col_letter = get_column_letter(col_idx)
+            ws.column_dimensions[col_letter].width = 15
+        
+        # CRITICAL: Also write cells that are in DB but NOT in structure (e.g., B5 that was empty in original Excel)
+        # These are cells that were added via chat but didn't exist in the original structure
+        db_only_cells = set(cell_map.keys()) - {cell_info.get("address", "").upper() for cell_info in structure.get("cells", [])}
+        if db_only_cells:
+            logger.info(f"[generate_numbers_table_excel] Found {len(db_only_cells)} cells in DB that are not in structure: {sorted(list(db_only_cells))}")
+            for cell_addr in db_only_cells:
+                cell_data = cell_map[cell_addr]
+                value = cell_data.get("value", "") if isinstance(cell_data, dict) else str(cell_data)
+                
+                # Parse cell address (e.g., "B5" -> row=5, col=2)
+                import re
+                match = re.match(r'([A-Z]+)(\d+)', cell_addr.upper())
+                if match:
+                    col_letters = match.group(1)
+                    row_num = int(match.group(2))
+                    
+                    # Convert column letters to number (A=1, B=2, ..., Z=26, AA=27, etc.)
+                    col_num = 0
+                    for char in col_letters:
+                        col_num = col_num * 26 + (ord(char) - ord('A') + 1)
+                    
+                    col_letter = get_column_letter(col_num)
+                    cell = ws[f"{col_letter}{row_num}"]
+                    
+                    # Apply value
+                    try:
+                        if isinstance(value, str) and value.strip() and not value.startswith("="):
+                            num_val = float(value.replace(",", "."))
+                            cell.value = num_val
+                            logger.info(f"[generate_numbers_table_excel] ✅ Set DB-only cell {cell_addr} to number: {num_val}")
+                        else:
+                            cell.value = value
+                            logger.info(f"[generate_numbers_table_excel] ✅ Set DB-only cell {cell_addr} to value: '{value}'")
+                    except (ValueError, TypeError) as e:
+                        cell.value = str(value) if value is not None else ""
+                        logger.warning(f"[generate_numbers_table_excel] ⚠️ Error converting DB-only cell {cell_addr}: {e}, set to string: '{value}'")
+        
+        logger.info(f"[generate_numbers_table_excel] Excel generated: {max_col} columns, {structure.get('rows', 0)} rows, {len(structure.get('cells', []))} cells written")
+        logger.info(f"[generate_numbers_table_excel] 📊 Summary: {cells_with_db_values} cells with DB values, {cells_with_structure_values} cells with structure values, {cells_with_formulas} cells with formulas, {cells_empty} empty cells, {len(db_only_cells)} DB-only cells added")
         
         # Save to bytes
         buf = io.BytesIO()
@@ -305,9 +531,10 @@ def generate_numbers_table_excel(property_id: str, template_key: str = "R2B") ->
         
     except Exception as e:
         import logging
-        logging.error(f"Error generating Numbers table Excel: {e}", exc_info=True)
-        # Fallback to old method
-        return generate_numbers_excel(property_id)
+        logger = logging.getLogger(__name__)
+        logger.error(f"[generate_numbers_table_excel] Error generating Numbers table Excel: {e}", exc_info=True)
+        # DO NOT fallback to old method - re-raise the error
+        raise ValueError(f"Error al generar el Excel de la plantilla {template_key}: {str(e)}")
 
 
 # ------------------ Scenarios & Sensitivity ------------------

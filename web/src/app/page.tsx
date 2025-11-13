@@ -196,15 +196,17 @@ export default function ChatPage() {
       const answer = String(data?.answer ?? '')
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
       
-      // Auto-reload Numbers table if agent confirms a value update
+      // Auto-reload Numbers table if agent confirms a value update or deletion
       if (excelTemplate && propertyId) {
         const updateKeywords = ['actualizado', 'guardado', 'he actualizado', 'he guardado', 'valor actualizado', 'valor guardado', 'actualicé', 'guardé']
+        const deleteKeywords = ['borrado', 'eliminado', 'he borrado', 'he eliminado', 'valor borrado', 'valor eliminado', 'borré', 'eliminé']
         const answerLower = answer.toLowerCase()
         const hasUpdate = updateKeywords.some(keyword => answerLower.includes(keyword))
+        const hasDelete = deleteKeywords.some(keyword => answerLower.includes(keyword))
         
-        if (hasUpdate) {
-          console.log('[Numbers Table] 🔄 Detected value update in chat response, reloading table...')
-          // Small delay to ensure backend has saved the value, but don't show progress bar
+        if (hasUpdate || hasDelete) {
+          console.log('[Numbers Table] 🔄 Detected value update/delete in chat response, reloading table...')
+          // Small delay to ensure backend has saved/deleted the value, but don't show progress bar
           setTimeout(() => {
             loadAddresses(false)
           }, 500)
@@ -497,20 +499,22 @@ export default function ChatPage() {
     if (lastProcessedMessageId.current === lastMessage.id) return
     
     const updateKeywords = ['actualizado', 'guardado', 'he actualizado', 'he guardado', 'valor actualizado', 'valor guardado', 'actualicé', 'guardé']
+    const deleteKeywords = ['borrado', 'eliminado', 'he borrado', 'he eliminado', 'valor borrado', 'valor eliminado', 'borré', 'eliminé']
     const answerLower = lastMessage.content.toLowerCase()
     const hasUpdate = updateKeywords.some(keyword => answerLower.includes(keyword))
+    const hasDelete = deleteKeywords.some(keyword => answerLower.includes(keyword))
     
-      if (hasUpdate) {
-        console.log('[Numbers Table] 🔄 Auto-reload triggered by assistant update confirmation:', lastMessage.content.substring(0, 50))
-        // Mark this message as processed
-        lastProcessedMessageId.current = lastMessage.id
-        // Delay to ensure backend has saved the value, but DON'T show loading state
-        const timeoutId = setTimeout(() => {
-          // Reload without showing progress bar (silent reload)
-          loadAddresses(false)
-        }, 800)
-        return () => clearTimeout(timeoutId)
-      }
+    if (hasUpdate || hasDelete) {
+      console.log('[Numbers Table] 🔄 Auto-reload triggered by assistant update/delete confirmation:', lastMessage.content.substring(0, 50))
+      // Mark this message as processed
+      lastProcessedMessageId.current = lastMessage.id
+      // Delay to ensure backend has saved/deleted the value, but DON'T show loading state
+      const timeoutId = setTimeout(() => {
+        // Reload without showing progress bar (silent reload)
+        loadAddresses(false)
+      }, 800)
+      return () => clearTimeout(timeoutId)
+    }
   }, [messages, excelTemplate, propertyId, addressesData, loadAddresses])
 
   // Auto-show addresses by default when Excel panel/template is active
