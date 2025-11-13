@@ -300,8 +300,11 @@ def _wants_property_search(text: str) -> bool:
     # Only detect EXPLICIT property switching commands with clear verbs
     if re.search(r"\b(trabajar|usar|utilizar|cambiar|switch)\b", t) and re.search(r"\b(propiedad|property|con|en)\b", t):
         return True
-    # "metete en/a X", "vamos a X" with explicit property mention
-    if re.search(r"\b(metete|meter|vamos|voy)\b", t) and re.search(r"\b(propiedad|property|casa|finca)\b", t):
+    # "metete en/a X", "vamos a X", "entrar en X", "quiero entrar en X" with explicit property mention
+    if re.search(r"\b(metete|meter|vamos|voy|entrar|entra|quiero entrar)\b", t) and re.search(r"\b(propiedad|property|casa|finca|demo)\b", t):
+        return True
+    # "quiero entrar en Casa Demo 12" - detect even without explicit "propiedad" word
+    if re.search(r"\b(quiero\s+)?entrar\s+en\b", t) and re.search(r"\b(casa|demo|finca|propiedad)\b", t, re.IGNORECASE):
         return True
     return False
 

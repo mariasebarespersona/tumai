@@ -160,8 +160,15 @@ class SignedUrlInput(BaseModel):
 
 @tool("signed_url_for")
 def signed_url_for_tool(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
-    """Create a short-lived signed URL for a stored document."""
-    return {"signed_url": _signed_url_for(property_id, document_group, document_subgroup, document_name)}
+    """Create a signed URL for a stored document. The URL is valid for 24 hours (86400 seconds).
+    Use this when you need to send a document link by email.
+    Returns: {"signed_url": "https://..."}"""
+    # Use 24 hours expiration (86400 seconds) for email links
+    url = _signed_url_for(property_id, document_group, document_subgroup, document_name, expires=86400)
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[signed_url_for_tool] Generated URL for {document_name}, expires in 24h: {url[:50]}...")
+    return {"signed_url": url}
 
 
 class SlotExistsInput(BaseModel):
@@ -481,7 +488,17 @@ class SendEmailInput(BaseModel):
 
 @tool("send_email")
 def send_email_tool(to: List[str], subject: str, html: str) -> Dict:
-    """Send an email (no attachments by default)."""
+    """Send an email (no attachments by default).
+    
+    When sending a document link, the HTML should include a clickable link like:
+    <a href="https://signed-url-here" target="_blank">Descargar documento</a>
+    
+    Example HTML for document:
+    <html><body>
+      <p>Aquí está el documento que solicitaste: [document_name]</p>
+      <p><a href="[signed_url]" target="_blank" style="background-color: #3d7435; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Descargar documento</a></p>
+    </body></html>
+    """
     return _send_email(to, subject, html)
 
 

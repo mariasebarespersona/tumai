@@ -27,28 +27,30 @@
         {
           "tool": "list_docs",
           "args": {"property_id": "<current>"},
-          "reason": "Verificar que existe el documento"
+          "reason": "Verificar que existe el documento y obtener los valores exactos (document_name, document_group, document_subgroup)"
         },
         {
           "tool": "signed_url_for",
           "args": {
             "property_id": "<current>",
-            "document_group": "Compra",
-            "document_name": "Escritura notarial"
+            "document_group": "R2B",
+            "document_subgroup": "Compra",
+            "document_name": "Escritura notarial de compraventa"
           },
-          "reason": "Obtener URL firmada del documento"
+          "reason": "Obtener URL firmada del documento usando los valores EXACTOS de list_docs"
         },
         {
           "tool": "send_email",
           "args": {
             "to": ["<user_email>"],
-            "subject": "Documento: Escritura notarial",
-            "html": "<link_to_document>"
+            "subject": "Documento: Escritura notarial de compraventa",
+            "html": "<html><body><p>Aquí está el documento que solicitaste: Escritura notarial de compraventa</p><p><a href=\"[signed_url]\" target=\"_blank\" style=\"background-color: #3d7435; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;\">Descargar documento</a></p></body></html>"
           },
-          "reason": "Enviar enlace por email"
+          "reason": "Enviar enlace por email con HTML que incluye link clickeable"
         }
       ],
-      "response": "✅ Te he enviado el enlace al documento por email."
+      "response": "✅ Te he enviado el enlace al documento por email.",
+      "critical_note": "SIEMPRE usa los valores EXACTOS que devuelve list_docs: document_name completo, document_group, document_subgroup. NO uses nombres abreviados."
     }
   ],
   "critical_rule": "SIEMPRE usa send_email cuando el usuario pida 'por email/correo/mándame'. NO te limites a mostrar en el chat."
