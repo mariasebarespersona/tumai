@@ -876,9 +876,11 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
 
 # Minimal HTTP app to support the Next.js frontend
 app = FastAPI(title="RAMA AI Backend")
+cors_env = os.getenv("WEB_BASE", "http://localhost:3000,http://localhost:3004,http://localhost:3005,http://localhost:3006")
+allow_all = os.getenv("ALLOW_ALL_CORS", "0") == "1" or cors_env.strip() == "*"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("WEB_BASE", "http://localhost:3004,http://localhost:3005").split(","),
+    allow_origins=["*"] if allow_all else cors_env.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
