@@ -1293,6 +1293,29 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                             logger.info(f"[contracts] {name} args ok")
             except Exception as _e:
                 logger.warning(f"[contracts] validation failed: {_e}")
+            # Thresholds + confirmations (light gating)
+            try:
+                if getattr(ai, "tool_calls", None):
+                    low_conf = float(state.get("intent_confidence") or 0.0) < 0.8
+                    # Tools that always require explicit confirmation
+                    confirm_tools = {"send_email", "upload_and_link", "delete_property"}
+                    write_tools = {"set_numbers_table_cell", "clear_numbers_table_cell", "export_numbers_table"}
+                    needs_confirm = False
+                    for tc in ai.tool_calls:
+                        tname = tc.get("name")
+                        if tname in confirm_tools:
+                            needs_confirm = True
+                            break
+                        if low_conf and tname in write_tools:
+                            needs_confirm = True
+                            break
+                    if needs_confirm:
+                        # Replace tool_calls with a confirmation question
+                        question = "Necesito tu confirmación antes de ejecutar esta acción. ¿Confirmas que proceda?"
+                        ai = AIMessage(content=question)
+                        return {"messages": [ai], "awaiting_confirmation": True, "last_llm_timestamp": time.time()}
+            except Exception as _e:
+                logger.warning(f"[confirm] gating failed: {_e}")
     except Exception as e:
         # Manejar errores de rate limit y otros errores de API
         error_msg = str(e).lower()
