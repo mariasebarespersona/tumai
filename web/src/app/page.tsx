@@ -996,16 +996,14 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
           </div>
         </div>
         
-        {/* Excel iframe - shows actual Excel from OneDrive */}
+        {/* Spreadsheet replica (DB-backed) */}
         <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
           <div className="absolute top-2 right-2 z-10 px-3 py-1.5 rounded-lg bg-[color:var(--c-green-100)] text-[color:var(--c-green-800)] text-xs font-semibold flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[color:var(--c-green-500)] animate-pulse"></span>
             <span>Sincronizado</span>
           </div>
-          {/** Replace iframe with in-app Spreadsheet for realtime editing */}
-          {excelUrl ? (
-            // Show mirrored in-app Spreadsheet for realtime editing/viewing
-            <div className="relative w-full h-[70vh] flex flex-col">
+          {/* Show mirrored in-app Spreadsheet for realtime editing/viewing */}
+          <div className="relative w-full h-[70vh] flex flex-col">
               <div className="flex-1 overflow-auto p-4 relative" style={{ minHeight: '400px' }}>
                 {/* Progress bar overlay - ALWAYS show when addressesLoading is true */}
                 {addressesLoading ? (
@@ -1050,9 +1048,8 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                             : '⏱️ Finalizando...'}
                         </div>
                       )}
-                    </div>
-                  </div>
-                ) : null}
+              </div>
+            </div>
                 
                 {/* Main content */}
                 {addressesData && addressesData.length > 0 ? (

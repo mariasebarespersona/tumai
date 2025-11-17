@@ -2,6 +2,7 @@ from __future__ import annotations
 import os, smtplib, ssl
 from email.message import EmailMessage
 from typing import List
+from uuid import uuid4
 
 SMTP_HOST = os.getenv("SMTP_HOST")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -64,5 +65,6 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
     except Exception as e:
         logger.error(f"[send_email] ❌ Error sending email: {e}", exc_info=True)
         raise
-    
-    return {"sent": True, "to": to, "subject": subject}
+    # Generate a synthetic message_id for verification/logging
+    message_id = f"<{uuid4()}@rama.local>"
+    return {"sent": True, "to": to, "subject": subject, "message_id": message_id}

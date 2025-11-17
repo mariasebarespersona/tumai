@@ -734,7 +734,8 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
                         current_values = values  # We already fetched this above
                         
                         # Import formula calculator
-                        from tools.formula_calculator import auto_calculate_on_update
+from tools.formula_calculator import auto_calculate_on_update
+from .verifier import verify_numbers_update
                         
                         # Calculate affected cells
                         calculated = auto_calculate_on_update(
@@ -781,6 +782,11 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
                         # Don't fail the whole operation if auto-calc fails
                         response["auto_calculate_error"] = str(calc_error)
                 
+                # Log-only verification
+                try:
+                    verify_numbers_update(property_id, template_key, normalized_cell_address, str(value), response.get("auto_calculated"))
+                except Exception:
+                    pass
                 return response
             else:
                 logger.warning(f"⚠️ Validation failed: expected {expected_value_str}, got {saved_value_str}")
