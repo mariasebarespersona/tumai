@@ -233,6 +233,7 @@ export default function ChatPage() {
           /Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
           /establecido la plantilla de Números (?:como|:)\s*([^\.\n]+)/i,
           /plantilla de Números:\s*([^\.\n]+)/i,
+          /La plantilla\s+["'“”]?([^\n"'“”]+)["'“”]?\s+ya está seleccionada/i, // e.g., La plantilla "R2B" ya está seleccionada
         ]
         for (const pattern of patterns) {
           const m = answer.match(pattern)
@@ -288,7 +289,17 @@ export default function ChatPage() {
   const [estimatedTime, setEstimatedTime] = useState(0) // total estimated seconds
   // autoSync removed - all changes are saved directly to DB
 
-  const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
+  // Backend URL (defensive sanitation in case .env lines were concatenated)
+  const RAW_BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
+  const BACKEND_URL = (() => {
+    let s = String(RAW_BACKEND_URL || '').trim()
+    // If someone accidentally appended another env line into the value, cut before it
+    const cutIdx = s.indexOf('NEXT_PUBLIC_API_URL=')
+    if (cutIdx >= 0) s = s.slice(0, cutIdx)
+    // Remove trailing quotes
+    s = s.replace(/"+$/g, '').trim()
+    return s || 'http://127.0.0.1:7901'
+  })()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const [zoom, setZoom] = useState<number>(0.85) // 85% default
   const BASE_W = 1600
@@ -322,7 +333,7 @@ export default function ChatPage() {
       console.log('[Numbers Table] structure response', structureData)
       
       // Handle both response formats: {ok: true, structure: {...}} and direct structure
-      let structure = {}
+      let structure: any = {}
       if (structureData?.ok && structureData?.structure) {
         structure = structureData.structure
       } else if (structureData?.structure) {
@@ -739,6 +750,7 @@ export default function ChatPage() {
             /Usaremos la plantilla de Números:\s*([^\.\n]+)/i,
             /establecido la plantilla de Números (?:como|:)\s*([^\.\n]+)/i,
             /plantilla de Números:\s*([^\.\n]+)/i,
+            /La plantilla\s+["'“”]?([^\n"'“”]+)["'“”]?\s+ya está seleccionada/i,
           ]
           for (const pattern of patterns) {
             const m = String(data.answer).match(pattern)
@@ -911,23 +923,8 @@ export default function ChatPage() {
   }, [])
 
   const excelUrl = useMemo(() => {
-    if (!excelTemplate) return ''
-    const map: Record<string, string | undefined> = {
-      'R2B': process.env.NEXT_PUBLIC_EXCEL_EMBED_R2B,
-      'R2B + PM': process.env.NEXT_PUBLIC_EXCEL_EMBED_R2B_PM,
-      'R2B + PM + Venta certs': process.env.NEXT_PUBLIC_EXCEL_EMBED_R2B_PM_VENTA,
-      'Promoción': process.env.NEXT_PUBLIC_EXCEL_EMBED_PROMOCION,
-      'Promocion': process.env.NEXT_PUBLIC_EXCEL_EMBED_PROMOCION,
-    }
-    const raw = map[excelTemplate] || ''
-    if (!raw) return ''
-    try {
-      const u = new URL(raw)
-      u.searchParams.set('wdAllowInteractivity', 'True')
-      return u.toString()
-    } catch {
-      return raw.replace(/wdAllowInteractivity=\w+/i, 'wdAllowInteractivity=True')
-    }
+    // Embed no longer required – keep non-empty placeholder to bypass legacy checks
+    return excelTemplate ? 'about:blank' : ''
   }, [excelTemplate])
 
   const ExcelPanel = useMemo(() => {

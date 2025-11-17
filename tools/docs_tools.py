@@ -310,18 +310,18 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
                     all_docs = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data or []
                     existing = [
                         d for d in all_docs
-                        if d.get(\"document_group\") == document_group
-                        and (d.get(\"document_subgroup\") or \"\") == sg
-                        and d.get(\"document_name\") == document_name
+                        if d.get("document_group") == document_group
+                        and (d.get("document_subgroup") or "") == sg
+                        and d.get("document_name") == document_name
                     ]
                     if not existing:
                         raise ValueError(
-                            f\"La celda no existe después de fallback: {document_group} / {sg} / {document_name}.\"
+                            f"La celda no existe después de fallback: {document_group} / {sg} / {document_name}."
                         )
                 except Exception as seed_err:
-                    logger.error(f\"❌ Fallback seed_documents_v2 falló: {seed_err}\")
+                    logger.error(f"❌ Fallback seed_documents_v2 falló: {seed_err}")
                     raise ValueError(
-                        f\"La celda no existe: {document_group} / {sg} / {document_name}. Error al inicializar esquema: {init_error}\"
+                        f"La celda no existe: {document_group} / {sg} / {document_name}. Error al inicializar esquema: {init_error}"
                     )
         
         # 2) Update via RPC
