@@ -2305,6 +2305,33 @@ async def api_set_cell_value(
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/api/numbers/recalculate")
+async def api_recalculate_formulas(property_id: str = Form(...), template_key: str = Form(...)):
+    """Recalculate all formulas in the Numbers table.
+    This is called when:
+    - User opens a template that already has values
+    - User wants to refresh all calculated values
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from tools.numbers_recalculate import recalculate_and_save
+        
+        logger.info(f"[api_recalculate_formulas] ⚡ Recalculating formulas for property_id={property_id}, template_key={template_key}")
+        
+        result = recalculate_and_save(property_id, template_key)
+        
+        if result.get("ok"):
+            return JSONResponse(result)
+        else:
+            return JSONResponse(result, status_code=500)
+    
+    except Exception as e:
+        logger.error(f"[api_recalculate_formulas] Error: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/numbers/clear-cell-value")
 async def api_clear_cell_value(request: Request):
     """Clear/delete a cell value in the Numbers table.

@@ -427,11 +427,16 @@ export default function ChatPage() {
               cellValue = ''
             }
           }
+          // Get format from structure or formatMap (prefer structure as it has is_user_input)
+          const cellInfo = structure.cells?.find((cell: any) => cell.address === addr)
+          const cellFormat = cellInfo?.format || formatMap[addr] || {}
+          
           // Store cell data with format
           row.push({
             value: cellValue,
-            format: formatMap[addr] || {},
-            address: addr
+            format: cellFormat,
+            address: addr,
+            is_user_input: cellInfo?.is_user_input || false  // Mark yellow cells
           })
         }
         rows.push(row)
@@ -461,6 +466,36 @@ export default function ChatPage() {
     }
   }, [propertyId, excelTemplate])
 
+  // Auto-recalculate formulas when loading the table
+  const autoRecalculateFormulas = useCallback(async () => {
+    if (!propertyId || !excelTemplate) return
+    
+    try {
+      console.log('[Numbers Table] 🔄 Auto-recalculating formulas...')
+      const form = new FormData()
+      form.append('property_id', propertyId)
+      form.append('template_key', excelTemplate)
+      
+      const resp = await fetch(`${BACKEND_URL}/api/numbers/recalculate`, {
+        method: 'POST',
+        body: form
+      })
+      
+      if (resp.ok) {
+        const result = await resp.json()
+        if (result.calculated && Object.keys(result.calculated).length > 0) {
+          console.log('[Numbers Table] ✅ Formulas recalculated:', result.calculated)
+          // Reload table to show calculated values
+          await loadAddresses(false)
+        } else {
+          console.log('[Numbers Table] No formulas to calculate')
+        }
+      }
+    } catch (e) {
+      console.error('[Numbers Table] Error recalculating formulas:', e)
+    }
+  }, [propertyId, excelTemplate, loadAddresses])
+
   // Auto-load Numbers table when template is selected (only if we don't have data)
   // This also handles reload scenarios - if template is set, try to load data
   useEffect(() => {
@@ -481,9 +516,17 @@ export default function ChatPage() {
       }
       console.log('[Numbers Table] Auto-loading triggered:', { shouldLoad, recentlyUploaded: !!recentlyUploaded, hasData: !!addressesData })
       // Initial load should not show progress bar
-      loadAddresses(false)
+      loadAddresses(false).then(() => {
+        console.log('[Numbers Table] loadAddresses complete, calling autoRecalculateFormulas...')
+        // After loading data, auto-recalculate formulas if there are values
+        autoRecalculateFormulas().catch(err => {
+          console.error('[Numbers Table] autoRecalculateFormulas error:', err)
+        })
+      }).catch(err => {
+        console.error('[Numbers Table] loadAddresses error:', err)
+      })
     }
-  }, [excelTemplate, propertyId]) // Removed addressesData, addressesLoading, addressesError from dependencies to prevent loops
+  }, [excelTemplate, propertyId, loadAddresses, autoRecalculateFormulas]) // Include all dependencies
 
   // Auto-reload table when messages change and contain update confirmations
   // Use a ref to track the last message we processed to avoid duplicate reloads
@@ -1030,9 +1073,54 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                     addressRange="A1"
                     selected={selectedCell}
                     showAddresses={false}
-                    onCellClick={(addr) => {
+                    onCellClick={async (addr) => {
                       setSelectedCell(addr)
-                      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
+                      
+                      // Fetch cell info to show formula if exists
+                      try {
+                        const structureResp = await fetch(`${BACKEND_URL}/api/numbers/template-structure?property_id=${propertyId}&template_key=${excelTemplate}`)
+                        const structureData = await structureResp.json()
+                        
+                        const valuesResp = await fetch(`${BACKEND_URL}/api/numbers/table-values?property_id=${propertyId}&template_key=${excelTemplate}`)
+                        const valuesData = await valuesResp.json()
+                        
+                        // Find cell in structure
+                        const cellInfo = structureData.structure?.cells?.find((c: any) => c.address === addr)
+                        const cellValue = valuesData[addr]
+                        
+                        if (cellInfo?.formula) {
+                          // Cell has a formula - show detailed info
+                          const actualValue = cellValue?.value || cellValue || ''
+                          let message = `📊 **Celda ${addr}**\n\n`
+                          message += `**Fórmula:** ${cellInfo.formula}\n`
+                          if (actualValue) {
+                            message += `**Resultado:** ${actualValue}\n`
+                          }
+                          
+                          // Try to explain the calculation
+                          const formula = cellInfo.formula.substring(1) // Remove leading "="
+                          const explanation = formula
+                            .replace(/\*/g, ' × ')
+                            .replace(/\//g, ' ÷ ')
+                            .replace(/\+/g, ' + ')
+                            .replace(/-/g, ' − ')
+                          
+                          if (explanation !== formula) {
+                            message += `**Cálculo:** ${explanation}`
+                            if (actualValue) {
+                              message += ` = ${actualValue}`
+                            }
+                          }
+                          
+                          setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: message }])
+                        } else {
+                          // Regular cell - just show selection
+                          setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
+                        }
+                      } catch (error) {
+                        console.error('Error fetching cell info:', error)
+                        setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: `Seleccionada: ${addr}` }])
+                      }
                     }}
                   />
                 ) : !addressesLoading && addressesError ? (

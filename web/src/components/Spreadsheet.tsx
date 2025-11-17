@@ -44,7 +44,8 @@ export default function Spreadsheet({ data = [[]], addressRange = 'A1', selected
       return {
         value: cell.value ?? '',
         format: cell.format || {},
-        address: cell.address || `${colLabel(startCol + cIdx)}${startRow + rIdx}`
+        address: cell.address || `${colLabel(startCol + cIdx)}${startRow + rIdx}`,
+        is_user_input: cell.is_user_input || false
       }
     }
     // Legacy format: just a value
@@ -52,7 +53,8 @@ export default function Spreadsheet({ data = [[]], addressRange = 'A1', selected
     return {
       value: cell ?? '',
       format: {},
-      address: addr
+      address: addr,
+      is_user_input: false
     }
   }
   

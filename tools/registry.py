@@ -280,8 +280,18 @@ class SetNumbersTableCellInput(BaseModel):
 @tool("set_numbers_table_cell")
 def set_numbers_table_cell_tool(property_id: str, template_key: str, cell_address: str, value: str) -> Dict:
     """Set a cell value in the Numbers Table (R2B template) using Excel cell addresses like 'B5', 'C10', etc.
+    
+    🔥 CÁLCULO AUTOMÁTICO EN CASCADA:
+    - Cuando actualizas una celda amarilla (input del usuario como B5, C5), todas las fórmulas dependientes 
+      se calculan AUTOMÁTICAMENTE en cascada.
+    - Ejemplo: B5=1000, C5=21 → D5 (=B5*C5/100) se calcula a 210, luego E5 (=B5+D5) se calcula a 1210
+    - El resultado incluirá "auto_calculated" con las celdas recalculadas automáticamente.
+    
     This is the correct tool to use when working with the Numbers Table Framework.
     Example: set_numbers_table_cell(property_id='...', template_key='R2B', cell_address='B5', value='5000')
+    
+    Returns:
+        Dict with ok=True, cell details, and "auto_calculated" dict with automatically calculated cells
     """
     return _set_numbers_table_cell(property_id, template_key, cell_address, value)
 
@@ -433,7 +443,8 @@ def set_numbers_template_tool(property_id: str, template_key: str) -> Dict:
     # If structure exists and has cells, we're done
     if structure and structure.get("cells"):
         logger.info(f"Template {template_key} already exists in DB for property {property_id}")
-        return {"property_id": property_id, "template_key": template_key, "values_cleared": True, "imported": False}
+        # CRÍTICO: NO decir "values_cleared: True" si no borramos nada
+        return {"property_id": property_id, "template_key": template_key, "values_cleared": False, "imported": False, "note": "Template already exists, values preserved"}
     
     # Structure doesn't exist - try to import or initialize
     # For R2B template, try to import from Excel file upload (user must upload via UI)

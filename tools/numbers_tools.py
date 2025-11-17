@@ -3,6 +3,35 @@ from typing import Dict, List, Optional, Union
 from .supabase_client import sb
 from .utils import nums_schema
 
+# R2B Template Formulas (from docs/R2B_FORMULAS.md)
+# These formulas are automatically injected when importing an R2B Excel file
+R2B_FORMULAS = {
+    # IVA Calculations (Column D)
+    "D5": "=B5*C5/100",
+    "D6": "=B6*C6/100",
+    "D7": "=B7*C7/100",
+    "D8": "=B8*C8/100",
+    
+    # Total with VAT (Column E)
+    "E5": "=B5+D5",
+    "E6": "=B6+D6",
+    "E7": "=B7+D7",
+    "E8": "=B8+D8",
+    
+    # Profit Calculations
+    "B10": "=B6-B7-B8",      # Gross profit from land sale
+    "B12": "=B10+B11",       # Total gross income
+    "B13": "=B12*0.25",      # Taxes at 25%
+    "B14": "=B13",           # Taxes in euros
+    "B15": "=B12-B14",       # Net profit
+    
+    # AUTOPROMOCIÓN
+    "B18": "=B15",           # Reference to net profit
+    
+    # Coste Comprador Total
+    "B29": "=B25+B26+B27+B28"  # Sum of all buyer costs
+}
+
 def set_number(property_id: str, item_key: str, amount: Optional[float]) -> Dict:
     """Set a numeric input in the numbers framework. Returns validated result."""
     import logging
@@ -357,7 +386,8 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
         logger.info(f"Starting Excel import from file: template_key={template_key}, property_id={property_id}")
         
         # Load workbook from bytes
-        wb = load_workbook(BytesIO(file_bytes), data_only=True)
+        # CRITICAL: data_only=False to read formulas, not just values
+        wb = load_workbook(BytesIO(file_bytes), data_only=False)
         ws = wb.active  # Use first worksheet
         
         # Get dimensions
@@ -463,6 +493,14 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                 if col > 1:  # Skip header column
                     col_label = header_row[col - 1] if col - 1 < len(header_row) else None
                 
+                # Identify if cell is a user input (yellow background)
+                is_user_input = False
+                if cell_format.get("bg_color"):
+                    # Check if background is yellow/yellowish (FFFF00, FFFFE0, etc.)
+                    bg = cell_format["bg_color"].upper()
+                    if bg.startswith("FFFF") or "YELLOW" in bg:
+                        is_user_input = True
+                
                 # Store ALL cells in structure (including empty ones)
                 structure["cells"].append({
                     "address": cell_address,
@@ -473,7 +511,8 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                     "formula": formula if formula and isinstance(formula, str) and formula.startswith("=") else None,
                     "format": cell_format,
                     "row_label": row_label,
-                    "col_label": col_label
+                    "col_label": col_label,
+                    "is_user_input": is_user_input  # Mark yellow cells as user inputs
                 })
                 
                 # Store for values table (only if has value or formula)
@@ -503,9 +542,24 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
             sb.table("numbers_templates").insert(template_data).execute()
         
         # Save initial values to numbers_table_values
+        # CRÍTICO: NO sobrescribir valores que el usuario ya añadió via chat
+        # Solo guardar valores que vienen del Excel y que NO existen en la DB
+        existing_values = get_numbers_table_values(property_id, template_key)
         saved_count = 0
+        skipped_count = 0
         for cell_addr, cell_data in cell_values.items():
             try:
+                # Check if user already added a value for this cell via chat
+                normalized_addr = str(cell_addr).upper().strip()
+                if normalized_addr in existing_values:
+                    existing_val = existing_values[normalized_addr]
+                    existing_val_str = existing_val.get("value", "") if isinstance(existing_val, dict) else str(existing_val)
+                    # Skip if there's already a user-added value (non-empty)
+                    if existing_val_str and existing_val_str != cell_data["value"]:
+                        logger.info(f"[import_excel] Preserving user value for {normalized_addr}: '{existing_val_str}' (Excel has '{cell_data['value']}')")
+                        skipped_count += 1
+                        continue
+                
                 sb.rpc("set_numbers_table_cell", {
                     "p_property_id": property_id,
                     "p_template_key": template_key,
@@ -519,7 +573,30 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
             except Exception as e:
                 logger.warning(f"Failed to save cell {cell_addr}: {e}")
         
-        logger.info(f"✅ Imported {saved_count} cells from Excel file")
+        logger.info(f"✅ Imported {saved_count} cells from Excel file, preserved {skipped_count} user-added values")
+        
+        # 🔥 INJECT R2B FORMULAS AUTOMATICALLY INTO STRUCTURE
+        if template_key == "R2B":
+            logger.info(f"[R2B] 🔥 Injecting {len(R2B_FORMULAS)} formulas into structure...")
+            injected_count = 0
+            
+            # Update structure with formulas
+            for cell in structure.get("cells", []):
+                cell_address = cell.get("address")
+                if cell_address in R2B_FORMULAS:
+                    cell["formula"] = R2B_FORMULAS[cell_address]
+                    injected_count += 1
+                    logger.debug(f"[R2B] Injected formula: {cell_address} = {R2B_FORMULAS[cell_address]}")
+            
+            # Re-save structure with formulas
+            existing = sb.table("numbers_templates").select("id").eq("template_key", template_key).eq("property_id", property_id).execute()
+            if existing.data:
+                sb.table("numbers_templates").update({
+                    "structure_json": structure
+                }).eq("id", existing.data[0]["id"]).execute()
+                logger.info(f"[R2B] ✅ Successfully injected {injected_count}/{len(R2B_FORMULAS)} formulas into structure")
+            else:
+                logger.warning(f"[R2B] ⚠️ Could not find template to update with formulas")
         
         return {
             "ok": True,
@@ -592,8 +669,17 @@ def get_numbers_table_values(property_id: str, template_key: str) -> Dict:
         return {}
 
 
-def set_numbers_table_cell(property_id: str, template_key: str, cell_address: str, value: str, row_label: Optional[str] = None, col_label: Optional[str] = None, format_json: Optional[Dict] = None) -> Dict:
-    """Set a cell value in the Numbers table. Returns validated result."""
+def set_numbers_table_cell(property_id: str, template_key: str, cell_address: str, value: str, row_label: Optional[str] = None, col_label: Optional[str] = None, format_json: Optional[Dict] = None, auto_calculate: bool = True) -> Dict:
+    """Set a cell value in the Numbers table with automatic formula calculation.
+    
+    🔥 CÁLCULO AUTOMÁTICO EN CASCADA:
+    - Cuando auto_calculate=True (default), después de actualizar la celda,
+      se recalculan automáticamente todas las fórmulas dependientes en cascada.
+    - Ejemplo: Si actualizas B5 y C5, D5 (=B5*C5/100) se calculará automáticamente,
+      y luego E5 (=B5+D5) también se calculará en cascada.
+    
+    Returns validated result with auto_calculated cells if any.
+    """
     import logging
     logger = logging.getLogger(__name__)
     
@@ -601,13 +687,13 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
         sb.postgrest.schema = "public"
         # Normalize cell address to uppercase for consistent storage
         normalized_cell_address = str(cell_address).upper().strip()
-        logger.info(f"[set_numbers_table_cell] Setting {normalized_cell_address} = '{value}' for property_id={property_id}, template_key={template_key}")
-        logger.info(f"[set_numbers_table_cell] property_id type: {type(property_id)}, value: {property_id}")
+        logger.info(f"[set_numbers_table_cell] Setting {normalized_cell_address} = '{value}' for property_id={property_id}, template_key={template_key}, auto_calculate={auto_calculate}")
         
         # Ensure property_id is a valid UUID string
         if not property_id:
             raise ValueError("property_id is required")
         
+        # 1. Save the user's value to DB
         result = sb.rpc("set_numbers_table_cell", {
             "p_property_id": property_id,
             "p_template_key": template_key,
@@ -620,7 +706,7 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
         
         logger.info(f"[set_numbers_table_cell] RPC result: {result.data}")
         
-        # Validate that the value was saved correctly
+        # 2. Validate that the value was saved correctly
         if result.data and result.data.get("ok"):
             # Verify by reading back the value (use normalized address)
             values = get_numbers_table_values(property_id, template_key)
@@ -633,14 +719,76 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
             expected_value_str = str(value) if value is not None else ""
             if saved_value_str == expected_value_str:
                 logger.info(f"✅ Validated: {normalized_cell_address} = {value} saved correctly")
-                return {"ok": True, "cell_address": normalized_cell_address, "value": value, "validated": True}
+                
+                response = {"ok": True, "cell_address": normalized_cell_address, "value": value, "validated": True}
+                
+                # 3. Auto-calculate dependent formulas if enabled
+                if auto_calculate:
+                    logger.info(f"[set_numbers_table_cell] 🔥 Starting auto-calculation for {normalized_cell_address}")
+                    
+                    try:
+                        # Get template structure
+                        structure = get_numbers_table_structure(property_id, template_key)
+                        
+                        # Get current values from DB
+                        current_values = values  # We already fetched this above
+                        
+                        # Import formula calculator
+                        from tools.formula_calculator import auto_calculate_on_update
+                        
+                        # Calculate affected cells
+                        calculated = auto_calculate_on_update(
+                            property_id=property_id,
+                            template_key=template_key,
+                            updated_cell=normalized_cell_address,
+                            new_value=value,
+                            structure=structure,
+                            current_values=current_values
+                        )
+                        
+                        # 4. Save calculated values to DB
+                        if calculated:
+                            logger.info(f"[set_numbers_table_cell] 💾 Saving {len(calculated)} auto-calculated cells to DB")
+                            for calc_cell, calc_value in calculated.items():
+                                # Find cell info for labels
+                                calc_cell_info = None
+                                for cell in structure.get("cells", []):
+                                    if cell.get("address") == calc_cell:
+                                        calc_cell_info = cell
+                                        break
+                                
+                                # Save calculated value via RPC
+                                sb.rpc("set_numbers_table_cell", {
+                                    "p_property_id": property_id,
+                                    "p_template_key": template_key,
+                                    "p_cell_address": calc_cell,
+                                    "p_value": str(calc_value),
+                                    "p_row_label": calc_cell_info.get("row_label") if calc_cell_info else None,
+                                    "p_col_label": calc_cell_info.get("col_label") if calc_cell_info else None,
+                                    "p_format_json": calc_cell_info.get("format", {}) if calc_cell_info else {}
+                                }).execute()
+                                
+                                logger.info(f"[set_numbers_table_cell] ✅ Saved calculated value: {calc_cell} = {calc_value}")
+                            
+                            response["auto_calculated"] = calculated
+                            response["auto_calculated_count"] = len(calculated)
+                            logger.info(f"✅ Auto-calculated and saved {len(calculated)} cells: {list(calculated.keys())}")
+                        else:
+                            logger.info(f"[set_numbers_table_cell] No formulas to calculate for {normalized_cell_address}")
+                    
+                    except Exception as calc_error:
+                        logger.error(f"[set_numbers_table_cell] ⚠️ Error during auto-calculation: {calc_error}", exc_info=True)
+                        # Don't fail the whole operation if auto-calc fails
+                        response["auto_calculate_error"] = str(calc_error)
+                
+                return response
             else:
                 logger.warning(f"⚠️ Validation failed: expected {expected_value_str}, got {saved_value_str}")
                 return {"ok": False, "cell_address": normalized_cell_address, "error": f"Validation failed: expected {expected_value_str}, got {saved_value_str}"}
         
         return result.data if result.data else {"ok": True, "cell_address": normalized_cell_address, "value": value, "validated": False}
     except Exception as e:
-        logger.error(f"Error setting cell value {cell_address}: {e}")
+        logger.error(f"Error setting cell value {cell_address}: {e}", exc_info=True)
         return {"ok": False, "error": str(e)}
 
 

@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
 
     // Detect headers (first row and first column)
     const headerRow: string[] = values[0] || []
-    const headerCol: string[] = values.map(row => row[0]?.toString() || '').filter(v => v)
+    const headerCol: string[] = values.map((row: any[]) => row[0]?.toString() || '').filter((v: string) => v)
 
     structure.header_row = headerRow
     structure.header_col = headerCol
