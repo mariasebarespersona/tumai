@@ -878,11 +878,23 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
 app = FastAPI(title="RAMA AI Backend")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("WEB_BASE", "http://localhost:3004,http://localhost:3005").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request ID middleware for tracing
+from starlette.middleware.base import BaseHTTPMiddleware
+from uuid import uuid4
+
+@app.middleware("http")
+async def add_request_id(request, call_next):
+    rid = request.headers.get("x-request-id") or str(uuid4())
+    request.state.request_id = rid
+    response = await call_next(request)
+    response.headers["x-request-id"] = rid
+    return response
 
 # Exception handler to catch validation errors before they reach our functions
 from fastapi.exceptions import RequestValidationError
@@ -893,9 +905,12 @@ async def validation_exception_handler(request, exc):
     """Catch FastAPI validation errors and log them before returning 422."""
     import logging
     logger = logging.getLogger(__name__)
+    logger.error(f"[FastAPI Validation Error] Request-Id: {getattr(request.state, 'request_id', None)}")
     logger.error(f"[FastAPI Validation Error] Path: {request.url.path}")
     logger.error(f"[FastAPI Validation Error] Method: {request.method}")
-    logger.error(f"[FastAPI Validation Error] Headers: {dict(request.headers)}")
+    # Avoid logging all headers; keep only safe subset
+    safe_headers = {k: v for k, v in dict(request.headers).items() if k.lower() in ["content-type", "user-agent", "x-request-id"]}
+    logger.error(f"[FastAPI Validation Error] Headers: {safe_headers}")
     logger.error(f"[FastAPI Validation Error] Error details: {exc.errors()}")
     logger.error(f"[FastAPI Validation Error] Body: {await request.body() if hasattr(request, 'body') else 'N/A'}")
     

@@ -8,7 +8,9 @@
     "start": "next start",
     "dev:addin": "python3 -m http.server 4300 -d ../packages/excel-addin/public",
     "dev:mcp": "node ../packages/mcp-server/server.js",
-    "dev:all": "bash -c 'npm run dev & npm run dev:mcp & npm run dev:addin & wait'"
+    "dev:all": "bash -c 'npm run dev & npm run dev:mcp & npm run dev:addin & wait'",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"No ESLint configured\""
   },
   "dependencies": {
     "next": "14.2.5",
