@@ -1,0 +1,21 @@
+{
+  "numbers.set_cell": {
+    "domain": "numbers",
+    "input_schema": { "cell": "string", "value": "string", "template_key": "string" },
+    "output_schema": { "status": "string", "auto_calculated": "object?" },
+    "requires_confirm": false
+  },
+  "numbers.clear_cell": {
+    "domain": "numbers",
+    "input_schema": { "cell": "string", "template_key": "string" },
+    "output_schema": { "status": "string" },
+    "requires_confirm": false
+  },
+  "docs.send_email": {
+    "domain": "docs",
+    "input_schema": { "to": "string", "subject": "string", "body": "string" },
+    "output_schema": { "status": "string", "message_id": "string" },
+    "requires_confirm": true
+  }
+}
+

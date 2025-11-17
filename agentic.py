@@ -12,6 +12,8 @@ from langchain_openai import ChatOpenAI
 
 from tools.registry import TOOLS  # <-- decorated tools live here
 from tools.property_tools import list_frameworks as _derive_framework_names
+from prompts.system_loader import load_prompt_for_intent
+from tools.contracts import validate_tool_call
 
 logger = logging.getLogger(__name__)
 
@@ -1053,7 +1055,17 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         time.sleep(0.5 - (now - last_llm_ts))
     
     # system + conversación (FILTRADA para evitar rate limits) + contexto
-    msgs: List[Any] = [SystemMessage(content=SYSTEM_PROMPT)]
+    msgs: List[Any] = []
+    # Optional modular loader: prepend slim base+task blocks based on intent_guess
+    try:
+        if os.getenv("ENABLE_PROMPT_LOADER", "1") == "1":
+            slim = load_prompt_for_intent(state.get("intent_guess"))
+            if slim:
+                msgs.append(SystemMessage(content=slim))
+    except Exception as _e:
+        logger.warning(f"[assistant] prompt loader failed: {_e}")
+    # Keep the existing SYSTEM_PROMPT to preserve behavior
+    msgs.append(SystemMessage(content=SYSTEM_PROMPT))
     if state.get("property_id"):
         msgs.append(SystemMessage(content=f"Contexto: property_id activa = {state['property_id']}. Asume esta propiedad hasta que el usuario la cambie explícitamente."))
     if state.get("last_doc_ref"):
@@ -1268,6 +1280,19 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             # Planificación con tools
             llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
             ai = llm.invoke(msgs)
+            # Log-only: validate tool calls against registry
+            try:
+                if os.getenv("ENABLE_TOOL_CONTRACTS", "1") == "1":
+                    for tc in getattr(ai, "tool_calls", []) or []:
+                        name = tc.get("name")
+                        args = tc.get("args", {})
+                        ok, msg = validate_tool_call(name, args if isinstance(args, dict) else {})
+                        if not ok:
+                            logger.warning(f"[contracts] {name} args invalid: {msg} args={args}")
+                        else:
+                            logger.info(f"[contracts] {name} args ok")
+            except Exception as _e:
+                logger.warning(f"[contracts] validation failed: {_e}")
     except Exception as e:
         # Manejar errores de rate limit y otros errores de API
         error_msg = str(e).lower()

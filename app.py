@@ -7,6 +7,7 @@ import time
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
+from router.scaffold import Router
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
 from tools.property_tools import search_properties as db_search_properties
 from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists, seed_mock_documents
@@ -33,6 +34,7 @@ from tools.numbers_agent import (
 )
 
 agent = build_graph()
+router = Router()
 
 # Session state management (persistent to survive reloads)
 SESSIONS_FILE = ".sessions.json"
@@ -824,10 +826,25 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     
     # LangGraph with checkpointer automatically maintains message history using thread_id
     # DON'T pass messages - let the checkpointer load the full history automatically
+    # Optional: router log-only
+    intent_guess = None
+    intent_conf = 0.0
+    try:
+        if os.getenv("ENABLE_ROUTER", "1") == "1" and text:
+            decision = __import__("asyncio").get_event_loop().run_until_complete(
+                router.decide(text, {"session_id": session_id, "property_id": property_id or STATE.get("property_id")})
+            )
+            intent_guess = decision.get("intent")
+            intent_conf = float(decision.get("confidence") or 0.0)
+    except Exception as _e:
+        print(f"[ROUTER] error: {_e}")
+    
     state = {
         "input": text,  # This will be converted to HumanMessage by prepare_input node
         "audio": audio_wav_bytes,
-        "property_id": property_id or STATE.get("property_id")
+        "property_id": property_id or STATE.get("property_id"),
+        "intent_guess": intent_guess,
+        "intent_confidence": intent_conf,
     }
     
     print(f"[MEMORY DEBUG] Invoking agent with thread_id={session_id}, input={text[:50]}")
