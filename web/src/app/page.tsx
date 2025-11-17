@@ -1140,24 +1140,6 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
               </div>
               <div className="px-4 py-2 bg-white border-t flex gap-2 items-center justify-between">
                 <div className="flex gap-2 items-center">
-                  {/* TEST BUTTON - Remove after testing */}
-                  <button
-                    onClick={() => {
-                      console.log('[TEST] Setting addressesLoading to true, importProgress to 50')
-                      setAddressesLoading(true)
-                      setImportProgress(50)
-                      setTimeRemaining(5)
-                      setEstimatedTime(10)
-                      setTimeout(() => {
-                        console.log('[TEST] Hiding progress bar after 5 seconds')
-                        setAddressesLoading(false)
-                        setImportProgress(0)
-                      }, 5000)
-                    }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 shadow-md"
-                  >
-                    🧪 TEST Progress Bar
-                  </button>
                   <input 
                     type="file" 
                     accept=".xlsx,.xls" 
