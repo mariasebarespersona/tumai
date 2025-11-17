@@ -26,7 +26,14 @@ def add_property(name: str, address: str) -> Dict:
         logger.info(f"✅ Esquema de documentos inicializado para {name}")
     except Exception as e:
         logger.error(f"❌ Error al inicializar esquema de documentos para {property_id}: {e}")
-        # No fallar la creación de la propiedad, pero registrar el error
+        # Fallback: intentar al menos sembrar filas si el esquema ya existe o pudo crearse parcialmente
+        try:
+            logger.info(f"🛟 Intentando fallback seed_documents_v2 para {property_id}...")
+            sb.rpc("seed_documents_v2", {"p_id": property_id}).execute()
+            logger.info("✅ Fallback seed_documents_v2 ejecutado")
+        except Exception as e2:
+            logger.error(f"❌ Fallback seed_documents_v2 falló: {e2}")
+            # No fallar creación; el flujo de subida volverá a intentar inicializar esquema
         # El esquema se puede inicializar más tarde si es necesario
     
     # CRÍTICO: Las tablas de números ya existen en el esquema público,
