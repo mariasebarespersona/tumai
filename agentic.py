@@ -1112,15 +1112,22 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                 "promoción": "Promoción",
             }
 
-            numbers_keywords = ["número", "numeros", "números", "plantilla", "números"]
-            mentioned_numbers = any(kw in last_user_text for kw in numbers_keywords)
+            # Detect explicit Numbers context. Avoid triggering when the user says "plantilla documentos".
+            numbers_tokens = ["número", "numeros", "números"]
+            mentioned_numbers = (
+                any(tok in last_user_text for tok in numbers_tokens)
+                or (("plantilla" in last_user_text) and any(tok in last_user_text for tok in ["numeros", "números", "de números", "de numeros"]))
+            )
+            # If the user explicitly mentions documents, do not treat as numbers
+            if any(tok in last_user_text for tok in ["documento", "documentos", "plantilla de documentos", "plantilla documentos"]):
+                mentioned_numbers = False
 
             for key, val in template_map.items():
                 if key in last_user_text:
                     selected_tpl = val
                     break
 
-            if selected_tpl and state.get("property_id"):
+            if selected_tpl and state.get("property_id") and mentioned_numbers:
                 forced_set_tpl = AIMessage(content="", tool_calls=[{
                     "name": "set_numbers_template",
                     "args": {"property_id": state.get("property_id"), "template_key": selected_tpl},
@@ -1154,7 +1161,7 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         if messages and isinstance(messages[-1], HumanMessage):
             last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
             # Si el usuario dice "quiero completar", "quiero empezar", "quiero rellenar" → resetear y ofrecer plantillas
-            if any(phrase in last_user_text for phrase in ["quiero completar", "quiero empezar", "quiero rellenar", "empezar con números", "completar plantilla"]):
+            if any(phrase in last_user_text for phrase in ["quiero completar la plantilla de números", "quiero empezar la plantilla de números", "quiero rellenar la plantilla de números", "empezar con números"]) or (("plantilla" in last_user_text) and any(tok in last_user_text for tok in ["numeros", "números"])):
                 user_wants_to_start_afresh = True
         
         if state.get("numbers_template") and not user_wants_to_start_afresh:
@@ -1165,7 +1172,11 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             # NO hay template O el usuario quiere empezar de nuevo → DEBE ofrecer las 4 opciones primero
             if messages and isinstance(messages[-1], HumanMessage):
                 last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
-                if any(kw in last_user_text for kw in ["número", "numeros", "plantilla", "completar", "rellenar", "empezar"]):
+                is_numbers_context = (
+                    any(tok in last_user_text for tok in ["número", "numeros", "números"])
+                    or (("plantilla" in last_user_text) and any(tok in last_user_text for tok in ["numeros", "números", "de números", "de numeros"]))
+                )
+                if is_numbers_context:
                     if user_wants_to_start_afresh:
                         # CRÍTICO: Resetear el template en el estado para que el agente no vea un template previo
                         msgs.append(SystemMessage(content="🚨🚨🚨 ATENCIÓN CRÍTICA: El usuario dijo 'quiero completar/empezar la plantilla de Números'. Esto significa que quiere EMPEZAR DESDE CERO. 🚨🚨🚨 DEBES: 1) IGNORAR COMPLETAMENTE cualquier `numbers_template` que pueda existir en el estado. 2) OFRECER las 4 opciones de plantillas (R2B, R2B + PM, R2B + PM + Venta certs, Promoción). 3) ESPERAR a que el usuario elija UNA. 4) NO LLAMAR `get_numbers` ni `set_number` hasta que el usuario haya elegido. TRATA ESTO COMO SI FUERA LA PRIMERA VEZ QUE EL USUARIO ENTRÓ EN NÚMEROS."))
@@ -1676,12 +1687,14 @@ def should_call_tool(state: AgentState) -> Literal["tools", "end"]:
 
 # ---- Optional prompt override (flagged) ----
 try:
-    if os.getenv("USE_SYSTEM_PROMPT_V2", "0") == "1":
+    # Default to V2 unless explicitly disabled (USE_SYSTEM_PROMPT_V2=0)
+    use_v2 = os.getenv("USE_SYSTEM_PROMPT_V2", "1") != "0"
+    if use_v2:
         _p = os.path.join("prompts", "system_v2.md")
         if os.path.exists(_p):
             with open(_p, "r", encoding="utf-8") as _f:
                 SYSTEM_PROMPT = _f.read()
-            logger.info("[agentic] Using prompts/system_v2.md as SYSTEM_PROMPT (USE_SYSTEM_PROMPT_V2=1)")
+            logger.info("[agentic] Using prompts/system_v2.md as SYSTEM_PROMPT (default ON; set USE_SYSTEM_PROMPT_V2=0 to disable)")
 except Exception as _e:
     logger.warning(f"[agentic] Failed to load system_v2.md: {_e}")
 
