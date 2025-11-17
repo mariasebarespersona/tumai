@@ -2,6 +2,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Union
 from .supabase_client import sb
 from .utils import nums_schema
+from tools.formula_calculator import auto_calculate_on_update
+from .verifier import verify_numbers_update
 
 # R2B Template Formulas (from docs/R2B_FORMULAS.md)
 # These formulas are automatically injected when importing an R2B Excel file
@@ -732,10 +734,6 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
                         
                         # Get current values from DB
                         current_values = values  # We already fetched this above
-                        
-                        # Import formula calculator
-from tools.formula_calculator import auto_calculate_on_update
-from .verifier import verify_numbers_update
                         
                         # Calculate affected cells
                         calculated = auto_calculate_on_update(
