@@ -1236,7 +1236,10 @@ async def ui_chat(
             return make_response("De acuerdo. Dime el grupo/subgrupo/nombre exacto o vuelve a adjuntar el archivo con una pista (por ejemplo 'Contrato arquitecto').")
     
     # Quick intent: "facturas asociadas" → list placeholders for current/mentioned doc
-    if any(k in _normalize(user_text) for k in ["factura", "facturas"]) and any(k in _normalize(user_text) for k in ["asociad", "relacionad", "de este", "de ese", "de este contrato", "de ese contrato"]):
+    # CRÍTICO: NO interceptar si es una solicitud de email (dejar que el agente lo maneje)
+    is_email_request = bool(re.search(r"\b(manda|envía|enviame|mandame|enviar|mandar)\s+.*\b(por\s+email|por\s+correo|al\s+email|al\s+correo)\b", user_text, re.IGNORECASE))
+    
+    if not is_email_request and any(k in _normalize(user_text) for k in ["factura", "facturas"]) and any(k in _normalize(user_text) for k in ["asociad", "relacionad", "de este", "de ese", "de este contrato", "de ese contrato"]):
         pid = STATE.get("property_id")
         if not pid:
             return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")

@@ -5,10 +5,35 @@ from .utils import docs_schema, nums_schema, sum_schema
 
 
 def add_property(name: str, address: str) -> Dict:
+    """
+    Create a new property and automatically initialize:
+    1. Documents schema (with all R2B document cells)
+    2. Numbers table framework (tables are ready, template selection happens later)
+    
+    CRÍTICO: Siempre inicializa ambos esquemas para que la propiedad esté lista para usar.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     r = sb.table("properties").insert({"name": name, "address": address}).execute()
     prop = r.data[0]
-    # The DB trigger provisions the three schemas
-    return {"id": prop["id"], "name": name, "address": address}
+    property_id = prop["id"]
+    
+    # CRÍTICO: Inicializar esquema de documentos automáticamente
+    try:
+        logger.info(f"🔧 Inicializando esquema de documentos para propiedad {property_id}...")
+        sb.rpc("ensure_documents_schema_v2", {"p_id": property_id}).execute()
+        logger.info(f"✅ Esquema de documentos inicializado para {name}")
+    except Exception as e:
+        logger.error(f"❌ Error al inicializar esquema de documentos para {property_id}: {e}")
+        # No fallar la creación de la propiedad, pero registrar el error
+        # El esquema se puede inicializar más tarde si es necesario
+    
+    # CRÍTICO: Las tablas de números ya existen en el esquema público,
+    # no necesitan inicialización de esquema. El usuario seleccionará la plantilla después.
+    # Las tablas `numbers_templates` y `numbers_table_values` están listas para usar.
+    
+    return {"id": property_id, "name": name, "address": address}
 
 
 def list_frameworks(property_id: str) -> Dict:

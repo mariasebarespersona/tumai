@@ -283,9 +283,29 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
             and d.get("document_name") == document_name
         ]
         if not existing:
-            raise ValueError(
-                f"La celda no existe: {document_group} / {sg} / {document_name}."
-            )
+            # CRÍTICO: Si la celda no existe, intentar inicializar el esquema primero
+            logger.warning(f"⚠️ Celda no encontrada: {document_group} / {sg} / {document_name}. Intentando inicializar esquema...")
+            try:
+                # Intentar inicializar el esquema de documentos para esta propiedad
+                sb.rpc("ensure_documents_schema_v2", {"p_id": property_id}).execute()
+                logger.info(f"✅ Esquema inicializado para propiedad {property_id}")
+                # Verificar de nuevo después de inicializar
+                all_docs = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data or []
+                existing = [
+                    d for d in all_docs
+                    if d.get("document_group") == document_group
+                    and (d.get("document_subgroup") or "") == sg
+                    and d.get("document_name") == document_name
+                ]
+                if not existing:
+                    raise ValueError(
+                        f"La celda no existe después de inicializar el esquema: {document_group} / {sg} / {document_name}."
+                    )
+            except Exception as init_error:
+                logger.error(f"❌ Error al inicializar esquema: {init_error}")
+                raise ValueError(
+                    f"La celda no existe: {document_group} / {sg} / {document_name}. Error al inicializar esquema: {init_error}"
+                )
         
         # 2) Update via RPC
         payload = {

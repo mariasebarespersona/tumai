@@ -208,6 +208,15 @@ HERRAMIENTAS (nombres exactos)
 - Comunicación/Voz: `send_email`, `transcribe_audio`, `synthesize_speech`, `process_voice_input`, `create_voice_response`.
 - **Recordatorios**: `create_reminder`, `extract_payment_date`, `list_reminders`, `cancel_reminder`.
 
+**CRÍTICO - INICIALIZACIÓN AUTOMÁTICA DE PROPIEDADES:**
+- Cuando se crea una nueva propiedad con `add_property`, el sistema AUTOMÁTICAMENTE:
+  1. Inicializa el esquema de documentos (`ensure_documents_schema_v2`) con TODAS las celdas R2B (Compra, Diseño/Obra, etc.)
+  2. Las tablas de números ya están listas (no requieren inicialización de esquema, solo selección de plantilla)
+- Esto garantiza que TODAS las propiedades nuevas tengan:
+  - ✅ Plantilla de documentos lista para usar (todas las celdas R2B creadas)
+  - ✅ Framework de números listo (el usuario seleccionará la plantilla después)
+- NO es necesario llamar manualmente a funciones de inicialización después de crear una propiedad.
+
 FLUJO: DOCUMENTOS
 - Todos los documentos son por propiedad. Nunca mezcles documentos entre propiedades: cada llamada a herramientas de documentos debe usar el `property_id` activo y devolver resultados solo de esa propiedad.
 - **ANTES DE DECIR QUE UN DOCUMENTO NO EXISTE:** SIEMPRE llama a `list_docs` primero para verificar qué documentos están realmente subidos. NO asumas que algo no existe sin verificarlo.
@@ -227,6 +236,13 @@ FLUJO: DOCUMENTOS
   * Para preguntas concretas sobre un documento → `qa_document`
   * Para pagos/fechas → `qa_payment_schedule` (si falta una fecha clave, pídesela)
   * Para saber si un documento tiene facturas asociadas → `list_related_facturas`. Si devuelve 0 y el documento es de los marcados con "+ facturas", intenta `qa_payment_schedule` y, si encuentras día de mes, crea placeholders con `seed_facturas_for`.
+  * **CRÍTICO - ENVIAR FACTURAS POR EMAIL**: Si el usuario pide "mandame esta factura por email", "mandame factura arquitecto por email", o "mandame la factura asociada al contrato arquitecto por email":
+    1. **PRIMERO**: Llama `list_docs(property_id)` para buscar TODAS las facturas subidas
+    2. **FILTRA**: Busca documentos con `document_kind="factura"` que tengan `storage_key` (subidas) y que coincidan con el contexto (ej: "arquitecto" → busca facturas con "arquitecto" en el nombre)
+    3. **SELECCIONA**: Si hay múltiples, elige la más reciente (por fecha en el nombre o `due_date`) o la que coincide con la fecha mencionada
+    4. **USA VALORES EXACTOS**: Usa el `document_name`, `document_group`, y `document_subgroup` EXACTOS que devuelve `list_docs()` (ej: "Facturas arquitecto — 2025-11-05", "R2B", "Diseño/Obra")
+    5. **EXTRACCIÓN**: Si el usuario menciona un nombre con "vence", extrae solo la parte antes de "— vence" para obtener el nombre real
+    6. **FALLBACK**: Si `list_docs()` no encuentra facturas subidas, entonces llama `list_related_facturas()` para ver si hay placeholders (pero NO uses placeholders para enviar, solo para informar al usuario)
   * Para preguntas abiertas sobre múltiples documentos → `rag_qa_with_citations` con citas claras
   * Si no encuentras el documento exacto por nombre, usa `list_docs` para ver nombres similares y sugiérelos al usuario
 
@@ -842,11 +858,71 @@ Usuario: "Mandame el documento Arras por email a maria@test.com"
 → Tú: [2) `send_email(to=["maria@test.com"], subject="Documento: Señal / Arras", html="<html><body><p>Aquí está el documento que solicitaste: Señal / Arras</p><p><a href=\"" + signed_url + "\" target=\"_blank\" style=\"background-color: #3d7435; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;\">Descargar documento</a></p></body></html>")`]
 → Respuesta: "✅ He enviado el documento 'Señal / Arras' a maria@test.com"
 
+**EJEMPLO 2b - Usuario dice "esta factura" o "este documento" (referencia contextual):**
+[Mensaje anterior: "✅ Subido 'Facturas arquitecto — 2025-11-05'"]
+Usuario: "mandame esta factura por email" o "mandame este documento por email"
+→ Tú: [INMEDIATAMENTE llama `list_docs(property_id)` para encontrar el documento más reciente]
+→ Resultado: list_docs devuelve documentos, buscas el más reciente o el que coincide con "factura" o "arquitecto"
+→ Tú: [Encuentras: {"document_name": "Facturas arquitecto — 2025-11-05", "document_group": "R2B", "document_subgroup": "Diseño/Obra", ...}]
+→ Tú: [1) `signed_url_for(property_id, document_group="R2B", document_subgroup="Diseño/Obra", document_name="Facturas arquitecto — 2025-11-05")` → obtiene URL]
+→ Tú: [2) Si no tienes email: "¿A qué dirección de email quieres que lo envíe?"]
+→ Tú: [3) Una vez tengas el email: `send_email(to=[email], subject="Documento: Facturas arquitecto — 2025-11-05", html="...")`]
+→ Respuesta: "✅ He enviado el documento 'Facturas arquitecto — 2025-11-05' a [email]"
+
+**EJEMPLO 2d - Usuario pide factura relacionada a un documento padre:**
+Usuario: "mandame la factura asociada al contrato arquitecto por email"
+→ Tú: [INMEDIATAMENTE llama `list_docs(property_id)` para buscar TODAS las facturas subidas]
+→ Resultado: [{"document_name": "Facturas arquitecto — 2025-11-05", "document_group": "R2B", "document_subgroup": "Diseño/Obra", "document_kind": "factura", "storage_key": "..."}, ...]
+→ Tú: [FILTRA: Busca documentos con `document_kind="factura"` y `storage_key` (subidas) que contengan "arquitecto" en el nombre]
+→ Tú: [Encuentras: {"document_name": "Facturas arquitecto — 2025-11-05", "document_group": "R2B", "document_subgroup": "Diseño/Obra", "storage_key": "...", ...}]
+→ Tú: [1) `signed_url_for(property_id, document_group="R2B", document_subgroup="Diseño/Obra", document_name="Facturas arquitecto — 2025-11-05")` → obtiene URL]
+→ Tú: [2) Si no tienes email: "¿A qué dirección de email quieres que lo envíe?"]
+→ Tú: [3) Una vez tengas el email: `send_email(to=[email], subject="Documento: Facturas arquitecto — 2025-11-05", html="...")`]
+→ Respuesta: "✅ He enviado el documento 'Facturas arquitecto — 2025-11-05' a [email]"
+
+**EJEMPLO 2e - Usuario especifica factura de la lista (con "vence" en el nombre mostrado):**
+[Mensaje anterior: Tú mostraste lista de facturas con formato "Facturas arquitecto — 2025-11-05 — vence 2025-11-05"]
+Usuario: "mandame la factura arquitecto — 2025-11-05 — vence 2025-11-05 por email"
+→ Tú: [EXTRAE el nombre real: "Facturas arquitecto — 2025-11-05" (elimina "— vence 2025-11-05")]
+→ Tú: [INMEDIATAMENTE llama `list_related_facturas(property_id, document_group="R2B", document_subgroup="Diseño/Obra", document_name="Contrato arquitecto")`]
+→ Tú: [Busca en la lista la factura con `document_name="Facturas arquitecto — 2025-11-05"` y `storage_key` (subida)]
+→ Tú: [Encuentras: {"document_name": "Facturas arquitecto — 2025-11-05", "document_group": "R2B", "document_subgroup": "Diseño/Obra", "storage_key": "...", ...}]
+→ Tú: [1) `signed_url_for(property_id, document_group="R2B", document_subgroup="Diseño/Obra", document_name="Facturas arquitecto — 2025-11-05")` → obtiene URL]
+→ Tú: [2) Si no tienes email: "¿A qué dirección de email quieres que lo envíe?"]
+→ Tú: [3) Una vez tengas el email: `send_email(to=[email], subject="Documento: Facturas arquitecto — 2025-11-05", html="...")`]
+→ Respuesta: "✅ He enviado el documento 'Facturas arquitecto — 2025-11-05' a [email]"
+
+**EJEMPLO 2c - Usuario menciona nombre de archivo específico (NO es subir, es ENVIAR):**
+Usuario: "mandame el documento factura-arquitecto-2025-11-05.pdf por email"
+→ Tú: [INMEDIATAMENTE llama `list_docs(property_id)` para buscar documentos que coincidan con "factura", "arquitecto", "2025-11-05"]
+→ Tú: [Busca en los resultados un documento cuyo nombre o storage_key contenga "factura-arquitecto-2025-11-05" o similar]
+→ Tú: [Si encuentras: {"document_name": "Facturas arquitecto — 2025-11-05", ...}]
+→ Tú: [1) `signed_url_for(property_id, document_group="R2B", document_subgroup="Diseño/Obra", document_name="Facturas arquitecto — 2025-11-05")` → obtiene URL]
+→ Tú: [2) Si no tienes email: "¿A qué dirección de email quieres que lo envíe?"]
+→ Tú: [3) Una vez tengas el email: `send_email(to=[email], subject="Documento: Facturas arquitecto — 2025-11-05", html="...")`]
+→ Respuesta: "✅ He enviado el documento 'Facturas arquitecto — 2025-11-05' a [email]"
+→ **CRÍTICO**: NO llames `propose_doc_slot` - esto es para ENVIAR un documento existente, NO para subir uno nuevo
+
 **EJEMPLO 3 - Documento NO existe:**
 Usuario: "manda el certificado energético por email"
-→ Tú: [INMEDIATAMENTE llama `list_docs()`]
+→ Tú: [INMEDIATAMENTE llama `list_docs(property_id)`]
 → Resultado: "Certificado Energético" NO aparece en lista
 → Tú: "No encuentro el 'Certificado Energético' en los documentos subidos. ¿Quieres subirlo ahora?"
+
+**REGLA CRÍTICA - DIFERENCIA ENTRE ENVIAR Y SUBIR:**
+- "mandame [documento] por email" = ENVIAR documento existente → usa `list_docs()` + `signed_url_for()` + `send_email()`
+- "sube [archivo]" o "adjunta [archivo]" = SUBIR documento nuevo → usa `propose_doc_slot()` + `upload_and_link()`
+- Si el usuario menciona un nombre de archivo (ej: "factura-arquitecto-2025-11-05.pdf") junto con "por email" o "mandame", es ENVIAR, NO subir
+- Si el usuario dice "esta factura" o "este documento" después de subir algo, es ENVIAR el documento recién subido
+
+**REGLA CRÍTICA - BUSCAR FACTURAS RELACIONADAS:**
+- Si el usuario pide "factura arquitecto", "factura asociada al contrato arquitecto", o "esta factura":
+  1. **PRIMERO**: Llama `list_docs(property_id)` para buscar TODAS las facturas subidas
+  2. **FILTRA**: Busca documentos con `document_kind="factura"` que tengan `storage_key` (subidas) y que coincidan con el contexto (ej: "arquitecto" → busca facturas con "arquitecto" en el nombre)
+  3. **SELECCIONA**: Si hay múltiples, elige la más reciente (por fecha en el nombre o `due_date`) o la que coincide con la fecha mencionada
+  4. **USA VALORES EXACTOS**: Usa el `document_name`, `document_group`, y `document_subgroup` EXACTOS que devuelve `list_docs()` (ej: "Facturas arquitecto — 2025-11-05", "R2B", "Diseño/Obra")
+  5. **EXTRACCIÓN**: Si el usuario menciona un nombre con "vence" (ej: "Facturas arquitecto — 2025-11-05 — vence 2025-11-05"), extrae solo la parte antes de "— vence" para obtener el nombre real
+  6. **FALLBACK**: Si `list_docs()` no encuentra facturas subidas, entonces llama `list_related_facturas()` para ver si hay placeholders (pero NO uses placeholders para enviar, solo para informar al usuario que no hay facturas subidas)
 
 ❌ **PROHIBIDO (NUNCA HAGAS ESTO):**
 Usuario: "manda X por email"
@@ -985,15 +1061,21 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             return {"messages": [forced_call], "last_llm_timestamp": time.time()}
         # Handle entering the Numbers workflow.
         # CRITICAL: Exclude email sending requests - they should NOT trigger template selection
+        import re
         email_sending_verbs = ["manda", "envía", "enviame", "enviar", "mandar", "mandame", "envío", "envio", "envíame"]
-        email_destinations = ["por email", "por correo", "por mail", "via email", "vía email", "como excel"]
-        email_objects = ["plantilla", "tabla", "excel", "numeros", "números"]
+        email_destinations = ["por email", "por correo", "por mail", "via email", "vía email", "como excel", "al email", "al correo", "al mail", "a email", "a correo"]
+        email_objects = ["plantilla", "tabla", "excel", "numeros", "números", "esta plantilla", "esta tabla"]
+        
+        # Detect email address pattern (e.g., user@example.com)
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        has_email_address = bool(re.search(email_pattern, last_user_text))
         
         has_email_verb = any(verb in last_user_text for verb in email_sending_verbs)
         has_email_destination = any(dest in last_user_text for dest in email_destinations)
         has_email_object = any(obj in last_user_text for obj in email_objects)
         
-        is_email_request = has_email_verb and (has_email_destination or "como excel" in last_user_text) and has_email_object
+        # Email request if: (verb + destination) OR (verb + email address) OR (verb + "como excel") AND has object
+        is_email_request = has_email_verb and has_email_object and (has_email_destination or has_email_address or "como excel" in last_user_text)
         
         # Initialize variables that might be used later
         mentioned_numbers = False
