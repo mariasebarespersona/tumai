@@ -1674,6 +1674,17 @@ def should_call_tool(state: AgentState) -> Literal["tools", "end"]:
         return "tools"
     return "end"
 
+# ---- Optional prompt override (flagged) ----
+try:
+    if os.getenv("USE_SYSTEM_PROMPT_V2", "0") == "1":
+        _p = os.path.join("prompts", "system_v2.md")
+        if os.path.exists(_p):
+            with open(_p, "r", encoding="utf-8") as _f:
+                SYSTEM_PROMPT = _f.read()
+            logger.info("[agentic] Using prompts/system_v2.md as SYSTEM_PROMPT (USE_SYSTEM_PROMPT_V2=1)")
+except Exception as _e:
+    logger.warning(f"[agentic] Failed to load system_v2.md: {_e}")
+
 # --------------- Should we continue looping? ------------
 def should_continue(state: AgentState) -> Literal["tools", "assistant", "end"]:
     """After executing tools, decide whether to call tools again, assistant, or end.

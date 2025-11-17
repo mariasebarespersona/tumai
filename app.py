@@ -951,6 +951,24 @@ async def ui_chat(
     user_text = text or ""
     transcript = None  # Initialize transcript at the beginning
     
+    # Optional router logging (no behavior change)
+    if os.getenv("USE_ROUTER_LOG", "0") == "1" and user_text:
+        try:
+            intent = "general"
+            if _wants_list_properties(user_text):
+                intent = "property.list"
+            elif _wants_create_property(user_text):
+                intent = "property.create"
+            else:
+                norm = _soft_normalize(user_text)
+                if any(x in norm for x in ["celda", "casilla", "b5", "c5", "d5", "numeros", "números", "r2b"]):
+                    intent = "numbers"
+                elif any(x in norm for x in ["email", "correo", "documento", "factura", "contrato"]):
+                    intent = "documents"
+            print(f"[ROUTER_LOG] session={session_id} intent_guess={intent} text='{user_text[:120]}'")
+        except Exception as _e:
+            print(f"[ROUTER_LOG] error: {_e}")
+    
     # Debug logging for files and audio
     if files and len(files) > 0:
         print(f"[DEBUG] Received {len(files)} file(s): {[f.filename for f in files]}")
