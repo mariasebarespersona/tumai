@@ -67,6 +67,7 @@ Alternative (Vercel + Render):
 ### Frontend UX
 - Chat highlights the rule “Elegir una entre II/III/IV”.
 - Markdown headings/lists rendered for readability.
+ - Numbers panel is DB-only (no Office embed); upload Excel → replica en Supabase → edición por chat → export Excel.
 
 ### LLM & Rate-limits
 - Default model switched to `gpt-4o-mini` with token caps to reduce 429s.
@@ -97,6 +98,26 @@ export NEXT_PUBLIC_API_URL=http://127.0.0.1:7901
 npm run dev
 ```
 5) Test: upload `Contrato arquitecto` and ask “¿Hay facturas asociadas…?” → placeholders should appear.
+
+---
+
+## 📐 Numbers Table – DB-only Architecture (R2B)
+
+- Upload once: the Excel template is imported and replicated into Supabase (`numbers_templates`, `numbers_table_values`).
+- Work in-app: yellow cells are user inputs; formulas are auto-calculated in cascade and saved to DB.
+- Export: `export_numbers_table` regenerates an Excel mirroring structure and formatting with current values.
+- No embed required; the UI renders the DB-backed grid directly.
+
+Observability:
+- Every HTTP request logs method, path, status and latency (ms).
+- Verifier (log-only): after set_cell, checks stored value and that auto-calculated outputs are numeric.
+
+Local dev:
+```bash
+source .venv/bin/activate
+uvicorn app:app --reload --port 7901
+cd web && NEXT_PUBLIC_API_URL=http://127.0.0.1:7901 npm run dev
+```
 
 ---
 

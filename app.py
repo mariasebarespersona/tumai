@@ -911,7 +911,16 @@ from uuid import uuid4
 async def add_request_id(request, call_next):
     rid = request.headers.get("x-request-id") or str(uuid4())
     request.state.request_id = rid
+    # Simple latency metric
+    import time as _t, logging as _logging
+    _logger = _logging.getLogger("metrics")
+    _t0 = _t.perf_counter()
     response = await call_next(request)
+    ms = int((_t.perf_counter() - _t0) * 1000)
+    try:
+        _logger.info(f"[metrics] {request.method} {request.url.path} status={response.status_code} ms={ms} rid={rid}")
+    except Exception:
+        pass
     response.headers["x-request-id"] = rid
     return response
 
