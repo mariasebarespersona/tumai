@@ -1,20 +1,38 @@
 {
-  "numbers.set_cell": {
+  "set_numbers_table_cell": {
     "domain": "numbers",
-    "input_schema": { "cell": "string", "value": "string", "template_key": "string" },
+    "input_schema": { "property_id": "string", "template_key": "string", "cell_address": "string", "value": "string" },
     "output_schema": { "status": "string", "auto_calculated": "object?" },
     "requires_confirm": false
   },
-  "numbers.clear_cell": {
+  "clear_numbers_table_cell": {
     "domain": "numbers",
-    "input_schema": { "cell": "string", "template_key": "string" },
+    "input_schema": { "property_id": "string", "template_key": "string", "cell_address": "string" },
     "output_schema": { "status": "string" },
     "requires_confirm": false
   },
-  "docs.send_email": {
+  "upload_and_link": {
     "domain": "docs",
-    "input_schema": { "to": "string", "subject": "string", "body": "string" },
+    "input_schema": { "property_id": "string", "filename": "string", "document_group": "string", "document_subgroup": "string?", "document_name": "string", "bytes_b64": "string", "metadata": "object?" },
+    "output_schema": { "status": "string" },
+    "requires_confirm": true
+  },
+  "send_email": {
+    "domain": "docs",
+    "input_schema": { "to": "array", "subject": "string", "html": "string" },
     "output_schema": { "status": "string", "message_id": "string" },
+    "requires_confirm": true
+  },
+  "export_numbers_table": {
+    "domain": "numbers",
+    "input_schema": { "property_id": "string", "template_key": "string" },
+    "output_schema": { "status": "string" },
+    "requires_confirm": false
+  },
+  "delete_property": {
+    "domain": "property",
+    "input_schema": { "property_id": "string", "purge_docs_first": "boolean?" },
+    "output_schema": { "deleted": "boolean" },
     "requires_confirm": true
   }
 }

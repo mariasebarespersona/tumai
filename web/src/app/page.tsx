@@ -963,15 +963,6 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <a 
-              href={excelUrl} 
-              target="_blank" 
-              rel="noreferrer" 
-              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105 flex items-center gap-2"
-            >
-              <span>🔗</span>
-              <span>Abrir en pestaña</span>
-            </a>
             <div className="hidden md:flex items-center gap-1 bg-white/20 rounded-lg px-1 py-0.5">
               <button onClick={() => setZoom(z => Math.max(0.4, Math.round((z-0.1)*100)/100))} className="px-2 py-1 text-white/90 hover:text-white">−</button>
               <button onClick={() => setZoom(1)} className="px-2 py-1 text-white/90 hover:text-white">100%</button>
