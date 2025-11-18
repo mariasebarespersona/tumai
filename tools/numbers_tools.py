@@ -785,6 +785,12 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
                     verify_numbers_update(property_id, template_key, normalized_cell_address, str(value), response.get("auto_calculated"))
                 except Exception:
                     pass
+                # Metrics event
+                try:
+                    from .metrics import log_event  # local import to avoid cycles
+                    log_event("numbers", "set_numbers_table_cell", "ok", 0, {"property_id": property_id, "cell": normalized_cell_address})
+                except Exception:
+                    pass
                 return response
             else:
                 logger.warning(f"⚠️ Validation failed: expected {expected_value_str}, got {saved_value_str}")

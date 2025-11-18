@@ -906,6 +906,7 @@ app.add_middleware(
 # Request ID middleware for tracing
 from starlette.middleware.base import BaseHTTPMiddleware
 from uuid import uuid4
+from tools.metrics import log_request, log_event, fetch_summary, fetch_series
 
 @app.middleware("http")
 async def add_request_id(request, call_next):
@@ -919,6 +920,11 @@ async def add_request_id(request, call_next):
     ms = int((_t.perf_counter() - _t0) * 1000)
     try:
         _logger.info(f"[metrics] {request.method} {request.url.path} status={response.status_code} ms={ms} rid={rid}")
+        # Persist for dashboard
+        try:
+            log_request(request.method, request.url.path, response.status_code, ms, rid)
+        except Exception:
+            pass
     except Exception:
         pass
     response.headers["x-request-id"] = rid
@@ -955,6 +961,20 @@ async def validation_exception_handler(request, exc):
 @app.get("/")
 async def healthcheck():
     return {"status": "ok", "app": "RAMA AI Backend"}
+
+@app.get("/api/metrics/summary")
+async def api_metrics_summary(window_seconds: int = 3600):
+    try:
+        return JSONResponse({"ok": True, "summary": fetch_summary(window_seconds)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/api/metrics/series")
+async def api_metrics_series(path: str | None = None, window_seconds: int = 3600, buckets: int = 60):
+    try:
+        return JSONResponse({"ok": True, "series": fetch_series(path, window_seconds, buckets)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @app.get("/debug/excel-config")
 async def debug_excel_config():
