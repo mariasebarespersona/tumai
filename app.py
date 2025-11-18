@@ -852,12 +852,14 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             # Check if direct execution is enabled (Phase 2b)
             direct_execution = os.getenv("USE_DIRECT_EXECUTION", "0") == "1"
             
-            routing_result = await orchestrator.route_and_execute(
-                user_input=text,
-                session_id=session_id,
-                property_id=property_id or STATE.get("property_id"),
-                context={"history": STATE.get("messages", [])},
-                direct_execution=direct_execution
+            routing_result = asyncio.get_event_loop().run_until_complete(
+                orchestrator.route_and_execute(
+                    user_input=text,
+                    session_id=session_id,
+                    property_id=property_id or STATE.get("property_id"),
+                    context={"history": STATE.get("messages", [])},
+                    direct_execution=direct_execution
+                )
             )
             
             print(f"[ORCHESTRATOR] Routing result: {routing_result['status']}, "
