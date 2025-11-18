@@ -270,8 +270,22 @@ FLUJO: NÚMEROS (Numbers Table Framework)
 - **El usuario SOLO debe rellenar celdas amarillas**. Las demás se calculan solas.
 
 🔴 **PASO OBLIGATORIO AL ENTRAR EN MODO NÚMEROS** 🔴
+
+**🗑️ BORRAR/ELIMINAR PLANTILLA:**
+- Cuando el usuario pida eliminar/borrar la plantilla de números:
+  1. **NO generes ningún texto, NO pidas confirmación**
+  2. Llama INMEDIATAMENTE `delete_numbers_template(property_id=<property_id>, template_key='R2B')`
+  3. El sistema de confirmación lo manejará automáticamente si es necesario
+- Después de borrar, indica al usuario que refresque la página (F5) y suba el Excel de nuevo
+
+**CRÍTICO - REGLA ANTI-BUCLE DE CONFIRMACIÓN:**
+- Si el usuario dice "si", "sí", "ok", "confirmo" DESPUÉS de una pregunta de confirmación de borrado,
+  NO lo interpretes como selección de plantilla "R2B"
+- En ese contexto, "si" significa "confirmo el borrado", no "quiero R2B"
+
+**EMPEZAR/COMPLETAR PLANTILLA (si NO es borrar):**
 - **ANTES DE LLAMAR `get_numbers` o `set_number`**, verifica si el usuario quiere "empezar" o "completar" la plantilla desde cero.
-- **🚨 REGLA CRÍTICA: Si el usuario dice "quiero completar", "quiero empezar", "quiero rellenar" la plantilla de Números:**
+- **🚨 REGLA: Si el usuario dice "quiero completar", "quiero empezar", "quiero rellenar" (SIN mencionar borrar/eliminar):**
   - IGNORA cualquier `numbers_template` previo en el estado
   - SIEMPRE ofrece las 4 opciones de plantillas primero
   - NO llames `get_numbers` hasta que el usuario haya elegido UNA plantilla
@@ -1110,6 +1124,7 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         # Initialize variables that might be used later
         mentioned_numbers = False
         selected_tpl = None
+        wants_to_delete = False  # Initialize here so it's in scope
         
         # If it's an email request, DO NOT trigger template selection - let the agent handle it via send_numbers_table_email
         if not is_email_request:
@@ -1134,13 +1149,50 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             # If the user explicitly mentions documents, do not treat as numbers
             if any(tok in last_user_text for tok in ["documento", "documentos", "plantilla de documentos", "plantilla documentos"]):
                 mentioned_numbers = False
+            
+            # CRITICAL: If user wants to DELETE/REMOVE the template, do NOT trigger template selection
+            delete_verbs = ["borra", "elimina", "delete", "quita", "borrar", "eliminar", "quitar", "borro", "elimino"]
+            wants_to_delete = any(verb in last_user_text for verb in delete_verbs) and ("plantilla" in last_user_text or "tabla" in last_user_text or "números" in last_user_text or "numeros" in last_user_text)
+            
+            # ALSO check if previous message was asking for delete confirmation
+            # and current message is a confirmation ("si", "sí", "yes", "confirmo")
+            if len(messages) >= 2:
+                prev_msg = messages[-2]
+                if isinstance(prev_msg, AIMessage) and prev_msg.content:
+                    prev_text = prev_msg.content.lower()
+                    # Check for delete confirmation keywords
+                    delete_confirm_keywords = [
+                        "eliminación", "irreversible", "borrar", "eliminar", 
+                        "estás seguro", "estas seguro", "confirmar", "proceder",
+                        "deseas borrar", "deseas eliminar"
+                    ]
+                    is_delete_confirmation = any(kw in prev_text for kw in delete_confirm_keywords)
+                    # And check if user is confirming
+                    is_confirming = any(conf in last_user_text for conf in ["si", "sí", "yes", "confirmo", "ok", "procede"])
+                    
+                    if is_delete_confirmation and is_confirming:
+                        wants_to_delete = True
+                        logger.info(f"[assistant] 🗑️ Detected delete confirmation ('{last_user_text}' after confirmation question), disabling template selection logic")
+            
+            if wants_to_delete:
+                logger.info(f"[assistant] 🗑️ Detected delete request, FORCING delete_numbers_template call")
+                # FORCE delete immediately - don't let LLM generate confirmation text
+                forced_delete = AIMessage(content="", tool_calls=[{
+                    "name": "delete_numbers_template",
+                    "args": {"property_id": state.get("property_id"), "template_key": "R2B"},
+                    "id": "force_delete_numbers_template"
+                }])
+                return {"messages": [forced_delete], "last_llm_timestamp": time.time()}
+            
+            # Only check template_map if NOT deleting
+            if not wants_to_delete:
+                for key, val in template_map.items():
+                    if key in last_user_text:
+                        selected_tpl = val
+                        break
 
-            for key, val in template_map.items():
-                if key in last_user_text:
-                    selected_tpl = val
-                    break
-
-            if selected_tpl and state.get("property_id") and mentioned_numbers:
+            # If template is explicitly selected (e.g. "R2B"), force it even if "números" wasn't mentioned
+            if selected_tpl and state.get("property_id") and not wants_to_delete:
                 forced_set_tpl = AIMessage(content="", tool_calls=[{
                     "name": "set_numbers_template",
                     "args": {"property_id": state.get("property_id"), "template_key": selected_tpl},
@@ -1148,7 +1200,8 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                 }])
                 return {"messages": [forced_set_tpl], "last_llm_timestamp": time.time()}
 
-        if mentioned_numbers and not selected_tpl:
+        # Only ask for template if NOT deleting
+        if mentioned_numbers and not selected_tpl and not wants_to_delete:
             ask_msg = AIMessage(content=(
                 "¿Qué plantilla de Números quieres usar? Elige una de las siguientes opciones y respóndeme con el nombre o el número:\n\n"
                 "1) R2B\n2) R2B + PM\n3) R2B + PM + Venta certs\n4) Promoción"
@@ -1294,26 +1347,40 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             except Exception as _e:
                 logger.warning(f"[contracts] validation failed: {_e}")
             # Thresholds + confirmations (light gating)
+            # CRITICAL: Skip confirmation if router just processed user confirmation
             try:
                 if getattr(ai, "tool_calls", None):
-                    low_conf = float(state.get("intent_confidence") or 0.0) < 0.8
-                    # Tools that always require explicit confirmation
-                    confirm_tools = {"send_email", "upload_and_link", "delete_property"}
-                    write_tools = {"set_numbers_table_cell", "clear_numbers_table_cell", "export_numbers_table"}
-                    needs_confirm = False
-                    for tc in ai.tool_calls:
-                        tname = tc.get("name")
-                        if tname in confirm_tools:
-                            needs_confirm = True
+                    # Check if we just came from a confirmation (router cleared awaiting_confirmation)
+                    just_confirmed = False
+                    for msg in reversed(messages):
+                        if isinstance(msg, SystemMessage) and "User confirmed" in msg.content:
+                            just_confirmed = True
                             break
-                        if low_conf and tname in write_tools:
-                            needs_confirm = True
+                        if isinstance(msg, HumanMessage):
+                            # Only check the last user message
                             break
-                    if needs_confirm:
-                        # Replace tool_calls with a confirmation question
-                        question = "Necesito tu confirmación antes de ejecutar esta acción. ¿Confirmas que proceda?"
-                        ai = AIMessage(content=question)
-                        return {"messages": [ai], "awaiting_confirmation": True, "last_llm_timestamp": time.time()}
+                    
+                    if not just_confirmed:
+                        low_conf = float(state.get("intent_confidence") or 0.0) < 0.8
+                        # Tools that always require explicit confirmation
+                        confirm_tools = {"send_email", "upload_and_link", "delete_property"}
+                        # Write tools that require confirmation ONLY when confidence is low
+                        # NOTE: set_numbers_table_cell removed - we want it to execute without confirmation
+                        write_tools = {"clear_numbers_table_cell", "export_numbers_table"}
+                        needs_confirm = False
+                        for tc in ai.tool_calls:
+                            tname = tc.get("name")
+                            if tname in confirm_tools:
+                                needs_confirm = True
+                                break
+                            if low_conf and tname in write_tools:
+                                needs_confirm = True
+                                break
+                        if needs_confirm:
+                            # Replace tool_calls with a confirmation question
+                            question = "Necesito tu confirmación antes de ejecutar esta acción. ¿Confirmas que proceda?"
+                            ai = AIMessage(content=question)
+                            return {"messages": [ai], "awaiting_confirmation": True, "last_llm_timestamp": time.time()}
             except Exception as _e:
                 logger.warning(f"[confirm] gating failed: {_e}")
     except Exception as e:

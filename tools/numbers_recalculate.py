@@ -8,47 +8,9 @@ not just those affected by a single cell update.
 import logging
 from typing import Dict, Any
 from tools.supabase_client import sb
-from tools.formula_calculator import recalculate_formulas, build_dependency_graph
+from tools.formula_calculator_v3_simple import recalculate_all_formulas as recalc_all
 
 logger = logging.getLogger(__name__)
-
-
-def recalculate_all_formulas(property_id: str, template_key: str, structure: Dict, current_values: Dict[str, Any]) -> Dict[str, Any]:
-    """Recalculate ALL formulas in the numbers table based on current values.
-    
-    This is used when:
-    - User opens a template that already has some values
-    - User wants to refresh all calculated values
-    
-    Args:
-        property_id: Property UUID
-        template_key: Template key (e.g., "R2B")
-        structure: Excel structure with cells and formulas
-        current_values: Current cell values from database
-    
-    Returns:
-        Dict of calculated values {cell_addr: calculated_value}
-    """
-    logger.info(f"[recalculate_all_formulas] Starting full recalculation for property_id={property_id}, template_key={template_key}")
-    
-    # Build dependency graph
-    dependencies = build_dependency_graph(structure)
-    logger.info(f"[recalculate_all_formulas] Found {len(dependencies)} cells with formulas")
-    
-    # Find all cells that have values (user inputs)
-    cells_with_values = set(current_values.keys())
-    logger.info(f"[recalculate_all_formulas] Found {len(cells_with_values)} cells with values: {list(cells_with_values)[:10]}")
-    
-    # Recalculate all formulas (treat all cells with values as "updated")
-    calculated = recalculate_formulas(
-        updated_cells=list(cells_with_values),  # Treat all existing values as "updated"
-        structure=structure,
-        current_values=current_values
-    )
-    
-    logger.info(f"[recalculate_all_formulas] Successfully calculated {len(calculated)} formulas: {list(calculated.keys())}")
-    
-    return calculated
 
 
 def save_calculated_values(property_id: str, template_key: str, calculated: Dict[str, Any], structure: Dict) -> int:
@@ -119,8 +81,8 @@ def recalculate_and_save(property_id: str, template_key: str) -> Dict:
         structure = get_numbers_table_structure(property_id, template_key)
         current_values = get_numbers_table_values(property_id, template_key)
         
-        # Recalculate all formulas
-        calculated = recalculate_all_formulas(property_id, template_key, structure, current_values)
+        # Recalculate all formulas using V2
+        calculated = recalc_all(property_id, template_key, structure, current_values)
         
         if not calculated:
             logger.info(f"[recalculate_and_save] No formulas to calculate (either no formulas or missing dependencies)")

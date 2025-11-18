@@ -893,7 +893,7 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
 
 # Minimal HTTP app to support the Next.js frontend
 app = FastAPI(title="RAMA AI Backend")
-cors_env = os.getenv("WEB_BASE", "http://localhost:3000,http://localhost:3004,http://localhost:3005,http://localhost:3006")
+cors_env = os.getenv("WEB_BASE", "http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3005,http://localhost:3006")
 allow_all = os.getenv("ALLOW_ALL_CORS", "0") == "1" or cors_env.strip() == "*"
 app.add_middleware(
     CORSMiddleware,
@@ -2410,6 +2410,174 @@ async def api_recalculate_formulas(property_id: str = Form(...), template_key: s
     
     except Exception as e:
         logger.error(f"[api_recalculate_formulas] Error: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/delete-template")
+async def api_delete_template(property_id: str = Form(...), template_key: str = Form(...)):
+    """Completely delete a Numbers template and all its values from the database."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"[api_delete_template] Deleting template for property_id={property_id}, template_key={template_key}")
+        
+        # Delete from numbers_templates
+        sb.postgrest.schema = "public"
+        result1 = sb.table("numbers_templates").delete().eq("property_id", property_id).eq("template_key", template_key).execute()
+        logger.info(f"[api_delete_template] Deleted from numbers_templates: {len(result1.data) if result1.data else 0} rows")
+        
+        # Delete from numbers_table_values
+        result2 = sb.table("numbers_table_values").delete().eq("property_id", property_id).eq("template_key", template_key).execute()
+        logger.info(f"[api_delete_template] Deleted from numbers_table_values: {len(result2.data) if result2.data else 0} rows")
+        
+        return JSONResponse({"ok": True, "deleted_templates": len(result1.data) if result1.data else 0, "deleted_values": len(result2.data) if result2.data else 0})
+    
+    except Exception as e:
+        logger.error(f"[api_delete_template] Error: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/numbers/debug-formulas")
+async def api_debug_formulas(property_id: str, template_key: str = "R2B"):
+    """Debug endpoint to check which cells have formulas in the structure."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from tools.numbers_tools import get_numbers_table_structure, R2B_FORMULAS
+        
+        structure = get_numbers_table_structure(property_id, template_key)
+        if not structure:
+            return JSONResponse({"ok": False, "error": "No structure found"}, status_code=404)
+        
+        # Check which cells have formulas
+        cells_with_formulas = []
+        cells_without_formulas = []
+        formula_cells_expected = list(R2B_FORMULAS.keys())
+        
+        for cell in structure.get("cells", []):
+            addr = cell.get("address")
+            formula = cell.get("formula")
+            value = cell.get("value")
+            
+            if addr in formula_cells_expected:
+                cells_with_formulas.append({
+                    "address": addr,
+                    "has_formula": bool(formula),
+                    "formula": formula,
+                    "value": value,
+                    "expected_formula": R2B_FORMULAS.get(addr)
+                })
+        
+        # Check which expected formulas are missing
+        found_addresses = [c["address"] for c in cells_with_formulas]
+        missing_formulas = [addr for addr in formula_cells_expected if addr not in found_addresses]
+        
+        return JSONResponse({
+            "ok": True,
+            "property_id": property_id,
+            "template_key": template_key,
+            "total_cells": len(structure.get("cells", [])),
+            "formula_cells_found": len([c for c in cells_with_formulas if c["has_formula"]]),
+            "formula_cells_expected": len(formula_cells_expected),
+            "formula_cells": cells_with_formulas,
+            "missing_formulas": missing_formulas
+        })
+    
+    except Exception as e:
+        logger.error(f"[api_debug_formulas] Error: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/numbers/debug-auto-calc")
+async def api_debug_auto_calc(property_id: str, updated_cell: str, new_value: str, template_key: str = "R2B"):
+    """Debug endpoint to test auto-calculation without actually saving."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from tools.numbers_tools import get_numbers_table_structure, get_numbers_table_values
+        from tools.formula_calculator import auto_calculate_on_update
+        
+        # Get structure and values
+        structure = get_numbers_table_structure(property_id, template_key)
+        current_values = get_numbers_table_values(property_id, template_key)
+        
+        logger.info(f"[api_debug_auto_calc] Testing auto-calc for {updated_cell}={new_value}")
+        logger.info(f"[api_debug_auto_calc] Structure has {len(structure.get('cells', []))} cells")
+        logger.info(f"[api_debug_auto_calc] Current values: {len(current_values)} cells")
+        
+        # Test auto-calculation
+        calculated = auto_calculate_on_update(
+            property_id=property_id,
+            template_key=template_key,
+            updated_cell=updated_cell,
+            new_value=new_value,
+            structure=structure,
+            current_values=current_values
+        )
+        
+        return JSONResponse({
+            "ok": True,
+            "updated_cell": updated_cell,
+            "new_value": new_value,
+            "calculated_cells": calculated,
+            "calculated_count": len(calculated)
+        })
+    
+    except Exception as e:
+        logger.error(f"[api_debug_auto_calc] Error: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/numbers/clean-formula-values")
+async def api_clean_formula_values(property_id: str = Form(...), template_key: str = Form(...)):
+    """Clean/delete values from cells that have formulas.
+    This is used to ensure formula cells don't have static values in DB."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from tools.numbers_tools import get_numbers_table_structure
+        
+        logger.info(f"[api_clean_formula_values] Cleaning formula cell values for property_id={property_id}, template_key={template_key}")
+        
+        # Get structure to find cells with formulas
+        structure = get_numbers_table_structure(property_id, template_key)
+        if not structure or not structure.get("cells"):
+            return JSONResponse({"ok": False, "error": "No template structure found"}, status_code=404)
+        
+        # Find all cells with formulas
+        formula_cells = []
+        for cell in structure.get("cells", []):
+            if cell.get("formula"):
+                formula_cells.append(cell.get("address"))
+        
+        logger.info(f"[api_clean_formula_values] Found {len(formula_cells)} cells with formulas: {formula_cells}")
+        
+        # Delete values from these cells in the DB
+        deleted_count = 0
+        for cell_addr in formula_cells:
+            try:
+                sb.rpc("set_numbers_table_cell", {
+                    "p_property_id": property_id,
+                    "p_template_key": template_key,
+                    "p_cell_address": cell_addr,
+                    "p_value": "",  # Empty string to clear
+                    "p_row_label": None,
+                    "p_col_label": None,
+                    "p_format_json": {}
+                }).execute()
+                deleted_count += 1
+                logger.info(f"[api_clean_formula_values] ✅ Cleared value from {cell_addr}")
+            except Exception as e:
+                logger.warning(f"[api_clean_formula_values] ⚠️ Error clearing {cell_addr}: {e}")
+        
+        return JSONResponse({"ok": True, "cleaned": deleted_count, "formula_cells": formula_cells})
+    
+    except Exception as e:
+        logger.error(f"[api_clean_formula_values] Error: {e}", exc_info=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 

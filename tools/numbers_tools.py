@@ -2,36 +2,37 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Union
 from .supabase_client import sb
 from .utils import nums_schema
-from tools.formula_calculator import auto_calculate_on_update
+from tools.formula_calculator_v3_simple import auto_calculate_on_update
 from .verifier import verify_numbers_update
 
 # R2B Template Formulas (from docs/R2B_FORMULAS.md)
 # These formulas are automatically injected when importing an R2B Excel file
+# All formulas use IF() to show blank cells instead of 0 when inputs are empty
 R2B_FORMULAS = {
-    # IVA Calculations (Column D)
-    "D5": "=B5*C5/100",
-    "D6": "=B6*C6/100",
-    "D7": "=B7*C7/100",
-    "D8": "=B8*C8/100",
+    # IVA Calculations (Column D) - Show blank if B cell is empty
+    "D5": '=IF(OR(B5="",C5=""),"",B5*C5/100)',
+    "D6": '=IF(OR(B6="",C6=""),"",B6*C6/100)',
+    "D7": '=IF(OR(B7="",C7=""),"",B7*C7/100)',
+    "D8": '=IF(OR(B8="",C8=""),"",B8*C8/100)',
     
-    # Total with VAT (Column E)
-    "E5": "=B5+D5",
-    "E6": "=B6+D6",
-    "E7": "=B7+D7",
-    "E8": "=B8+D8",
+    # Total with VAT (Column E) - Show blank if B cell is empty
+    "E5": '=IF(B5="","",B5+D5)',
+    "E6": '=IF(B6="","",B6+D6)',
+    "E7": '=IF(B7="","",B7+D7)',
+    "E8": '=IF(B8="","",B8+D8)',
     
-    # Profit Calculations
-    "B10": "=B6-B7-B8",      # Gross profit from land sale
-    "B12": "=B10+B11",       # Total gross income
-    "B13": "=B12*0.25",      # Taxes at 25%
-    "B14": "=B13",           # Taxes in euros
-    "B15": "=B12-B14",       # Net profit
+    # Profit Calculations - Show blank if required inputs are empty
+    "B10": '=IF(B6="","",B6-B7-B8)',      # Gross profit from land sale
+    "B12": '=IF(B10="","",B10+B11)',      # Total gross income
+    "B13": '=IF(B12="","",B12*0.25)',     # Taxes at 25%
+    "B14": '=IF(B13="","",B13)',          # Taxes in euros
+    "B15": '=IF(B12="","",B12-B14)',      # Net profit
     
     # AUTOPROMOCIÓN
-    "B18": "=B15",           # Reference to net profit
+    "B18": '=IF(B15="","",B15)',          # Reference to net profit
     
-    # Coste Comprador Total
-    "B29": "=B25+B26+B27+B28"  # Sum of all buyer costs
+    # Coste Comprador Total - Show blank if all inputs are empty
+    "B29": '=IF(AND(B25="",B26="",B27="",B28=""),"",B25+B26+B27+B28)'  # Sum of all buyer costs
 }
 
 def set_number(property_id: str, item_key: str, amount: Optional[float]) -> Dict:
@@ -504,12 +505,26 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                         is_user_input = True
                 
                 # Store ALL cells in structure (including empty ones)
+                # CRITICAL: If cell has a formula (or will have one injected), DON'T store its calculated value
+                # This prevents showing 0 in cells that should be empty until calculated
+                cell_value_to_store = ""
+                
+                # Check if this cell will have a formula injected (R2B template)
+                will_have_formula = (template_key == "R2B" and cell_address in R2B_FORMULAS)
+                
+                if (formula and isinstance(formula, str) and formula.startswith("=")) or will_have_formula:
+                    # Has formula (or will have one) - don't store value, only formula
+                    cell_value_to_store = ""
+                else:
+                    # No formula - store the actual value
+                    cell_value_to_store = str(value) if value is not None else ""
+                
                 structure["cells"].append({
                     "address": cell_address,
                     "row": row,
                     "col": col,
                     "col_letter": col_letter,
-                    "value": str(value) if value is not None else "",
+                    "value": cell_value_to_store,
                     "formula": formula if formula and isinstance(formula, str) and formula.startswith("=") else None,
                     "format": cell_format,
                     "row_label": row_label,
@@ -545,14 +560,24 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
         
         # Save initial values to numbers_table_values
         # CRÍTICO: NO sobrescribir valores que el usuario ya añadió via chat
-        # Solo guardar valores que vienen del Excel y que NO existen en la DB
+        # CRÍTICO: NO guardar valores para celdas que tienen fórmulas en R2B_FORMULAS
+        # Solo guardar valores que vienen del Excel y que NO existen en la DB y NO tienen fórmulas
         existing_values = get_numbers_table_values(property_id, template_key)
         saved_count = 0
         skipped_count = 0
+        formula_cells_skipped = 0
+        
         for cell_addr, cell_data in cell_values.items():
             try:
-                # Check if user already added a value for this cell via chat
                 normalized_addr = str(cell_addr).upper().strip()
+                
+                # Skip cells that have formulas in R2B_FORMULAS (they should remain empty in DB)
+                if template_key == "R2B" and normalized_addr in R2B_FORMULAS:
+                    logger.info(f"[import_excel] Skipping {normalized_addr} - has formula in R2B_FORMULAS")
+                    formula_cells_skipped += 1
+                    continue
+                
+                # Check if user already added a value for this cell via chat
                 if normalized_addr in existing_values:
                     existing_val = existing_values[normalized_addr]
                     existing_val_str = existing_val.get("value", "") if isinstance(existing_val, dict) else str(existing_val)
@@ -575,7 +600,7 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
             except Exception as e:
                 logger.warning(f"Failed to save cell {cell_addr}: {e}")
         
-        logger.info(f"✅ Imported {saved_count} cells from Excel file, preserved {skipped_count} user-added values")
+        logger.info(f"✅ Imported {saved_count} cells from Excel file, preserved {skipped_count} user-added values, skipped {formula_cells_skipped} formula cells")
         
         # 🔥 INJECT R2B FORMULAS AUTOMATICALLY INTO STRUCTURE
         if template_key == "R2B":
@@ -587,6 +612,7 @@ def import_excel_from_file(file_bytes: bytes, property_id: str, template_key: st
                 cell_address = cell.get("address")
                 if cell_address in R2B_FORMULAS:
                     cell["formula"] = R2B_FORMULAS[cell_address]
+                    cell["value"] = ""  # CRITICAL: Clear any stored value for formula cells
                     injected_count += 1
                     logger.debug(f"[R2B] Injected formula: {cell_address} = {R2B_FORMULAS[cell_address]}")
             
@@ -745,29 +771,34 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
                             current_values=current_values
                         )
                         
-                        # 4. Save calculated values to DB
+                        # 4. Save calculated values to DB so frontend can display them
+                        # Excel export will still use formulas from structure (not these stored values)
                         if calculated:
-                            logger.info(f"[set_numbers_table_cell] 💾 Saving {len(calculated)} auto-calculated cells to DB")
-                            for calc_cell, calc_value in calculated.items():
-                                # Find cell info for labels
-                                calc_cell_info = None
-                                for cell in structure.get("cells", []):
-                                    if cell.get("address") == calc_cell:
-                                        calc_cell_info = cell
-                                        break
-                                
-                                # Save calculated value via RPC
-                                sb.rpc("set_numbers_table_cell", {
-                                    "p_property_id": property_id,
-                                    "p_template_key": template_key,
-                                    "p_cell_address": calc_cell,
-                                    "p_value": str(calc_value),
-                                    "p_row_label": calc_cell_info.get("row_label") if calc_cell_info else None,
-                                    "p_col_label": calc_cell_info.get("col_label") if calc_cell_info else None,
-                                    "p_format_json": calc_cell_info.get("format", {}) if calc_cell_info else {}
-                                }).execute()
-                                
-                                logger.info(f"[set_numbers_table_cell] ✅ Saved calculated value: {calc_cell} = {calc_value}")
+                            logger.info(f"[set_numbers_table_cell] ✅ Auto-calculated {len(calculated)} cells, saving to DB for frontend display")
+                            
+                            # Save each calculated value to DB
+                            for calc_cell_address, calc_value in calculated.items():
+                                try:
+                                    # Find cell info for this calculated cell
+                                    calc_cell_info = None
+                                    for cell in structure.get("cells", []):
+                                        if cell.get("address") == calc_cell_address:
+                                            calc_cell_info = cell
+                                            break
+                                    
+                                    # Save via RPC
+                                    sb.rpc("set_numbers_table_cell", {
+                                        "p_property_id": property_id,
+                                        "p_template_key": template_key,
+                                        "p_cell_address": calc_cell_address,
+                                        "p_value": str(calc_value),
+                                        "p_row_label": calc_cell_info.get("row_label") if calc_cell_info else None,
+                                        "p_col_label": calc_cell_info.get("col_label") if calc_cell_info else None,
+                                        "p_format_json": calc_cell_info.get("format", {}) if calc_cell_info else {}
+                                    }).execute()
+                                    logger.debug(f"[set_numbers_table_cell] Saved calculated value: {calc_cell_address} = {calc_value}")
+                                except Exception as e:
+                                    logger.warning(f"[set_numbers_table_cell] Error saving calculated value for {calc_cell_address}: {e}")
                             
                             response["auto_calculated"] = calculated
                             response["auto_calculated_count"] = len(calculated)
@@ -842,4 +873,44 @@ def clear_numbers_table_cell(property_id: str, template_key: str, cell_address: 
         return result.data if result.data else {"ok": True, "cell_address": cell_address, "cleared": True, "validated": False}
     except Exception as e:
         logger.error(f"Error clearing cell value {cell_address}: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def delete_numbers_template(property_id: str, template_key: str = "R2B") -> Dict:
+    """Delete a Numbers template completely (structure and all values).
+    
+    This is useful when you need to re-import the template cleanly.
+    
+    Args:
+        property_id: Property UUID
+        template_key: Template identifier (default "R2B")
+    
+    Returns:
+        Dict with ok status and counts of deleted records
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        sb.postgrest.schema = "public"
+        logger.info(f"[delete_numbers_template] Deleting template {template_key} for property {property_id}")
+        
+        # Delete from numbers_templates
+        result1 = sb.table("numbers_templates").delete().eq("property_id", property_id).eq("template_key", template_key).execute()
+        deleted_templates = len(result1.data) if result1.data else 0
+        logger.info(f"[delete_numbers_template] Deleted {deleted_templates} template(s)")
+        
+        # Delete from numbers_table_values
+        result2 = sb.table("numbers_table_values").delete().eq("property_id", property_id).eq("template_key", template_key).execute()
+        deleted_values = len(result2.data) if result2.data else 0
+        logger.info(f"[delete_numbers_template] Deleted {deleted_values} value(s)")
+        
+        return {
+            "ok": True,
+            "deleted_templates": deleted_templates,
+            "deleted_values": deleted_values,
+            "message": f"Template {template_key} deleted successfully"
+        }
+    except Exception as e:
+        logger.error(f"[delete_numbers_template] Error: {e}", exc_info=True)
         return {"ok": False, "error": str(e)}

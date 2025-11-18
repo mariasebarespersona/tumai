@@ -32,6 +32,7 @@ from .numbers_tools import (
     find_item_by_value as _find_item_by_value,
     set_numbers_table_cell as _set_numbers_table_cell,
     clear_numbers_table_cell as _clear_numbers_table_cell,
+    delete_numbers_template as _delete_numbers_template,
 )
 from .numbers_agent import (
     compute_and_log as _numbers_compute_and_log,
@@ -308,6 +309,25 @@ def clear_numbers_table_cell_tool(property_id: str, template_key: str, cell_addr
     Example: clear_numbers_table_cell(property_id='...', template_key='R2B', cell_address='B7')
     """
     return _clear_numbers_table_cell(property_id, template_key, cell_address)
+
+
+@tool("delete_numbers_template")
+def delete_numbers_template_tool(property_id: str, template_key: str = "R2B") -> Dict:
+    """Delete the entire Numbers template (structure and all values) for a property.
+    
+    Use this when the user wants to:
+    - Remove the Numbers table completely
+    - Start fresh with a new template
+    - Fix issues by re-importing the template
+    
+    This will DELETE ALL data in the Numbers table for this property.
+    
+    Example: delete_numbers_template(property_id='...', template_key='R2B')
+    
+    Returns:
+        Dict with ok=True and counts of deleted records
+    """
+    return _delete_numbers_template(property_id, template_key)
 
 
 class GetNumbersInput(BaseModel):
@@ -854,6 +874,7 @@ TOOLS = [
     set_numbers_table_cell_tool,  # NEW - Set cell value in Numbers Table (R2B) using Excel addresses
     clear_numbers_table_cell_tool,  # NEW - Clear/delete cell value in Numbers Table (R2B) using Excel addresses
     set_numbers_template_tool,  # NEW - Set Numbers template selection
+    delete_numbers_template_tool,  # NEW - Delete entire Numbers template and all values
     get_numbers_tool,
     calc_numbers_tool,
     numbers_compute_tool,

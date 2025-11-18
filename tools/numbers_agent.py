@@ -298,61 +298,91 @@ def generate_numbers_table_excel(property_id: str, template_key: str = "R2B") ->
             if normalized_cell_addr in ["B5", "C10", "D8"]:  # Common test cells
                 logger.info(f"[generate_numbers_table_excel] 🔍 Checking cell {normalized_cell_addr}: DB data = {updated_value_data}, structure value = {cell_info.get('value')}")
             
-            # Priority: 1) Updated value from DB, 2) Formula from structure, 3) Original value from structure
-            if updated_value_data is not None:
-                # We have a value from DB (even if it's empty string, it means it was explicitly set)
+            # Priority: 1) Updated value from DB (if non-empty), 2) Formula from structure, 3) Original value from structure
+            value_written = False
+            
+            # Check DB value first, BUT skip if this cell has a formula in the structure
+            # (we want to use formulas in Excel, not stored calculated values)
+            has_formula = bool(cell_info.get("formula"))
+            
+            if updated_value_data is not None and not has_formula:
+                # We have a value from DB and this cell doesn't have a formula
                 if isinstance(updated_value_data, dict):
                     value = updated_value_data.get("value", "")
                 else:
                     value = str(updated_value_data)
                 
-                # Apply value from DB (this is the value added via chat)
-                # CRITICAL: Always apply DB values, even if they seem empty
-                logger.info(f"[generate_numbers_table_excel] ✅ DB value found for {normalized_cell_addr}: '{value}' (type: {type(value)})")
-                try:
-                    if isinstance(value, str) and value.strip() and not value.startswith("="):
-                        # Try to convert to number
-                        num_val = float(value.replace(",", "."))
-                        cell.value = num_val
-                        logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to number: {num_val}")
-                        cells_with_db_values += 1
-                    elif isinstance(value, str) and value.strip() == "":
-                        # Empty string from DB - set to empty
-                        cell.value = ""
-                        logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to empty string (from DB)")
-                        cells_with_db_values += 1
-                    else:
-                        cell.value = value
-                        logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to value: '{value}'")
-                        cells_with_db_values += 1
-                except (ValueError, TypeError) as e:
-                    cell.value = str(value) if value is not None else ""
-                    logger.warning(f"[generate_numbers_table_excel] ⚠️ Error converting value for {normalized_cell_addr}: {e}, set to string: '{value}'")
-                    cells_with_db_values += 1
-            elif cell_info.get("formula"):
-                # Preserve formula from original Excel
-                cell.value = cell_info.get("formula")
-                logger.debug(f"[generate_numbers_table_excel] Using formula for {normalized_cell_addr}: {cell_info.get('formula')}")
-                cells_with_formulas += 1
-            else:
-                # Use original value from structure
-                value = cell_info.get("value", "")
-                if value:
+                # Only write non-empty values from DB
+                if value and isinstance(value, str) and value.strip():
+                    logger.info(f"[generate_numbers_table_excel] ✅ DB value found for {normalized_cell_addr}: '{value}'")
                     try:
-                        if isinstance(value, str) and value.strip() and not value.startswith("="):
+                        if not value.startswith("="):
+                            # Try to convert to number
                             num_val = float(value.replace(",", "."))
                             cell.value = num_val
+                            logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to number: {num_val}")
+                            cells_with_db_values += 1
+                            value_written = True
                         else:
                             cell.value = value
-                        cells_with_structure_values += 1
-                    except (ValueError, TypeError):
+                            logger.info(f"[generate_numbers_table_excel] ✅ Set {normalized_cell_addr} to formula: '{value}'")
+                            cells_with_db_values += 1
+                            value_written = True
+                    except (ValueError, TypeError) as e:
                         cell.value = str(value)
-                        cells_with_structure_values += 1
+                        logger.warning(f"[generate_numbers_table_excel] ⚠️ Error converting value for {normalized_cell_addr}: {e}, set to string: '{value}'")
+                        cells_with_db_values += 1
+                        value_written = True
                 else:
-                    # Empty cell - preserve as empty
-                    cell.value = None
-                    logger.debug(f"[generate_numbers_table_excel] Empty cell {normalized_cell_addr} (no DB value, no formula, no structure value)")
-                    cells_empty += 1
+                    logger.info(f"[generate_numbers_table_excel] ⏭️ Skipping empty DB value for {normalized_cell_addr}, will use formula or structure")
+            elif updated_value_data is not None and has_formula:
+                logger.debug(f"[generate_numbers_table_excel] ⏭️ Ignoring DB value for {normalized_cell_addr} (cell has formula, will use formula instead)")
+            
+            # If no value from DB, check formula
+            if not value_written:
+                cell_formula = cell_info.get("formula")
+                # DEBUG: Log for known formula cells
+                if normalized_cell_addr in ["B10", "D5", "D6", "D7", "D8", "E5", "B12", "B13", "B14", "B15"]:
+                    logger.info(f"[generate_numbers_table_excel] 🔍 Formula cell {normalized_cell_addr}: formula in structure = '{cell_formula}', value in structure = '{cell_info.get('value')}'")
+                
+                if cell_formula:
+                    # Preserve formula from original Excel
+                    cell.value = cell_formula
+                    logger.info(f"[generate_numbers_table_excel] ✅ Using formula for {normalized_cell_addr}: {cell_formula}")
+                    cells_with_formulas += 1
+                    value_written = True
+            
+            # If no value and no formula, check structure value ONLY if cell doesn't have a formula defined
+            if not value_written:
+                # CRITICAL: Check if this cell is a formula cell in R2B_FORMULAS
+                # If yes, DON'T use structure value (it's likely a calculated 0)
+                from tools.numbers_tools import R2B_FORMULAS
+                is_formula_cell = template_key == "R2B" and normalized_cell_addr in R2B_FORMULAS
+                
+                if not is_formula_cell:
+                    # Safe to use original value from structure (not a formula cell)
+                    value = cell_info.get("value", "")
+                    if value:
+                        try:
+                            if isinstance(value, str) and value.strip() and not value.startswith("="):
+                                num_val = float(value.replace(",", "."))
+                                cell.value = num_val
+                            else:
+                                cell.value = value
+                            cells_with_structure_values += 1
+                            value_written = True
+                        except (ValueError, TypeError):
+                            cell.value = str(value)
+                            cells_with_structure_values += 1
+                            value_written = True
+                else:
+                    logger.debug(f"[generate_numbers_table_excel] Skipping structure value for formula cell {normalized_cell_addr}")
+            
+            # If still no value written, leave as empty (None)
+            if not value_written:
+                cell.value = None
+                logger.debug(f"[generate_numbers_table_excel] Empty cell {normalized_cell_addr} (no DB value, no formula, no structure value)")
+                cells_empty += 1
             
             # Apply format (prefer format from structure to preserve original formatting)
             # Only use format from cell_map if it's more complete

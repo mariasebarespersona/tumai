@@ -411,6 +411,13 @@ export default function ChatPage() {
       }
       
       console.log('[Numbers Table] Value map size:', Object.keys(valueMap).length, 'Format map size:', Object.keys(formatMap).length)
+      // Debug: Log formula cells (D5, E5, etc.)
+      const formulaCells = ['D5', 'E5', 'D6', 'E6', 'B10', 'B12', 'B13', 'B14', 'B15']
+      formulaCells.forEach(addr => {
+        if (valueMap[addr] !== undefined) {
+          console.log(`[Numbers Table] ✅ Formula cell ${addr} has value:`, valueMap[addr])
+        }
+      })
 
       // Build matrix row by row with values and formats
       for (let r = 0; r < maxRow; r++) {
@@ -496,8 +503,24 @@ export default function ChatPage() {
         const result = await resp.json()
         if (result.calculated && Object.keys(result.calculated).length > 0) {
           console.log('[Numbers Table] ✅ Formulas recalculated:', result.calculated)
-          // Reload table to show calculated values
-          await loadAddresses(false)
+          
+          // Update addressesData with calculated values
+          setAddressesData(prev => {
+            if (!prev) return prev
+            
+            const newData = prev.map(row => row.map(cell => {
+              if (cell.address && result.calculated[cell.address] !== undefined) {
+                return {
+                  ...cell,
+                  value: result.calculated[cell.address]
+                }
+              }
+              return cell
+            }))
+            
+            console.log('[Numbers Table] ✅ Updated table with calculated values')
+            return newData
+          })
         } else {
           console.log('[Numbers Table] No formulas to calculate')
         }
@@ -505,7 +528,7 @@ export default function ChatPage() {
     } catch (e) {
       console.error('[Numbers Table] Error recalculating formulas:', e)
     }
-  }, [propertyId, excelTemplate, loadAddresses])
+  }, [propertyId, excelTemplate])
 
   // Auto-load Numbers table when template is selected (only if we don't have data)
   // This also handles reload scenarios - if template is set, try to load data
@@ -552,21 +575,23 @@ export default function ChatPage() {
     // Skip if we already processed this message
     if (lastProcessedMessageId.current === lastMessage.id) return
     
-    const updateKeywords = ['actualizado', 'guardado', 'he actualizado', 'he guardado', 'valor actualizado', 'valor guardado', 'actualicé', 'guardé']
+    const updateKeywords = ['actualizado', 'guardado', 'he actualizado', 'he guardado', 'valor actualizado', 'valor guardado', 'actualicé', 'guardé', 'calculando', 'recalculado', 'se han recalculado']
     const deleteKeywords = ['borrado', 'eliminado', 'he borrado', 'he eliminado', 'valor borrado', 'valor eliminado', 'borré', 'eliminé']
     const answerLower = lastMessage.content.toLowerCase()
     const hasUpdate = updateKeywords.some(keyword => answerLower.includes(keyword))
     const hasDelete = deleteKeywords.some(keyword => answerLower.includes(keyword))
     
     if (hasUpdate || hasDelete) {
-      console.log('[Numbers Table] 🔄 Auto-reload triggered by assistant update/delete confirmation:', lastMessage.content.substring(0, 50))
+      console.log('[Numbers Table] 🔄 Auto-reload triggered by assistant update/delete confirmation:', lastMessage.content.substring(0, 100))
       // Mark this message as processed
       lastProcessedMessageId.current = lastMessage.id
       // Delay to ensure backend has saved/deleted the value, but DON'T show loading state
-      const timeoutId = setTimeout(() => {
+      const timeoutId = setTimeout(async () => {
         // Reload without showing progress bar (silent reload)
-        loadAddresses(false)
-      }, 800)
+        console.log('[Numbers Table] 🔄 Reloading table after update...')
+        await loadAddresses(false)
+        console.log('[Numbers Table] ✅ Table reloaded successfully')
+      }, 1200) // Increased to 1.2s to ensure values are saved
       return () => clearTimeout(timeoutId)
     }
   }, [messages, excelTemplate, propertyId, addressesData, loadAddresses])
@@ -922,33 +947,8 @@ export default function ChatPage() {
     return <>{nodes}</>
   }, [])
 
-  const excelUrl = useMemo(() => {
-    // Embed no longer required – keep non-empty placeholder to bypass legacy checks
-    return excelTemplate ? 'about:blank' : ''
-  }, [excelTemplate])
-
   const ExcelPanel = useMemo(() => {
     if (!excelTemplate) return null
-    if (!excelUrl) {
-      return (
-        <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 nature-shadow">
-          <div className="flex items-start justify-between">
-            <div className="pr-4">
-              <div className="font-bold mb-1">Excel para "{excelTemplate}"</div>
-              <div>
-                Falta configurar la URL de incrustación. Añade las variables de entorno en el frontend y reinicia `npm run dev`:
-                <pre className="mt-2 whitespace-pre-wrap text-sm bg-white/70 p-2 rounded">NEXT_PUBLIC_EXCEL_EMBED_R2B=...
-NEXT_PUBLIC_EXCEL_EMBED_R2B_PM=...
-NEXT_PUBLIC_EXCEL_EMBED_R2B_PM_VENTA=...
-NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
-                Acepta URLs públicas de Excel Online (OneDrive/SharePoint) o Google Sheets (publish/embed).
-              </div>
-            </div>
-            <button onClick={() => setExcelTemplate(null)} className="px-3 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold">Cerrar</button>
-          </div>
-        </div>
-      )
-    }
     return (
       <div className="rounded-3xl border-2 border-[color:var(--c-green-400)] bg-white/95 backdrop-blur-sm shadow-2xl overflow-hidden transition-all duration-300 hover:shadow-3xl flex flex-col h-auto max-h-[80vh] min-h-0">
         {/* Header with gradient and better styling */}
@@ -1050,7 +1050,8 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                       )}
               </div>
             </div>
-                
+                ) : null}
+
                 {/* Main content */}
                 {addressesData && addressesData.length > 0 ? (
                   <Spreadsheet
@@ -1369,17 +1370,6 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
                 )}
               </div>
             </div>
-          ) : (
-            <div className="flex items-center justify-center h-full text-[color:var(--c-green-700)]">
-              <div className="text-center p-8">
-                <div className="text-4xl mb-4">📊</div>
-                <div className="font-semibold mb-2">Excel no configurado</div>
-                <div className="text-sm text-[color:var(--c-green-600)]">
-                  Falta configurar la URL de Excel en .env.local
-                </div>
-              </div>
-            </div>
-          )}
         </div>
         
         {/* Footer with helpful hints - compact */}
@@ -1391,7 +1381,7 @@ NEXT_PUBLIC_EXCEL_EMBED_PROMOCION=...</pre>
         </div>
       </div>
     )
-  }, [excelTemplate, excelUrl, excelRefreshKey, addressesLoading, addressesData, addressesError, importProgress, timeRemaining, estimatedTime, selectedCell, propertyId])
+  }, [excelTemplate, excelRefreshKey, addressesLoading, addressesData, addressesError, importProgress, timeRemaining, estimatedTime, selectedCell, propertyId])
 
   // Layout: two columns when Excel is open, single column otherwise
   const hasExcel = !!excelTemplate

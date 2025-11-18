@@ -90,9 +90,10 @@ def evaluate_formula(formula: str, cell_values: Dict[str, Any]) -> Optional[floa
             expression = handle_if_function(expression)
         
         # Evaluate the expression
-        # Security: only allow safe operations
-        allowed_chars = set("0123456789.+-*/() ")
-        if not all(c in allowed_chars for c in expression.replace("IF", "").replace("if", "")):
+        # Security: only allow safe operations (including quotes for string comparisons)
+        allowed_chars = set("0123456789.+-*/() \"'=!<>&|")
+        cleaned_expr = expression.replace("IF", "").replace("if", "").replace("else", "")
+        if not all(c in allowed_chars for c in cleaned_expr):
             logger.warning(f"Formula contains unsafe characters: {expression}")
             return None
         
@@ -107,23 +108,126 @@ def evaluate_formula(formula: str, cell_values: Dict[str, Any]) -> Optional[floa
 def handle_if_function(expression: str) -> str:
     """Convert Excel IF function to Python conditional.
     
+    Handles nested functions like OR() and AND().
+    
     Args:
-        expression: Expression containing IF function (e.g., "IF(C8>0, B8*C8/100, 0)")
+        expression: Expression containing IF function (e.g., "IF(OR(B5="",C5=""),"",B5*C5/100)")
     
     Returns:
-        Python-compatible conditional expression (e.g., "(B8*C8/100) if (C8>0) else (0)")
+        Python-compatible conditional expression
     """
-    # Simple IF pattern: IF(condition, value_if_true, value_if_false)
-    pattern = r'IF\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)'
+    import logging
+    logger = logging.getLogger(__name__)
     
-    def replace_if(match):
-        condition = match.group(1).strip()
-        value_true = match.group(2).strip()
-        value_false = match.group(3).strip()
-        return f"(({value_true}) if ({condition}) else ({value_false}))"
+    # Handle OR and AND functions - convert commas to 'or'/'and'
+    # OR(B5="",C5="") -> (B5=="" or C5=="")
+    # AND(...) -> (... and ...)
     
-    result = re.sub(pattern, replace_if, expression, flags=re.IGNORECASE)
-    return result
+    def convert_or_and(expr: str) -> str:
+        """Convert OR(a,b,c) to (a or b or c) and AND(a,b,c) to (a and b and c)"""
+        # Replace OR( with temp marker
+        expr = re.sub(r'OR\s*\(', '__OR__(', expr, flags=re.IGNORECASE)
+        expr = re.sub(r'AND\s*\(', '__AND__(', expr, flags=re.IGNORECASE)
+        
+        # Find and replace OR/AND function calls
+        for func_name, operator in [('__OR__', ' or '), ('__AND__', ' and ')]:
+            while func_name in expr:
+                start = expr.find(func_name)
+                if start == -1:
+                    break
+                
+                # Find matching closing paren
+                paren_start = start + len(func_name)
+                depth = 1
+                end = paren_start
+                for i in range(paren_start, len(expr)):
+                    if expr[i] == '(':
+                        depth += 1
+                    elif expr[i] == ')':
+                        depth -= 1
+                        if depth == 0:
+                            end = i
+                            break
+                
+                # Extract content and replace commas with operator
+                content = expr[paren_start:end]
+                converted = content.replace(',', operator)
+                expr = expr[:start] + '(' + converted + ')' + expr[end+1:]
+        
+        return expr
+    
+    expression = convert_or_and(expression)
+    
+    # Find IF function with proper parenthesis matching
+    def parse_if(expr: str) -> str:
+        if 'IF(' not in expr.upper():
+            return expr
+        
+        # Find the IF( position
+        if_pos = expr.upper().find('IF(')
+        if if_pos == -1:
+            return expr
+        
+        # Find matching parentheses
+        start = if_pos + 3  # After "IF("
+        depth = 1
+        parts = []
+        current = ""
+        
+        for i in range(start, len(expr)):
+            c = expr[i]
+            if c == '(':
+                depth += 1
+                current += c
+            elif c == ')':
+                depth -= 1
+                if depth == 0:
+                    # End of IF - save last arg and exit
+                    parts.append(current.strip())
+                    break
+                else:
+                    current += c
+            elif c == ',' and depth == 1:
+                # Top-level comma - save arg and continue
+                parts.append(current.strip())
+                current = ""
+            else:
+                current += c
+        
+        if len(parts) >= 3:
+            condition_raw = parts[0]
+            value_true_raw = parts[1]
+            value_false_raw = parts[2]
+            
+            logger.info(f"[handle_if_function] Raw parts: cond={condition_raw[:50]}, true={value_true_raw[:50]}, false={value_false_raw[:50]}")
+            
+            # Convert empty string checks: ="" -> ==""
+            condition = condition_raw.replace('=""', '==""').replace("=''", "==''")
+            
+            # Handle value_true: if it's just quotes, keep as ""; otherwise evaluate as expression
+            if value_true_raw in ['""', "''"]:
+                value_true = '""'
+            elif value_true_raw.startswith('"') and value_true_raw.endswith('"'):
+                value_true = value_true_raw  # Keep quoted string
+            else:
+                value_true = value_true_raw  # It's an expression
+            
+            # Handle value_false: same logic
+            if value_false_raw in ['""', "''"]:
+                value_false = '""'
+            elif value_false_raw.startswith('"') and value_false_raw.endswith('"'):
+                value_false = value_false_raw
+            else:
+                value_false = value_false_raw
+            
+            result = f'({value_true} if {condition} else {value_false})'
+            logger.info(f"[handle_if_function] ✅ Converted: {result[:100]}")
+            return result
+        
+        logger.warning(f"[handle_if_function] Could not parse IF (got {len(parts)} parts): {expr[:80]}")
+        return expr
+    
+    return parse_if(expression)
 
 
 def build_dependency_graph(structure: Dict) -> Dict[str, Set[str]]:
@@ -210,14 +314,23 @@ def recalculate_formulas(
     Returns:
         Dict of newly calculated values {cell_addr: calculated_value}
     """
+    logger.info(f"[recalculate_formulas] Updated cells: {updated_cells}")
+    logger.info(f"[recalculate_formulas] Current values keys: {list(current_values.keys())[:10]}")
+    logger.info(f"[recalculate_formulas] Structure cells count: {len(structure.get('cells', []))}")
+    
     # Build dependency graph
     dependencies = build_dependency_graph(structure)
+    logger.info(f"[recalculate_formulas] Dependencies built: {len(dependencies)} cells have dependents")
     
     # Find all affected cells (in order)
     all_affected = set()
     for cell in updated_cells:
+        logger.info(f"[recalculate_formulas] Getting affected cells for {cell}")
         affected = get_affected_cells(cell, dependencies)
+        logger.info(f"[recalculate_formulas] Affected by {cell}: {affected}")
         all_affected.update(affected)
+    
+    logger.info(f"[recalculate_formulas] Total affected cells: {all_affected}")
     
     # Create formula map
     formula_map = {}
