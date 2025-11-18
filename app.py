@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from agentic import build_graph
 from router.scaffold import Router
+from router.orchestrator import orchestrator
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
 from tools.property_tools import search_properties as db_search_properties
 from tools.docs_tools import propose_slot, upload_and_link, list_docs, slot_exists, seed_mock_documents
@@ -839,12 +840,40 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     except Exception as _e:
         print(f"[ROUTER] error: {_e}")
     
+    # === MULTI-AGENT ROUTING ===
+    # Use orchestrator to determine which agent should handle this request
+    routing_result = None
+    if os.getenv("USE_MULTI_AGENT", "0") == "1" and text:
+        try:
+            import asyncio
+            routing_result = await orchestrator.route_and_execute(
+                user_input=text,
+                session_id=session_id,
+                property_id=property_id or STATE.get("property_id"),
+                context={"history": STATE.get("messages", [])}
+            )
+            
+            print(f"[ORCHESTRATOR] Routing result: {routing_result['status']}, "
+                  f"agent={routing_result.get('target_agent')}, "
+                  f"intent={routing_result.get('intent')}, "
+                  f"conf={routing_result.get('confidence', 0):.2f}")
+            
+            # Update intent/confidence from orchestrator
+            if routing_result.get("intent"):
+                intent_guess = routing_result["intent"]
+                intent_conf = routing_result.get("confidence", intent_conf)
+                
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Error: {e}, falling back to MainAgent")
+            routing_result = None
+    
     state = {
         "input": text,  # This will be converted to HumanMessage by prepare_input node
         "audio": audio_wav_bytes,
         "property_id": property_id or STATE.get("property_id"),
         "intent_guess": intent_guess,
         "intent_confidence": intent_conf,
+        "routing_result": routing_result,  # Pass routing info to agent
     }
     
     print(f"[MEMORY DEBUG] Invoking agent with thread_id={session_id}, input={text[:50]}")
