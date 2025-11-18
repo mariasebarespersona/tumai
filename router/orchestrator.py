@@ -6,13 +6,17 @@ Handles:
 - Redirect/escalate loops from agents
 - Fallback to MainAgent
 - Loop prevention (max 3 redirects)
+- Direct agent execution (Phase 2b)
 """
 
 import logging
 import time
 from typing import Dict, Any, Optional
 from router.active_router import ActiveRouter
-from tools.metrics import log_event, record_latency
+from tools.metrics import log_event
+from agents.property_agent import PropertyAgent
+from agents.numbers_agent import NumbersAgent
+from agents.docs_agent import DocsAgent
 
 logger = logging.getLogger("orchestrator")
 
@@ -26,7 +30,20 @@ class OrchestrationRouter:
         """Initialize orchestration router."""
         self.active_router = ActiveRouter()
         self.max_redirects = 3
-        logger.info("[orchestrator] Initialized with max_redirects=3")
+        
+        # Initialize specialized agents
+        self.property_agent = PropertyAgent()
+        self.numbers_agent = NumbersAgent()
+        self.docs_agent = DocsAgent()
+        
+        # Agent registry
+        self.agents = {
+            "PropertyAgent": self.property_agent,
+            "NumbersAgent": self.numbers_agent,
+            "DocsAgent": self.docs_agent
+        }
+        
+        logger.info(f"[orchestrator] Initialized with {len(self.agents)} specialized agents, max_redirects=3")
     
     async def route_and_execute(
         self,
@@ -34,7 +51,8 @@ class OrchestrationRouter:
         session_id: str,
         property_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
-        use_main_agent: bool = False
+        use_main_agent: bool = False,
+        direct_execution: bool = False  # NEW: Enable Phase 2b direct execution
     ) -> Dict[str, Any]:
         """
         Route user input to appropriate agent and handle redirects.
@@ -45,6 +63,7 @@ class OrchestrationRouter:
             property_id: Current property ID
             context: Additional context
             use_main_agent: If True, skip routing and use MainAgent directly
+            direct_execution: If True, agents execute directly (Phase 2b)
         
         Returns:
             Dict with response, agent_path, redirects, and metadata
@@ -52,7 +71,7 @@ class OrchestrationRouter:
         start_time = time.time()
         redirect_count = 0
         agent_path = []  # Track which agents were used
-        responses = []
+        current_input = user_input
         
         try:
             # Prepare context
@@ -63,7 +82,7 @@ class OrchestrationRouter:
             # If use_main_agent is True, skip routing entirely
             if use_main_agent:
                 logger.info(f"[orchestrator] Using MainAgent directly (skip routing)")
-                log_event("orchestrator.skip_routing", {"session": session_id})
+                log_event("routing", "skip_routing", "success", extra={"session": session_id})
                 
                 return {
                     "status": "use_main_agent",
@@ -73,46 +92,167 @@ class OrchestrationRouter:
                 }
             
             # Get initial routing decision
-            routing = await self.active_router.decide(user_input, full_context)
-            current_agent = routing["target_agent"]
-            agent_path.append(current_agent)
+            routing = await self.active_router.decide(current_input, full_context)
+            current_agent_name = routing["target_agent"]
+            agent_path.append(current_agent_name)
             
             logger.info(
                 f"[orchestrator] Initial routing: {routing['intent']} "
-                f"(conf={routing['confidence']:.2f}) → {current_agent}"
+                f"(conf={routing['confidence']:.2f}) → {current_agent_name}"
             )
             
             # Log routing decision
-            log_event("orchestrator.route", {
-                "session": session_id,
-                "intent": routing["intent"],
-                "confidence": routing["confidence"],
-                "agent": current_agent,
-                "fallback": routing.get("fallback_reason") is not None
-            })
+            log_event("routing", "route_decision", "success", 
+                      ms=int((time.time() - start_time) * 1000),
+                      extra={
+                          "session": session_id,
+                          "intent": routing["intent"],
+                          "confidence": routing["confidence"],
+                          "agent": current_agent_name,
+                          "fallback": routing.get("fallback_reason") is not None
+                      })
             
-            # For now, we return the routing decision and let the existing
-            # LangGraph agent handle execution. Full agent execution will be
-            # implemented in Phase 3.
-            #
-            # This allows gradual integration:
-            # Phase 2a: Router decides agent (✅ this)
-            # Phase 2b: Specialized agents execute (future)
+            # === PHASE 2b: DIRECT EXECUTION ===
+            if direct_execution and current_agent_name in self.agents:
+                logger.info(f"[orchestrator] 🚀 Starting direct execution with {current_agent_name}")
+                
+                # Bidirectional routing loop
+                while redirect_count < self.max_redirects:
+                    agent = self.agents[current_agent_name]
+                    
+                    logger.info(f"[orchestrator] Executing {current_agent_name} (redirect #{redirect_count})")
+                    
+                    # Execute agent
+                    result = agent.run(
+                        user_input=current_input,
+                        property_id=property_id,
+                        context=full_context
+                    )
+                    
+                    action = result.get("action")
+                    logger.info(f"[orchestrator] {current_agent_name} returned action={action}")
+                    
+                    # Handle different actions
+                    if action == "complete":
+                        # Agent completed successfully
+                        logger.info(f"[orchestrator] ✅ Task completed by {current_agent_name}")
+                        log_event("agent", "task_complete", "success",
+                                  ms=result.get("latency_ms", 0),
+                                  extra={
+                                      "session": session_id,
+                                      "agent": current_agent_name,
+                                      "redirects": redirect_count
+                                  })
+                        
+                        return {
+                            "status": "completed",
+                            "response": result.get("response"),
+                            "agent_path": agent_path,
+                            "redirects": redirect_count,
+                            "final_agent": current_agent_name,
+                            "tool_calls": result.get("tool_calls", []),
+                            "total_latency_ms": int((time.time() - start_time) * 1000)
+                        }
+                    
+                    elif action == "redirect":
+                        # Agent redirected to another agent
+                        to_agent = result.get("to_agent")
+                        reason = result.get("reason", "unknown")
+                        
+                        logger.info(f"[orchestrator] 🔄 {current_agent_name} redirecting to {to_agent} (reason: {reason})")
+                        log_event("agent", "redirect", "success",
+                                  extra={
+                                      "session": session_id,
+                                      "from_agent": current_agent_name,
+                                      "to_agent": to_agent,
+                                      "reason": reason
+                                  })
+                        
+                        # Check if target agent exists
+                        if to_agent not in self.agents and to_agent != "MainAgent":
+                            logger.warning(f"[orchestrator] ⚠️ Unknown agent {to_agent}, falling back to MainAgent")
+                            to_agent = "MainAgent"
+                        
+                        # Update for next iteration
+                        current_agent_name = to_agent
+                        agent_path.append(to_agent)
+                        redirect_count += 1
+                        
+                        # If redirecting to MainAgent, break loop
+                        if to_agent == "MainAgent":
+                            logger.info(f"[orchestrator] ⬆️ Escalating to MainAgent after {redirect_count} redirects")
+                            break
+                    
+                    elif action == "escalate":
+                        # Agent escalated to MainAgent (multi-domain task)
+                        reason = result.get("reason", "unknown")
+                        
+                        logger.info(f"[orchestrator] ⬆️ {current_agent_name} escalating to MainAgent (reason: {reason})")
+                        log_event("agent", "escalate", "success",
+                                  extra={
+                                      "session": session_id,
+                                      "from_agent": current_agent_name,
+                                      "reason": reason
+                                  })
+                        
+                        agent_path.append("MainAgent")
+                        break
+                    
+                    elif action == "error":
+                        # Agent encountered error, fallback to MainAgent
+                        error = result.get("error", "unknown")
+                        
+                        logger.error(f"[orchestrator] ❌ {current_agent_name} error: {error}, falling back to MainAgent")
+                        log_event("agent", "error", "error",
+                                  extra={
+                                      "session": session_id,
+                                      "agent": current_agent_name,
+                                      "error": error
+                                  })
+                        
+                        agent_path.append("MainAgent")
+                        break
+                    
+                    else:
+                        # Unknown action, fallback
+                        logger.warning(f"[orchestrator] ⚠️ Unknown action {action}, falling back to MainAgent")
+                        agent_path.append("MainAgent")
+                        break
+                
+                # Check if max redirects reached
+                if redirect_count >= self.max_redirects:
+                    logger.warning(f"[orchestrator] ⚠️ Max redirects ({self.max_redirects}) reached, falling back to MainAgent")
+                    agent_path.append("MainAgent")
+                    log_event("routing", "max_redirects", "warning",
+                              extra={"session": session_id, "redirects": redirect_count})
+                
+                # Return final status
+                return {
+                    "status": "use_main_agent",  # Falls back to MainAgent
+                    "agent_path": agent_path,
+                    "redirects": redirect_count,
+                    "total_latency_ms": int((time.time() - start_time) * 1000),
+                    "reason": "redirected_to_main_agent"
+                }
             
-            return {
-                "status": "routed",
-                "intent": routing["intent"],
-                "confidence": routing["confidence"],
-                "target_agent": current_agent,
-                "agent_path": agent_path,
-                "redirects": redirect_count,
-                "total_latency_ms": int((time.time() - start_time) * 1000),
-                "fallback_reason": routing.get("fallback_reason")
-            }
+            # === PHASE 2a: ROUTING ONLY (No direct execution) ===
+            else:
+                return {
+                    "status": "routed",
+                    "intent": routing["intent"],
+                    "confidence": routing["confidence"],
+                    "target_agent": current_agent_name,
+                    "agent_path": agent_path,
+                    "redirects": redirect_count,
+                    "total_latency_ms": int((time.time() - start_time) * 1000),
+                    "fallback_reason": routing.get("fallback_reason")
+                }
         
         except Exception as e:
             logger.error(f"[orchestrator] Error during routing: {e}", exc_info=True)
-            log_event("orchestrator.error", {"session": session_id, "error": str(e)})
+            log_event("routing", "error", "error",
+                      ms=int((time.time() - start_time) * 1000),
+                      extra={"session": session_id, "error": str(e)})
             
             return {
                 "status": "error",

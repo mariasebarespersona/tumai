@@ -843,20 +843,51 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     # === MULTI-AGENT ROUTING ===
     # Use orchestrator to determine which agent should handle this request
     routing_result = None
+    agent_response = None
+    
     if os.getenv("USE_MULTI_AGENT", "0") == "1" and text:
         try:
             import asyncio
+            
+            # Check if direct execution is enabled (Phase 2b)
+            direct_execution = os.getenv("USE_DIRECT_EXECUTION", "0") == "1"
+            
             routing_result = await orchestrator.route_and_execute(
                 user_input=text,
                 session_id=session_id,
                 property_id=property_id or STATE.get("property_id"),
-                context={"history": STATE.get("messages", [])}
+                context={"history": STATE.get("messages", [])},
+                direct_execution=direct_execution
             )
             
             print(f"[ORCHESTRATOR] Routing result: {routing_result['status']}, "
-                  f"agent={routing_result.get('target_agent')}, "
-                  f"intent={routing_result.get('intent')}, "
-                  f"conf={routing_result.get('confidence', 0):.2f}")
+                  f"agent_path={routing_result.get('agent_path', [])}, "
+                  f"redirects={routing_result.get('redirects', 0)}, "
+                  f"latency={routing_result.get('total_latency_ms', 0)}ms")
+            
+            # If agent completed directly (Phase 2b), use its response
+            if routing_result.get("status") == "completed":
+                agent_response = routing_result.get("response")
+                print(f"[ORCHESTRATOR] ✅ Agent {routing_result['final_agent']} completed directly")
+                print(f"[ORCHESTRATOR] Response: {agent_response[:100]}...")
+                
+                # Return agent response directly (skip MainAgent)
+                result = {
+                    "messages": [
+                        {"role": "user", "content": text},
+                        {"role": "assistant", "content": agent_response}
+                    ],
+                    "property_id": property_id or STATE.get("property_id"),
+                    "agent_path": routing_result.get("agent_path", []),
+                    "redirects": routing_result.get("redirects", 0),
+                    "routing_latency_ms": routing_result.get("total_latency_ms", 0)
+                }
+                
+                # Save conversation to state
+                add_to_conversation(session_id, text, agent_response)
+                save_sessions()
+                
+                return result
             
             # Update intent/confidence from orchestrator
             if routing_result.get("intent"):
