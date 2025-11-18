@@ -61,3 +61,7 @@ web/.next/
 web/node_modules/
 .env.*
 .env.bak
+
+# Logs
+logs/
+*.log
