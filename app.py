@@ -848,10 +848,25 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     if os.getenv("USE_MULTI_AGENT", "0") == "1" and text:
         try:
             import asyncio
+            import nest_asyncio
             
             # Check if direct execution is enabled (Phase 2b)
             direct_execution = os.getenv("USE_DIRECT_EXECUTION", "0") == "1"
             
+            # Allow nested event loops (FastAPI already has one running)
+            try:
+                nest_asyncio.apply()
+            except:
+                pass
+            
+            # Get or create event loop
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Run async function
             routing_result = asyncio.get_event_loop().run_until_complete(
                 orchestrator.route_and_execute(
                     user_input=text,
@@ -1419,6 +1434,66 @@ async def ui_chat(
                 return make_response("No hay facturas asociadas aún. Si conoces el día mensual, dime 'día X' y las creo ahora.")
         except Exception as e:
             return make_response(f"No he podido obtener las facturas asociadas: {e}")
+
+    # -------------------------------------------------------------
+    # Document question/RAG - Intercept before agent
+    # -------------------------------------------------------------
+    pid = STATE.get("property_id")
+    qnorm = _soft_normalize(user_text)
+    
+    # Detect if it's a question (not a summarize request, not an action)
+    question_words = ["qué", "que", "cual", "cuál", "cuando", "cuándo", "donde", "dónde", 
+                      "cómo", "como", "por qué", "porque", "cuanto", "cuánto", "cuanta", "cuánta",
+                      "quien", "quién", "lee el", "que pone", "qué pone", "que dice", "qué dice",
+                      "dime", "explicame", "explícame", "di", "día", "dia", "hay que"]
+    
+    action_words = ["borra", "borrar", "elimina", "eliminar", "delete", "remove", "crea", "crear",
+                    "add", "añadir", "anadir", "agrega", "agregar", "sube", "subir", "upload",
+                    "pon", "poner", "set", "actualiza", "actualizar", "calcula", "calcular"]
+    
+    is_summarize = any(w in qnorm for w in ["resume", "resumen", "resúmeme", "resumeme", "sintetiza"])
+    has_action = any(w in qnorm for w in action_words)
+    is_question = any(w in qnorm for w in question_words) and not is_summarize and not has_action
+    
+    if is_question and pid:
+        print(f"[RAG] Detected question: '{user_text}'")
+        # Prioritize document mentioned in current text
+        doc_ref = _match_document_from_text(pid, user_text, STATE)
+        try:
+            from tools.rag_index import qa_with_citations
+            if doc_ref:
+                print(f"[RAG] Searching in specific document: {doc_ref.get('document_name')}")
+                # Search in specific document
+                result = qa_with_citations(
+                    property_id=pid,
+                    query=user_text,
+                    top_k=6,
+                    document_name=doc_ref.get("document_name"),
+                    document_group=doc_ref.get("document_group"),
+                    document_subgroup=doc_ref.get("document_subgroup")
+                )
+            else:
+                print(f"[RAG] Searching across all documents")
+                # Search across ALL documents for the property
+                result = qa_with_citations(
+                    property_id=pid,
+                    query=user_text,
+                    top_k=6
+                )
+            
+            if result.get("answer") and "No he encontrado información" not in result["answer"]:
+                print(f"[RAG] Found answer: {result['answer'][:100]}...")
+                answer_text = result["answer"]
+                if result.get("citations"):
+                    cit_strs = [f"{c['document_group']}/{c.get('document_subgroup','')}/{c['document_name']} (trozo {c['chunk_index']})" for c in result['citations']]
+                    answer_text += f"\n\nFuentes:\n" + "\n".join(f"- {s}" for s in cit_strs)
+                return make_response(answer_text)
+            else:
+                print(f"[RAG] No relevant answer found, falling through to agent")
+        except Exception as e:
+            print(f"[RAG] Error: {e}, falling through to agent")
+            import traceback
+            traceback.print_exc()
 
     # -------------------------------------------------------------
     # New: Delegate all remaining intent handling to the Agent
