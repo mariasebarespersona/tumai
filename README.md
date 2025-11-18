@@ -121,6 +121,18 @@ cd web && NEXT_PUBLIC_API_URL=http://127.0.0.1:7901 npm run dev
 
 ---
 
+## 🗂️ Repository layout (high-level)
+- `app.py`, `agentic.py` – backend service and agent
+- `tools/` – business logic (docs, numbers, email, verifier, supabase)
+- `web/` – Next.js frontend
+- `migrations/` – SQL migrations (run in Supabase)
+- `scripts/` – ops helpers (`dev_start.sh`, cron, migrations)
+- `vendor/` – third-party binaries (e.g., `ffmpeg`)
+- `data/` – runtime data (local checkpointer)
+- `docs/` – product and tech docs (see `docs/OPS.md`)
+
+---
+
 ## 🔄 What's new (Oct 2025)
 
 - Prompt-as-code (modular): `prompts/core.md` + `prompts/policies/*` + `prompts/contracts/*` + `prompts/examples/*`.
