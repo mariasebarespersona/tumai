@@ -97,6 +97,17 @@ class BaseAgent:
         try:
             logger.info(f"[{self.name}] Processing: '{user_input[:50]}...'")
             
+            # Check if multi-domain task FIRST (higher priority than redirect)
+            if self.is_multi_domain(user_input):
+                logger.info(f"[{self.name}] ⬆️ Multi-domain task detected, escalating to MainAgent")
+                return {
+                    "action": "escalate",
+                    "reason": "multi_domain_task",
+                    "original_input": user_input,
+                    "from_agent": self.name,
+                    "latency_ms": int((time.time() - start_time) * 1000)
+                }
+            
             # Check if out of scope (enables bidirectional routing)
             is_out, suggested_agent = self.is_out_of_scope(user_input)
             if is_out:
@@ -105,17 +116,6 @@ class BaseAgent:
                     "action": "redirect",
                     "to_agent": suggested_agent,
                     "reason": "out_of_scope",
-                    "original_input": user_input,
-                    "from_agent": self.name,
-                    "latency_ms": int((time.time() - start_time) * 1000)
-                }
-            
-            # Check if multi-domain task (escalate to MainAgent)
-            if self.is_multi_domain(user_input):
-                logger.info(f"[{self.name}] ⬆️ Multi-domain task detected, escalating to MainAgent")
-                return {
-                    "action": "escalate",
-                    "reason": "multi_domain_task",
                     "original_input": user_input,
                     "from_agent": self.name,
                     "latency_ms": int((time.time() - start_time) * 1000)

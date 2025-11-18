@@ -32,7 +32,14 @@ class NumbersAgent(BaseAgent):
         text_lower = user_input.lower()
         
         # Check for property operations
-        if any(phrase in text_lower for phrase in ["crea propiedad", "nueva propiedad", "lista propiedades", "elimina propiedad"]):
+        if any(phrase in text_lower for phrase in ["crea propiedad", "nueva propiedad", "elimina propiedad"]):
+            return True, "PropertyAgent"
+        
+        # Explicit list properties check
+        if "lista" in text_lower and "propiedades" in text_lower:
+            return True, "PropertyAgent"
+        
+        if any(phrase in text_lower for phrase in ["mis propiedades", "las propiedades", "cuántas propiedades"]):
             return True, "PropertyAgent"
         
         if any(phrase in text_lower for phrase in ["cambiar a", "trabajar con"]) and "plantilla" not in text_lower:
