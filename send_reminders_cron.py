@@ -1,3 +1,11 @@
+"""
+Backward-compat launcher kept for compatibility.
+The real script should live under scripts/. This wrapper allows existing cron/commands to keep working.
+"""
+from scripts import send_reminders_cron as _impl  # type: ignore
+
+if __name__ == "__main__":
+    _impl.main()  # expects scripts/send_reminders_cron.py to expose main()
 #!/usr/bin/env python3
 """
 Cron job para enviar recordatorios pendientes.

@@ -1849,7 +1849,12 @@ def build_graph():
         print("⚠️  WARNING: DATABASE_URL not found! Using SQLite fallback...")
         from langgraph.checkpoint.sqlite import SqliteSaver
         from sqlite3 import connect
-        db_path = os.path.join(os.path.dirname(__file__), "checkpoints.db")
+        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        try:
+            os.makedirs(data_dir, exist_ok=True)
+        except Exception:
+            pass
+        db_path = os.path.join(data_dir, "checkpoints.db")
         conn = connect(db_path, check_same_thread=False)
         checkpointer = SqliteSaver(conn)
         checkpointer.setup()

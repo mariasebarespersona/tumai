@@ -1,3 +1,10 @@
+"""
+Backward-compat launcher for reminders setup. The real implementation should be moved to scripts/.
+"""
+from scripts import setup_reminders as _impl  # type: ignore
+
+if __name__ == "__main__":
+    _impl.main()  # expects scripts/setup_reminders.py to expose main()
 #!/usr/bin/env python3
 """
 Script de configuración para el sistema de recordatorios.
