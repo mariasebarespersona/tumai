@@ -46,11 +46,37 @@ class BaseAgent:
         """
         raise NotImplementedError(f"{self.name} must implement get_tools()")
     
+    def is_out_of_scope(self, user_input: str) -> tuple[bool, Optional[str]]:
+        """Check if request is out of this agent's scope.
+        
+        Args:
+            user_input: User's message
+        
+        Returns:
+            Tuple of (is_out_of_scope, suggested_agent)
+        """
+        # Default: not out of scope
+        return False, None
+    
+    def is_multi_domain(self, user_input: str) -> bool:
+        """Check if request involves multiple domains.
+        
+        Multi-domain tasks should be escalated to MainAgent.
+        
+        Args:
+            user_input: User's message
+        
+        Returns:
+            True if multi-domain task detected
+        """
+        # Default: not multi-domain
+        return False
+    
     def run(self, 
             user_input: str, 
             property_id: Optional[str] = None,
             context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Run the agent on user input.
+        """Run the agent on user input with bidirectional routing support.
         
         Args:
             user_input: User's message
@@ -58,12 +84,42 @@ class BaseAgent:
             context: Additional context (history, etc.)
         
         Returns:
-            Dict with response, tool_calls, metadata
+            Dict with action, response, and routing metadata
+            
+            Actions:
+            - "complete": Task completed successfully
+            - "redirect": Needs redirection to another agent
+            - "escalate": Needs escalation to MainAgent
+            - "error": Error occurred, fallback needed
         """
         start_time = time.time()
         
         try:
             logger.info(f"[{self.name}] Processing: '{user_input[:50]}...'")
+            
+            # Check if out of scope (enables bidirectional routing)
+            is_out, suggested_agent = self.is_out_of_scope(user_input)
+            if is_out:
+                logger.info(f"[{self.name}] 🔄 Out of scope, suggesting {suggested_agent}")
+                return {
+                    "action": "redirect",
+                    "to_agent": suggested_agent,
+                    "reason": "out_of_scope",
+                    "original_input": user_input,
+                    "from_agent": self.name,
+                    "latency_ms": int((time.time() - start_time) * 1000)
+                }
+            
+            # Check if multi-domain task (escalate to MainAgent)
+            if self.is_multi_domain(user_input):
+                logger.info(f"[{self.name}] ⬆️ Multi-domain task detected, escalating to MainAgent")
+                return {
+                    "action": "escalate",
+                    "reason": "multi_domain_task",
+                    "original_input": user_input,
+                    "from_agent": self.name,
+                    "latency_ms": int((time.time() - start_time) * 1000)
+                }
             
             # Build messages
             messages = [
@@ -89,6 +145,7 @@ class BaseAgent:
             
             # Extract response
             result = {
+                "action": "complete",
                 "agent": self.name,
                 "response": response.content,
                 "tool_calls": response.tool_calls if hasattr(response, "tool_calls") else [],
@@ -103,11 +160,12 @@ class BaseAgent:
         except Exception as e:
             logger.error(f"[{self.name}] ❌ Error: {e}", exc_info=True)
             return {
+                "action": "error",
                 "agent": self.name,
                 "response": f"Lo siento, ocurrió un error: {str(e)}",
-                "tool_calls": [],
-                "latency_ms": int((time.time() - start_time) * 1000),
                 "error": str(e),
+                "fallback_to": "MainAgent",
+                "latency_ms": int((time.time() - start_time) * 1000),
                 "success": False
             }
     

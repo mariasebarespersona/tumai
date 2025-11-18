@@ -27,6 +27,40 @@ class NumbersAgent(BaseAgent):
     def __init__(self):
         super().__init__(name="NumbersAgent", model="gpt-4o", temperature=0.3)
     
+    def is_out_of_scope(self, user_input: str) -> tuple[bool, str | None]:
+        """Detect if request is about properties or docs, not numbers."""
+        text_lower = user_input.lower()
+        
+        # Check for property operations
+        if any(phrase in text_lower for phrase in ["crea propiedad", "nueva propiedad", "lista propiedades", "elimina propiedad"]):
+            return True, "PropertyAgent"
+        
+        if any(phrase in text_lower for phrase in ["cambiar a", "trabajar con"]) and "plantilla" not in text_lower:
+            return True, "PropertyAgent"
+        
+        # Check for document operations (not numbers email)
+        if any(word in text_lower for word in ["sube", "subir", "upload"]):
+            return True, "DocsAgent"
+        
+        if any(doc in text_lower for doc in ["contrato", "factura", "escritura"]) and "plantilla" not in text_lower:
+            if any(word in text_lower for word in ["manda", "envía", "lista"]):
+                return True, "DocsAgent"
+        
+        return False, None
+    
+    def is_multi_domain(self, user_input: str) -> bool:
+        """Detect multi-domain tasks."""
+        text_lower = user_input.lower()
+        
+        # Check if mentions multiple domains
+        has_numbers = any(word in text_lower for word in ["b5", "c5", "celda", "plantilla", "números"])
+        has_docs = any(word in text_lower for word in ["contrato", "documento", "sube"])
+        has_property = any(word in text_lower for word in ["propiedad", "casa", "villa"])
+        
+        # Count domains
+        domains = sum([has_numbers, has_docs, has_property])
+        return domains >= 2
+    
     def get_system_prompt(self) -> str:
         return """Eres un experto en gestión de **plantillas de Números (R2B)**.
 
