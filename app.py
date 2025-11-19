@@ -1078,6 +1078,26 @@ async def api_metrics_health():
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+@app.get("/api/metrics/llm")
+async def api_metrics_llm(window_seconds: int = 3600):
+    """LLM usage and cost metrics."""
+    try:
+        from tools.metrics import fetch_llm_summary
+        llm_data = fetch_llm_summary(window_seconds)
+        return JSONResponse({"ok": True, "llm": llm_data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/api/metrics/business")
+async def api_metrics_business(window_seconds: int = 3600):
+    """Business metrics (properties, documents, exports)."""
+    try:
+        from tools.metrics import fetch_business_summary
+        business_data = fetch_business_summary(window_seconds)
+        return JSONResponse({"ok": True, "business": business_data})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 @app.get("/debug/excel-config")
 async def debug_excel_config():
     """Debug endpoint to check Excel configuration (without exposing tokens)"""

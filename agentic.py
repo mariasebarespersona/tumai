@@ -14,8 +14,42 @@ from tools.registry import TOOLS  # <-- decorated tools live here
 from tools.property_tools import list_frameworks as _derive_framework_names
 from prompts.system_loader import load_prompt_for_intent
 from tools.contracts import validate_tool_call
+from tools.metrics import log_llm_usage
 
 logger = logging.getLogger(__name__)
+
+# OpenAI pricing (as of Nov 2024) - update these if prices change
+PRICING = {
+    "gpt-4o": {"prompt": 0.0025 / 1000, "completion": 0.01 / 1000},  # $2.50 per 1M input, $10 per 1M output
+    "gpt-4o-mini": {"prompt": 0.00015 / 1000, "completion": 0.0006 / 1000},  # $0.15 per 1M input, $0.60 per 1M output
+    "gpt-4": {"prompt": 0.03 / 1000, "completion": 0.06 / 1000},
+    "gpt-3.5-turbo": {"prompt": 0.0005 / 1000, "completion": 0.0015 / 1000}
+}
+
+def _log_llm_usage(ai_message: AIMessage, agent: str, session_id: str):
+    """Extract usage metadata and log LLM cost."""
+    try:
+        usage = getattr(ai_message, "usage_metadata", None) or getattr(ai_message, "response_metadata", {}).get("token_usage", {})
+        if not usage:
+            return
+        
+        prompt_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+        
+        # Extract model from response_metadata
+        model = "gpt-4o"  # default
+        if hasattr(ai_message, "response_metadata"):
+            model = ai_message.response_metadata.get("model_name", "gpt-4o")
+        
+        # Calculate cost
+        pricing = PRICING.get(model, PRICING["gpt-4o"])
+        cost_usd = (prompt_tokens * pricing["prompt"]) + (completion_tokens * pricing["completion"])
+        
+        # Log to metrics
+        log_llm_usage(model, prompt_tokens, completion_tokens, cost_usd, agent, session_id)
+        logger.debug(f"[LLM] {agent} | {model} | {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens} tokens | ${cost_usd:.4f}")
+    except Exception as e:
+        logger.warning(f"[LLM] Failed to log usage: {e}")
 
 SYSTEM_PROMPT = """
 Eres **PropertyAgent** para RAMA Country Living. Tu objetivo es guiar al usuario hasta completar 3 plantillas por propiedad: **documentos**, **números** y **resumen de la propiedad**, trabajando siempre con herramientas.
@@ -1344,10 +1378,14 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             # Respuesta final (texto)
             llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800)
             ai = llm.invoke(msgs)
+            # Log LLM usage
+            _log_llm_usage(ai, "MainAgent", state.get("property_id", ""))
         else:
             # Planificación con tools
             llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
             ai = llm.invoke(msgs)
+            # Log LLM usage
+            _log_llm_usage(ai, "MainAgent", state.get("property_id", ""))
             # Log-only: validate tool calls against registry
             try:
                 if os.getenv("ENABLE_TOOL_CONTRACTS", "1") == "1":
