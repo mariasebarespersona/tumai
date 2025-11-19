@@ -1144,6 +1144,11 @@ async def ui_chat(
     files: list[UploadFile] = File(default=[]),
     audio: UploadFile | None = File(None),
 ):
+    print(f"\n{'='*80}")
+    print(f"[UI_CHAT] NEW REQUEST: text='{text[:100] if text else '(empty)'}'")
+    print(f"[UI_CHAT] session_id={session_id}, property_id={property_id}")
+    print(f"{'='*80}\n")
+    
     STATE = get_session(session_id)
     user_text = text or ""
     transcript = None  # Initialize transcript at the beginning
@@ -1560,15 +1565,19 @@ async def ui_chat(
     # Summarize requests are always document-related
     is_summarize = any(w in qnorm for w in ["resume", "resumen", "resúmeme", "resumeme", "sintetiza"])
     
+    # Check if user wants to SEND/EMAIL a document (should NOT activate RAG)
+    wants_send_email = any(w in qnorm for w in ["manda", "mandame", "envia", "enviame", "envía", "envíame", "send", "email", "correo", "mail"])
+    
     # DEFINITIVE RULE: Activate RAG ONLY if:
     # 1. User explicitly references a specific document (doc_ref found), OR
     # 2. User uses content verbs + doc keywords (e.g., "qué dice el contrato"), OR
     # 3. User asks to summarize + mentions document
+    # BUT NOT if user wants to send/email the document (should go to DocsAgent instead)
     should_activate_rag = (
         (doc_ref is not None) or  # Specific document mentioned and found
         (has_content_verb and has_doc_keyword) or  # Content question about documents
         (is_summarize and has_doc_keyword)  # Summarize request for document
-    )
+    ) and not wants_send_email  # EXCLUDE email/send operations
     
     if should_activate_rag and pid:
         print(f"[RAG] ✅ Activated for document content question: '{user_text}'")
