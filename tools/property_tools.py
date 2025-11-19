@@ -193,35 +193,45 @@ def search_properties(query: str, limit: int = 5) -> List[Dict]:
 
 # ---- Destructive operations ----
 def delete_property(property_id: str, purge_docs_first: bool = True) -> Dict:
-    """Soft-delete a property by UUID (safe for limited DB privileges).
+    """Delete a property by UUID (hard delete).
 
     Steps:
     - Optionally purge uploaded documents (storage + links)
-    - Rename property to prefix '__DELETED__ ' to hide in listings/searches
+    - Delete the property from the database
     - Return {deleted: True}
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         # Purge files first (best-effort)
         if purge_docs_first:
             try:
                 from .docs_tools import purge_property_documents
+                logger.info(f"[delete_property] Purging documents for property {property_id}")
                 purge_property_documents(property_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[delete_property] Failed to purge documents: {e}")
 
-        # Fetch current name for traceability
+        # Fetch current name for logging
         row = (
             sb.table("properties").select("id,name,address").eq("id", property_id).limit(1).execute()
         ).data
         cur_name = (row[0]["name"] if row else "") or "(sin nombre)"
-        # Prefix the name to mark as deleted; keep id hint
-        new_name = f"__DELETED__ {cur_name}"
+        
+        # Hard delete from database
         try:
-            sb.table("properties").update({"name": new_name}).eq("id", property_id).execute()
+            result = sb.table("properties").delete().eq("id", property_id).execute()
+            logger.info(f"[delete_property] ✅ Deleted property '{cur_name}' ({property_id})")
+            return {"deleted": True, "property_id": property_id, "name": cur_name}
         except Exception as e:
-            # If update fails, fallback to hard delete (may fail due to schema owner)
+            logger.error(f"[delete_property] ❌ Failed to delete property {property_id}: {e}")
+            # Fallback to soft-delete if hard delete fails
+            new_name = f"__DELETED__ {cur_name}"
             try:
-                sb.table("properties").delete().eq("id", property_id).execute()
+                sb.table("properties").update({"name": new_name}).eq("id", property_id).execute()
+                logger.info(f"[delete_property] ⚠️  Soft-deleted property '{cur_name}' (renamed to '{new_name}')")
+                return {"deleted": True, "property_id": property_id, "name": cur_name, "soft_delete": True}
             except Exception as e2:
                 import logging
                 logging.error(f"Error deleting property {property_id}: {e2}")

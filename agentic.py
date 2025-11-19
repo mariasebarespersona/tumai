@@ -1041,10 +1041,25 @@ def router_node(state: AgentState) -> Dict[str, Any]:
                 break
         
         # Check for confirmation
-        if any(w in last_user for w in ("yes", "confirm", "ok", "go ahead", "sí", "si", "proceed")):
-            # User confirmed - clear the flag and let assistant proceed
-            updates["awaiting_confirmation"] = False
-            updates["messages"] = [SystemMessage(content="User confirmed. Proceed with the proposed action.")]
+        if any(w in last_user for w in ("yes", "confirm", "ok", "go ahead", "sí", "si", "proceed", "confirmo")):
+            # User confirmed - execute the proposed tool_calls
+            proposal = state.get("proposal", {})
+            tool_calls = proposal.get("tool_calls", [])
+            
+            if tool_calls:
+                # Create an AIMessage with the saved tool_calls
+                ai_msg = AIMessage(
+                    content=proposal.get("original_message", ""),
+                    tool_calls=tool_calls
+                )
+                updates["awaiting_confirmation"] = False
+                updates["proposal"] = {}
+                updates["messages"] = [ai_msg]
+                logger.info(f"[router] ✅ User confirmed - executing {len(tool_calls)} tool(s): {[tc['name'] for tc in tool_calls]}")
+            else:
+                # No tool_calls saved, just proceed
+                updates["awaiting_confirmation"] = False
+                updates["messages"] = [SystemMessage(content="User confirmed. Proceed with the proposed action.")]
         elif any(w in last_user for w in ("no", "cancel", "change", "different", "nope")):
             # User cancelled - clear the flag and proposal
             updates["awaiting_confirmation"] = False
@@ -1377,10 +1392,20 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                                 needs_confirm = True
                                 break
                         if needs_confirm:
+                            # Save the original tool_calls in proposal before asking for confirmation
+                            proposal = {
+                                "tool_calls": ai.tool_calls,
+                                "original_message": ai.content if ai.content else ""
+                            }
                             # Replace tool_calls with a confirmation question
                             question = "Necesito tu confirmación antes de ejecutar esta acción. ¿Confirmas que proceda?"
-                            ai = AIMessage(content=question)
-                            return {"messages": [ai], "awaiting_confirmation": True, "last_llm_timestamp": time.time()}
+                            confirmation_msg = AIMessage(content=question)
+                            return {
+                                "messages": [confirmation_msg], 
+                                "awaiting_confirmation": True, 
+                                "proposal": proposal,
+                                "last_llm_timestamp": time.time()
+                            }
             except Exception as _e:
                 logger.warning(f"[confirm] gating failed: {_e}")
     except Exception as e:
