@@ -1064,7 +1064,61 @@ async def validation_exception_handler(request, exc):
 async def healthcheck():
     return {"status": "ok", "app": "RAMA AI Backend"}
 
-# Metrics endpoints removed - using Logfire instead
+# Logfire Metrics Dashboard API
+@app.get("/api/dashboard/metrics")
+async def get_dashboard_metrics(time_range: str = "1h"):
+    """Get all metrics from Logfire for custom dashboard"""
+    try:
+        from tools.logfire_client import get_logfire_client
+        
+        client = get_logfire_client()
+        data = client.get_dashboard_summary(time_range)
+        
+        return JSONResponse({"ok": True, "data": data})
+    except Exception as e:
+        logger.error(f"Error fetching Logfire metrics: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/api/dashboard/api-metrics")
+async def get_api_metrics(time_range: str = "1h"):
+    """Get API-specific metrics from Logfire"""
+    try:
+        from tools.logfire_client import get_logfire_client
+        
+        client = get_logfire_client()
+        
+        return JSONResponse({
+            "ok": True,
+            "data": {
+                "request_rate": client.get_api_request_rate(time_range),
+                "status_codes": client.get_status_codes(time_range),
+                "error_rate": client.get_error_rate(time_range),
+                "top_endpoints": client.get_top_endpoints(time_range)
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error fetching API metrics: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+@app.get("/api/dashboard/llm-metrics")
+async def get_llm_metrics(time_range: str = "1h"):
+    """Get LLM-specific metrics from Logfire"""
+    try:
+        from tools.logfire_client import get_logfire_client
+        
+        client = get_logfire_client()
+        
+        return JSONResponse({
+            "ok": True,
+            "data": {
+                "calls_over_time": client.get_llm_calls(time_range),
+                "cost": client.get_llm_cost(time_range),
+                "agents": client.get_agent_performance(time_range)
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error fetching LLM metrics: {e}", exc_info=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @app.get("/debug/excel-config")
 async def debug_excel_config():
