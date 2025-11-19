@@ -817,11 +817,9 @@ def set_numbers_table_cell(property_id: str, template_key: str, cell_address: st
                 except Exception:
                     pass
                 # Metrics event
-                try:
-                    from .metrics import log_event  # local import to avoid cycles
-                    log_event("numbers", "set_numbers_table_cell", "ok", 0, {"property_id": property_id, "cell": normalized_cell_address})
-                except Exception:
-                    pass
+                # Log to Logfire
+                import logfire
+                logfire.info("numbers_cell_updated", property_id=property_id, cell=normalized_cell_address, value=str(value)[:50])
                 return response
             else:
                 logger.warning(f"⚠️ Validation failed: expected {expected_value_str}, got {saved_value_str}")

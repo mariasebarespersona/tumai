@@ -3,7 +3,7 @@ import os, smtplib, ssl
 from email.message import EmailMessage
 from typing import List
 from uuid import uuid4
-from .metrics import log_event
+import logfire  # Logfire for event tracking
 
 SMTP_HOST = os.getenv("SMTP_HOST")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -68,8 +68,6 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
         raise
     # Generate a synthetic message_id for verification/logging
     message_id = f"<{uuid4()}@rama.local>"
-    try:
-        log_event("docs", "send_email", "ok", 0, {"to": to, "subject": subject})
-    except Exception:
-        pass
+    # Log email sent event to Logfire
+    logfire.info("email_sent", to=to, subject=subject, attachments_count=len(attachments))
     return {"sent": True, "to": to, "subject": subject, "message_id": message_id}

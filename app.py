@@ -6,6 +6,17 @@ from fastapi import FastAPI, UploadFile, Form, File
 import time
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
+
+# Logfire: Observability for API + LLM
+import logfire
+
+# Configure Logfire
+logfire.configure(
+    token=os.getenv("LOGFIRE_TOKEN"),  # Get from https://logfire.pydantic.dev
+    service_name="rama-ai-backend",
+    environment=os.getenv("ENVIRONMENT", "development"),
+)
+
 from agentic import build_graph
 from router.scaffold import Router
 from router.orchestrator import orchestrator
@@ -984,6 +995,10 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
 
 # Minimal HTTP app to support the Next.js frontend
 app = FastAPI(title="RAMA AI Backend")
+
+# Instrument FastAPI with Logfire (auto-logs all requests)
+logfire.instrument_fastapi(app)
+
 cors_env = os.getenv("WEB_BASE", "http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3005,http://localhost:3006")
 allow_all = os.getenv("ALLOW_ALL_CORS", "0") == "1" or cors_env.strip() == "*"
 app.add_middleware(
@@ -997,7 +1012,7 @@ app.add_middleware(
 # Request ID middleware for tracing
 from starlette.middleware.base import BaseHTTPMiddleware
 from uuid import uuid4
-from tools.metrics import log_request, log_event, fetch_summary, fetch_series
+# Metrics removed - using Logfire instead
 
 @app.middleware("http")
 async def add_request_id(request, call_next):
@@ -1011,11 +1026,7 @@ async def add_request_id(request, call_next):
     ms = int((_t.perf_counter() - _t0) * 1000)
     try:
         _logger.info(f"[metrics] {request.method} {request.url.path} status={response.status_code} ms={ms} rid={rid}")
-        # Persist for dashboard
-        try:
-            log_request(request.method, request.url.path, response.status_code, ms, rid)
-        except Exception:
-            pass
+        # Logfire automatically logs all requests via instrument_fastapi()
     except Exception:
         pass
     response.headers["x-request-id"] = rid
@@ -1053,50 +1064,7 @@ async def validation_exception_handler(request, exc):
 async def healthcheck():
     return {"status": "ok", "app": "RAMA AI Backend"}
 
-@app.get("/api/metrics/summary")
-async def api_metrics_summary(window_seconds: int = 3600):
-    try:
-        return JSONResponse({"ok": True, "summary": fetch_summary(window_seconds)})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-@app.get("/api/metrics/series")
-async def api_metrics_series(path: str | None = None, window_seconds: int = 3600, buckets: int = 60):
-    try:
-        return JSONResponse({"ok": True, "series": fetch_series(path, window_seconds, buckets)})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-@app.get("/api/metrics/health")
-async def api_metrics_health():
-    """Health check endpoint - returns system health status based on thresholds."""
-    try:
-        from tools.metrics import check_health
-        health = check_health()
-        status_code = 200 if health["status"] in ["healthy", "degraded"] else 503
-        return JSONResponse({"ok": True, "health": health}, status_code=status_code)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-@app.get("/api/metrics/llm")
-async def api_metrics_llm(window_seconds: int = 3600):
-    """LLM usage and cost metrics."""
-    try:
-        from tools.metrics import fetch_llm_summary
-        llm_data = fetch_llm_summary(window_seconds)
-        return JSONResponse({"ok": True, "llm": llm_data})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-@app.get("/api/metrics/business")
-async def api_metrics_business(window_seconds: int = 3600):
-    """Business metrics (properties, documents, exports)."""
-    try:
-        from tools.metrics import fetch_business_summary
-        business_data = fetch_business_summary(window_seconds)
-        return JSONResponse({"ok": True, "business": business_data})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+# Metrics endpoints removed - using Logfire instead
 
 @app.get("/debug/excel-config")
 async def debug_excel_config():

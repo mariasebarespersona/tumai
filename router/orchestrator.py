@@ -13,7 +13,8 @@ import logging
 import time
 from typing import Dict, Any, Optional
 from router.active_router import ActiveRouter
-from tools.metrics import log_event
+# Metrics removed - using Logfire instead
+def log_event(*args, **kwargs): pass  # No-op for now
 from agents.property_agent import PropertyAgent
 from agents.numbers_agent import NumbersAgent
 from agents.docs_agent import DocsAgent
