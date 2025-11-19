@@ -13,6 +13,24 @@ Este documento contiene todas las queries SQL y configuraciones para crear un da
 
 ---
 
+## ⚠️ **IMPORTANTE: Nombres de Columnas en Logfire**
+
+Logfire puede usar nombres diferentes según tu versión y configuración. **Antes de crear cualquier gráfico**, ejecuta esta query exploratoria:
+
+```sql
+SELECT * LIMIT 10
+```
+
+Esto te mostrará las columnas disponibles. Los nombres comunes son:
+- `start_timestamp` o `start_time` → Para el tiempo
+- `span_name` o `name` → Para el nombre del span
+- `attributes` → Para metadata adicional
+- `duration` → Para latency
+
+**Si una query no funciona**, ajusta los nombres de columnas según lo que veas en tu exploración.
+
+---
+
 ## 📊 **Gráficos del Dashboard**
 
 ### 1️⃣ **API Request Rate (Requests por Minuto)**
@@ -20,16 +38,31 @@ Este documento contiene todas las queries SQL y configuraciones para crear un da
 **Tipo de gráfico**: Time Series (Line Chart)  
 **Descripción**: Muestra el volumen de requests en tiempo real
 
+**⚠️ IMPORTANTE**: Primero prueba esta query exploratoria para ver qué columnas tienes disponibles:
+```sql
+SELECT * LIMIT 10
+```
+
+**Query básica (sin filtros - muestra TODO el tráfico)**:
 ```sql
 SELECT 
-  date_trunc('minute', start_time) as time,
+  date_trunc('minute', start_timestamp) as time,
   count(*) as requests
-FROM spans
+GROUP BY time
+ORDER BY time DESC
+LIMIT 1000
+```
+
+**Query con filtro HTTP (usa DESPUÉS de verificar que span_name existe)**:
+```sql
+SELECT 
+  date_trunc('minute', start_timestamp) as time,
+  count(*) as requests
 WHERE 
-  span_name LIKE 'POST %' 
-  OR span_name LIKE 'GET %'
-  OR span_name LIKE 'PUT %'
-  OR span_name LIKE 'DELETE %'
+  span_name LIKE '%POST%' 
+  OR span_name LIKE '%GET%'
+  OR span_name LIKE '%PUT%'
+  OR span_name LIKE '%DELETE%'
 GROUP BY time
 ORDER BY time DESC
 LIMIT 1000
