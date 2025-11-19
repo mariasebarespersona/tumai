@@ -322,10 +322,13 @@ def _wants_property_search(text: str) -> bool:
 def _wants_uploaded_docs(text: str) -> bool:
     t = _normalize(text)
     regexes = [
-        r"\bque\s+documentos\s+(tengo|hay|he\s+subido)\b",
+        r"\bque\s+documentos\s+(tengo|hay)\b",
+        r"\bque\s+documentos\s+he\s+subido\b",
         r"\b(documentos)\b.*\b(ya|subidos|subido)\b",
-        r"\b(cuales|que|qué)\s+documentos\b.*\b(tengo|hay)\b",
+        r"\b(cuales|que|qué)\s+documentos\b",
         r"\b(which|what)\s+documents\b.*\b(have|uploaded|already)\b",
+        r"\blista\s+(de\s+)?documentos\b",
+        r"\bmostrar\s+documentos\b",
     ]
     for rx in regexes:
         if re.search(rx, t):
@@ -2035,11 +2038,22 @@ async def ui_chat(
         try:
             rows = list_docs(pid)
             uploaded = [r for r in rows if r.get('storage_key')]
+            pending = [r for r in rows if not r.get('storage_key')]
+            
+            # Get property name for better UX
+            prop_name = STATE.get("property_name", "esta propiedad")
+            
+            response_parts = [f"Para la propiedad '{prop_name}':\n"]
+            
+            # Uploaded section
+            response_parts.append("\n📄 Documentos subidos:")
             if uploaded:
-                lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in uploaded[:10]]
-                more_hint = f"\n\n({len(uploaded)} documentos en total)" if len(uploaded) > 10 else ""
+                lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in uploaded[:20]]
+                response_parts.append("\n".join(lines))
+                if len(uploaded) > 20:
+                    response_parts.append(f"... y {len(uploaded) - 20} más")
                 
-                # Save reference to last document if there's only one, for "ese documento" references
+                # Save reference to last document if there's only one
                 if len(uploaded) == 1:
                     STATE["last_uploaded_doc"] = {
                         "document_group": uploaded[0].get("document_group", ""),
@@ -2047,9 +2061,20 @@ async def ui_chat(
                         "document_name": uploaded[0].get("document_name", ""),
                     }
                     save_sessions()
-                
-                return make_response("Documentos ya subidos:\n" + "\n".join(lines) + more_hint)
-            return make_response("Aún no hay documentos subidos para esta propiedad.")
+            else:
+                response_parts.append("(ninguno aún)")
+            
+            # Pending section
+            response_parts.append("\n\n⏳ Documentos pendientes:")
+            if pending:
+                lines = [f"- {r['document_group']} / {r.get('document_subgroup','')} / {r['document_name']}" for r in pending[:20]]
+                response_parts.append("\n".join(lines))
+                if len(pending) > 20:
+                    response_parts.append(f"... y {len(pending) - 20} más")
+            else:
+                response_parts.append("(ninguno)")
+            
+            return make_response("\n".join(response_parts))
         except Exception as e:
             return make_response(f"No he podido consultar los documentos: {e}")
 
