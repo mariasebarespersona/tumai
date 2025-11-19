@@ -1,4 +1,4 @@
-/* Metrics Dashboard (dev) */
+/* Metrics Dashboard v2 (dev) */
 "use client"
 import React, { useEffect, useMemo, useState } from "react"
 
@@ -8,28 +8,32 @@ export default function MetricsPage() {
   const [summary, setSummary] = useState<any>(null)
   const [series, setSeries] = useState<any>(null)
   const [health, setHealth] = useState<any>(null)
+  const [llm, setLlm] = useState<any>(null)
+  const [business, setBusiness] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [route, setRoute] = useState<string>("")
+  const [autoRefresh, setAutoRefresh] = useState(true)
 
   async function load() {
     setLoading(true); setError(null)
     try {
-      // Load health status
-      const h = await fetch(`${BACKEND_URL}/api/metrics/health`).then(r=>r.json())
-      if (h.ok) setHealth(h.health)
+      // Load all metrics in parallel
+      const [h, s, ser, l, b] = await Promise.all([
+        fetch(`${BACKEND_URL}/api/metrics/health`).then(r=>r.json()),
+        fetch(`${BACKEND_URL}/api/metrics/summary`).then(r=>r.json()),
+        fetch(`${BACKEND_URL}/api/metrics/series${route ? `?path=${route}` : ''}`).then(r=>r.json()),
+        fetch(`${BACKEND_URL}/api/metrics/llm`).then(r=>r.json()),
+        fetch(`${BACKEND_URL}/api/metrics/business`).then(r=>r.json())
+      ])
       
-      // Load summary
-      const s = await fetch(`${BACKEND_URL}/api/metrics/summary`).then(r=>r.json())
+      if (h.ok) setHealth(h.health)
       if (!s.ok) throw new Error(s.error || "summary error")
       setSummary(s.summary)
-      
-      // Load series
-      const q = new URLSearchParams()
-      if (route) q.set("path", route)
-      const ser = await fetch(`${BACKEND_URL}/api/metrics/series?${q.toString()}`).then(r=>r.json())
       if (!ser.ok) throw new Error(ser.error || "series error")
       setSeries(ser.series)
+      if (l.ok) setLlm(l.llm)
+      if (b.ok) setBusiness(b.business)
     } catch (e:any) {
       setError(String(e.message||e))
     } finally {
@@ -38,6 +42,13 @@ export default function MetricsPage() {
   }
 
   useEffect(()=>{ load() }, [route])
+  
+  // Auto-refresh every 30s
+  useEffect(() => {
+    if (!autoRefresh) return
+    const interval = setInterval(load, 30000)
+    return () => clearInterval(interval)
+  }, [autoRefresh, route])
 
   const kpis = useMemo(()=>{
     if (!summary) return []
@@ -60,13 +71,23 @@ export default function MetricsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="text-2xl font-bold mb-4 text-[color:var(--c-green-800)]">Metrics Dashboard</div>
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-2xl font-bold text-[color:var(--c-green-800)]">Metrics Dashboard v2</div>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={autoRefresh} onChange={e=>setAutoRefresh(e.target.checked)} />
+            Auto-refresh (30s)
+          </label>
+        </div>
+      </div>
+      
       <div className="flex items-center gap-3 mb-4">
         <input value={route} onChange={e=>setRoute(e.target.value)} placeholder="Filter by route (e.g., /api/numbers/set-cell-value)" className="border rounded px-3 py-2 w-full"/>
-        <button onClick={load} className="px-3 py-2 rounded bg-[color:var(--c-green-700)] text-white">Refresh</button>
+        <button onClick={load} className="px-3 py-2 rounded bg-[color:var(--c-green-700)] text-white whitespace-nowrap">Refresh</button>
       </div>
-      {loading ? <div>Loading...</div> : error ? <div className="text-red-600">Error: {error}</div> : (
+      
+      {loading && !health ? <div>Loading...</div> : error ? <div className="text-red-600">Error: {error}</div> : (
         <>
           {/* Health Status Panel */}
           {health && (
@@ -78,12 +99,7 @@ export default function MetricsPage() {
             }`}>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className={`text-4xl ${
-                    health.status === 'healthy' ? '🟢' :
-                    health.status === 'degraded' ? '🟡' :
-                    health.status === 'critical' ? '🔴' :
-                    '⚪'
-                  }`}>
+                  <div className="text-4xl">
                     {health.status === 'healthy' ? '🟢' :
                      health.status === 'degraded' ? '🟡' :
                      health.status === 'critical' ? '🔴' :
@@ -116,7 +132,6 @@ export default function MetricsPage() {
                 </div>
               )}
               
-              {/* Health metrics grid */}
               <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-gray-300">
                 <div>
                   <div className="text-xs text-gray-600">Total Requests</div>
@@ -138,6 +153,58 @@ export default function MetricsPage() {
             </div>
           )}
           
+          {/* LLM Cost Panel */}
+          {llm && llm.total_calls > 0 && (
+            <div className="rounded-2xl border-2 border-blue-200 bg-blue-50 p-6 mb-6">
+              <div className="font-semibold text-blue-800 mb-3 text-lg">💰 LLM Usage & Cost (1h)</div>
+              <div className="grid grid-cols-4 gap-4 mb-4">
+                <div>
+                  <div className="text-xs text-blue-600">Total Tokens</div>
+                  <div className="text-2xl font-bold text-blue-800">{llm.total_tokens.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-600">Total Cost</div>
+                  <div className="text-2xl font-bold text-blue-800">${llm.total_cost_usd.toFixed(4)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-600">API Calls</div>
+                  <div className="text-2xl font-bold text-blue-800">{llm.total_calls}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-blue-600">Avg Cost/Call</div>
+                  <div className="text-2xl font-bold text-blue-800">${(llm.total_cost_usd / llm.total_calls).toFixed(4)}</div>
+                </div>
+              </div>
+              
+              {llm.by_agent && llm.by_agent.length > 0 && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-blue-700 mb-2">By Agent</div>
+                    <div className="space-y-1">
+                      {llm.by_agent.map((a: any) => (
+                        <div key={a.agent} className="flex justify-between text-sm bg-white p-2 rounded">
+                          <span className="font-mono">{a.agent || 'Unknown'}</span>
+                          <span className="font-semibold">${a.cost_usd} ({a.tokens.toLocaleString()} tokens)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-blue-700 mb-2">By Model</div>
+                    <div className="space-y-1">
+                      {llm.by_model.map((m: any) => (
+                        <div key={m.model} className="flex justify-between text-sm bg-white p-2 rounded">
+                          <span className="font-mono">{m.model}</span>
+                          <span className="font-semibold">${m.cost_usd} ({m.calls} calls)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
           <div className="grid grid-cols-3 gap-4 mb-6">
             {kpis.map(k => (
               <div key={k.label} className="rounded-2xl border-2 border-[color:var(--c-green-200)] bg-white p-4">
@@ -146,6 +213,7 @@ export default function MetricsPage() {
               </div>
             ))}
           </div>
+          
           <div className="grid grid-cols-2 gap-6">
             <div className="rounded-2xl border-2 border-[color:var(--c-green-200)] bg-white p-4">
               <div className="font-semibold text-[color:var(--c-green-800)] mb-2">Top Routes (1h)</div>
@@ -169,6 +237,7 @@ export default function MetricsPage() {
               </div>
             </div>
           </div>
+          
           <div className="rounded-2xl border-2 border-[color:var(--c-green-200)] bg-white p-4 mt-6">
             <div className="font-semibold text-[color:var(--c-green-800)] mb-2">Traffic (counts & avg ms)</div>
             <div className="flex items-center gap-4">
@@ -191,4 +260,3 @@ export default function MetricsPage() {
     </div>
   )
 }
-
