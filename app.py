@@ -1468,8 +1468,9 @@ async def ui_chat(
                 except Exception as _auto_err:
                     print(f"[DEBUG] Auto factura seeding skipped: {_auto_err}")
                 
-                # Confirm with property name so user knows where it was uploaded
-                return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'.")
+                # Confirm with property name AND property_id so user knows where it was uploaded
+                logger.info(f"✅ Upload confirmed: document='{proposal['document_name']}', property='{prop_name}', property_id={pid}")
+                return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}' (ID: {pid[:8]}...).")
             except Exception as e:
                 STATE["pending_proposal"] = None
                 save_sessions()
@@ -2057,10 +2058,13 @@ async def ui_chat(
     # List uploaded documents
     if _wants_uploaded_docs(user_text):
         pid = STATE.get("property_id")
+        logger.info(f"📋 Listing documents for property_id: {pid}")
         if not pid:
             return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
         try:
+            logger.info(f"🔍 Calling list_docs(property_id={pid})")
             rows = list_docs(pid)
+            logger.info(f"📄 list_docs returned {len(rows)} total documents")
             uploaded = [r for r in rows if r.get('storage_key')]
             pending = [r for r in rows if not r.get('storage_key')]
             
