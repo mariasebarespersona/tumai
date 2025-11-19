@@ -1067,6 +1067,17 @@ async def api_metrics_series(path: str | None = None, window_seconds: int = 3600
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+@app.get("/api/metrics/health")
+async def api_metrics_health():
+    """Health check endpoint - returns system health status based on thresholds."""
+    try:
+        from tools.metrics import check_health
+        health = check_health()
+        status_code = 200 if health["status"] in ["healthy", "degraded"] else 503
+        return JSONResponse({"ok": True, "health": health}, status_code=status_code)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 @app.get("/debug/excel-config")
 async def debug_excel_config():
     """Debug endpoint to check Excel configuration (without exposing tokens)"""

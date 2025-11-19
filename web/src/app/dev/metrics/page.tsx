@@ -7,6 +7,7 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:7901"
 export default function MetricsPage() {
   const [summary, setSummary] = useState<any>(null)
   const [series, setSeries] = useState<any>(null)
+  const [health, setHealth] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [route, setRoute] = useState<string>("")
@@ -14,9 +15,16 @@ export default function MetricsPage() {
   async function load() {
     setLoading(true); setError(null)
     try {
+      // Load health status
+      const h = await fetch(`${BACKEND_URL}/api/metrics/health`).then(r=>r.json())
+      if (h.ok) setHealth(h.health)
+      
+      // Load summary
       const s = await fetch(`${BACKEND_URL}/api/metrics/summary`).then(r=>r.json())
       if (!s.ok) throw new Error(s.error || "summary error")
       setSummary(s.summary)
+      
+      // Load series
       const q = new URLSearchParams()
       if (route) q.set("path", route)
       const ser = await fetch(`${BACKEND_URL}/api/metrics/series?${q.toString()}`).then(r=>r.json())
@@ -60,6 +68,76 @@ export default function MetricsPage() {
       </div>
       {loading ? <div>Loading...</div> : error ? <div className="text-red-600">Error: {error}</div> : (
         <>
+          {/* Health Status Panel */}
+          {health && (
+            <div className={`rounded-2xl border-2 p-6 mb-6 ${
+              health.status === 'healthy' ? 'border-green-500 bg-green-50' :
+              health.status === 'degraded' ? 'border-yellow-500 bg-yellow-50' :
+              health.status === 'critical' ? 'border-red-500 bg-red-50' :
+              'border-gray-300 bg-gray-50'
+            }`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`text-4xl ${
+                    health.status === 'healthy' ? '🟢' :
+                    health.status === 'degraded' ? '🟡' :
+                    health.status === 'critical' ? '🔴' :
+                    '⚪'
+                  }`}>
+                    {health.status === 'healthy' ? '🟢' :
+                     health.status === 'degraded' ? '🟡' :
+                     health.status === 'critical' ? '🔴' :
+                     '⚪'}
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold capitalize">{health.status}</div>
+                    <div className="text-sm text-gray-600">{health.message}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-gray-500">P95 Latency</div>
+                  <div className="text-xl font-mono">{health.metrics?.p95_latency_ms}ms</div>
+                </div>
+              </div>
+              
+              {health.alerts && health.alerts.length > 0 && (
+                <div className="space-y-2">
+                  {health.alerts.map((alert: any, i: number) => (
+                    <div key={i} className={`p-3 rounded border ${
+                      alert.level === 'critical' ? 'bg-red-100 border-red-300' :
+                      alert.level === 'warning' ? 'bg-yellow-100 border-yellow-300' :
+                      'bg-blue-100 border-blue-300'
+                    }`}>
+                      <div className="font-semibold text-sm">
+                        {alert.level === 'critical' ? '🚨' : '⚠️'} {alert.message}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Health metrics grid */}
+              <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-gray-300">
+                <div>
+                  <div className="text-xs text-gray-600">Total Requests</div>
+                  <div className="text-lg font-mono">{health.metrics?.total_requests}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600">Error Rate</div>
+                  <div className="text-lg font-mono">{health.metrics?.error_rate_pct}%</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600">Avg Latency</div>
+                  <div className="text-lg font-mono">{health.metrics?.avg_latency_ms}ms</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-600">Max Latency</div>
+                  <div className="text-lg font-mono">{health.metrics?.max_latency_ms}ms</div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="grid grid-cols-3 gap-4 mb-6">
             {kpis.map(k => (
               <div key={k.label} className="rounded-2xl border-2 border-[color:var(--c-green-200)] bg-white p-4">

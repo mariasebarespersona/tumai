@@ -1,10 +1,17 @@
 from __future__ import annotations
-import os, sqlite3, threading, time, json
+import os, sqlite3, threading, time, json, logging
 from typing import Dict, Any, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "metrics.db")
 os.makedirs(os.path.dirname(_db_path), exist_ok=True)
+
+# THRESHOLDS - Configurable alerting thresholds
+THRESHOLD_LATENCY_MS = int(os.getenv("THRESHOLD_LATENCY_MS", "10000"))  # 10s default
+THRESHOLD_ERROR_RATE_PCT = float(os.getenv("THRESHOLD_ERROR_RATE_PCT", "10.0"))  # 10% default
+THRESHOLD_LOOKBACK_REQUESTS = int(os.getenv("THRESHOLD_LOOKBACK_REQUESTS", "100"))  # Last 100 requests
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_db_path, check_same_thread=False)
@@ -99,4 +106,81 @@ def fetch_series(path: str | None = None, window_seconds: int = 3600, buckets: i
             counts[idx]+=1; sums[idx]+=int(ms or 0); errors[idx]+= (1 if (status and status>=400) else 0)
     avg = [ (s//c if c>0 else 0) for s,c in zip(sums, counts) ]
     return {"bucket_seconds": int(step), "count": counts, "avg_ms": avg, "errors": errors}
+
+def check_health() -> Dict[str, Any]:
+    """Check system health based on thresholds.
+    
+    Returns:
+        dict with health status, alerts, and metrics
+    """
+    # Get last N requests
+    with _lock:
+        conn = _connect()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT status, ms 
+            FROM requests 
+            ORDER BY ts DESC 
+            LIMIT ?
+        """, (THRESHOLD_LOOKBACK_REQUESTS,))
+        rows = cur.fetchall()
+        conn.close()
+    
+    if not rows:
+        return {
+            "status": "unknown",
+            "message": "No recent requests to analyze",
+            "alerts": []
+        }
+    
+    # Calculate metrics
+    total = len(rows)
+    errors = sum(1 for (status, _) in rows if status and status >= 400)
+    error_rate = (errors / total * 100) if total > 0 else 0.0
+    
+    latencies = [ms for (_, ms) in rows if ms]
+    avg_latency = sum(latencies) / len(latencies) if latencies else 0
+    max_latency = max(latencies) if latencies else 0
+    p95_latency = sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0
+    
+    # Check thresholds
+    alerts = []
+    status = "healthy"
+    
+    if error_rate > THRESHOLD_ERROR_RATE_PCT:
+        alerts.append({
+            "level": "critical",
+            "message": f"High error rate: {error_rate:.1f}% (threshold: {THRESHOLD_ERROR_RATE_PCT}%)",
+            "metric": "error_rate",
+            "value": error_rate,
+            "threshold": THRESHOLD_ERROR_RATE_PCT
+        })
+        status = "critical"
+        logger.critical(f"🚨 CRITICAL: High error rate: {error_rate:.1f}% (threshold: {THRESHOLD_ERROR_RATE_PCT}%)")
+    
+    if p95_latency > THRESHOLD_LATENCY_MS:
+        alerts.append({
+            "level": "warning",
+            "message": f"High P95 latency: {p95_latency}ms (threshold: {THRESHOLD_LATENCY_MS}ms)",
+            "metric": "p95_latency",
+            "value": p95_latency,
+            "threshold": THRESHOLD_LATENCY_MS
+        })
+        if status == "healthy":
+            status = "degraded"
+        logger.warning(f"⚠️  WARNING: High P95 latency: {p95_latency}ms (threshold: {THRESHOLD_LATENCY_MS}ms)")
+    
+    return {
+        "status": status,  # "healthy", "degraded", "critical", "unknown"
+        "message": f"Analyzed last {total} requests",
+        "alerts": alerts,
+        "metrics": {
+            "total_requests": total,
+            "error_count": errors,
+            "error_rate_pct": round(error_rate, 2),
+            "avg_latency_ms": int(avg_latency),
+            "max_latency_ms": int(max_latency),
+            "p95_latency_ms": int(p95_latency)
+        }
+    }
 
