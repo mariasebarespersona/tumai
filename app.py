@@ -1522,56 +1522,63 @@ async def ui_chat(
             return make_response(f"No he podido obtener las facturas asociadas: {e}")
 
     # -------------------------------------------------------------
-    # Document question/RAG - Intercept before agent
+    # Document question/RAG - Intercept ONLY for explicit document content queries
+    # -------------------------------------------------------------
+    # STRATEGY: RAG should ONLY activate when:
+    # 1. User explicitly mentions a document (contrato, factura, escritura, etc.)
+    # 2. OR user says "resume/resumen" + document name
+    # 3. OR user asks content questions like "qué dice el documento X"
+    #
+    # DO NOT activate RAG for:
+    # - General questions (qué casas hay, lista propiedades)
+    # - System operations (qué documentos he subido, facturas asociadas)
+    # - State queries (en qué propiedad estamos)
     # -------------------------------------------------------------
     pid = STATE.get("property_id")
     qnorm = _soft_normalize(user_text)
     
-    # Detect if it's a question (not a summarize request, not an action)
-    question_words = ["qué", "que", "cual", "cuál", "cuando", "cuándo", "donde", "dónde", 
-                      "cómo", "como", "por qué", "porque", "cuanto", "cuánto", "cuanta", "cuánta",
-                      "quien", "quién", "lee el", "que pone", "qué pone", "que dice", "qué dice",
-                      "dime", "explicame", "explícame", "di", "día", "dia", "hay que"]
+    # Check if user explicitly mentions a document in the query
+    doc_ref = _match_document_from_text(pid, user_text, STATE) if pid else None
     
-    action_words = ["borra", "borrar", "elimina", "eliminar", "delete", "remove", "crea", "crear",
-                    "add", "añadir", "anadir", "agrega", "agregar", "sube", "subir", "upload",
-                    "pon", "poner", "set", "actualiza", "actualizar", "calcula", "calcular"]
+    # Document-specific keywords that indicate content questions
+    doc_content_keywords = [
+        "contrato", "factura", "escritura", "certificado", "documento",
+        "pdf", "archivo", "anexo", "cláusula", "clausula", "artículo", "articulo",
+        "apartado", "sección", "seccion", "página", "pagina", "párrafo", "parrafo"
+    ]
+    has_doc_keyword = any(word in qnorm for word in doc_content_keywords)
     
+    # Content question verbs (asking ABOUT document content)
+    content_verbs = [
+        "que dice", "qué dice", "que pone", "qué pone", "que contiene", "qué contiene",
+        "lee el", "lee la", "explica el", "explica la", "resume", "resumen", "resúmeme", "resumeme",
+        "sintetiza", "extracto", "información sobre", "informacion sobre", "datos sobre"
+    ]
+    has_content_verb = any(verb in qnorm for verb in content_verbs)
+    
+    # Summarize requests are always document-related
     is_summarize = any(w in qnorm for w in ["resume", "resumen", "resúmeme", "resumeme", "sintetiza"])
-    has_action = any(w in qnorm for w in action_words)
     
-    # Detect questions about current STATE (property, template, etc.) - NOT RAG queries
-    state_question_patterns = [
-        "en que propiedad", "en qué propiedad", "cual propiedad", "cuál propiedad",
-        "que propiedad", "qué propiedad", "propiedad actual", "propiedad estamos",
-        "donde estamos", "dónde estamos", "con que propiedad", "con qué propiedad",
-        "en que plantilla", "en qué plantilla", "que plantilla", "qué plantilla",
-        "plantilla actual", "plantilla estamos"
-    ]
-    is_state_question = any(pattern in qnorm for pattern in state_question_patterns)
+    # DEFINITIVE RULE: Activate RAG ONLY if:
+    # 1. User explicitly references a specific document (doc_ref found), OR
+    # 2. User uses content verbs + doc keywords (e.g., "qué dice el contrato"), OR
+    # 3. User asks to summarize + mentions document
+    should_activate_rag = (
+        (doc_ref is not None) or  # Specific document mentioned and found
+        (has_content_verb and has_doc_keyword) or  # Content question about documents
+        (is_summarize and has_doc_keyword)  # Summarize request for document
+    )
     
-    # RAG should ONLY activate for questions about DOCUMENT CONTENT
-    # NOT for general queries like "qué casas hay", "lista propiedades", "qué documentos he subido"
-    non_rag_patterns = [
-        "casas hay", "propiedades hay", "propiedades tengo", "lista propiedades", "mis propiedades",
-        "documentos he subido", "documentos subidos", "documentos tengo", "lista documentos",
-        "que puedo hacer", "qué puedo hacer", "ayuda", "help",
-        "frameworks", "plantillas", "esquemas",
-        "facturas asociadas", "facturas relacionadas"
-    ]
-    is_non_rag_question = any(pattern in qnorm for pattern in non_rag_patterns)
-    
-    is_question = any(w in qnorm for w in question_words) and not is_summarize and not has_action and not is_state_question and not is_non_rag_question
-    
-    if is_question and pid:
-        print(f"[RAG] Detected question: '{user_text}'")
-        # Prioritize document mentioned in current text
-        doc_ref = _match_document_from_text(pid, user_text, STATE)
+    if should_activate_rag and pid:
+        print(f"[RAG] ✅ Activated for document content question: '{user_text}'")
+        print(f"[RAG] Reason: doc_ref={doc_ref is not None}, has_content_verb={has_content_verb}, has_doc_keyword={has_doc_keyword}")
+        
         try:
             from tools.rag_index import qa_with_citations
+            
             if doc_ref:
+                # User mentioned a specific document - search in that document
                 print(f"[RAG] Searching in specific document: {doc_ref.get('document_name')}")
-                # Search in specific document
                 result = qa_with_citations(
                     property_id=pid,
                     query=user_text,
@@ -1581,8 +1588,9 @@ async def ui_chat(
                     document_subgroup=doc_ref.get("document_subgroup")
                 )
             else:
-                print(f"[RAG] Searching across all documents")
+                # User asked about document content but didn't specify which one
                 # Search across ALL documents for the property
+                print(f"[RAG] Searching across all documents (no specific document mentioned)")
                 result = qa_with_citations(
                     property_id=pid,
                     query=user_text,
@@ -1590,18 +1598,21 @@ async def ui_chat(
                 )
             
             if result.get("answer") and "No he encontrado información" not in result["answer"]:
-                print(f"[RAG] Found answer: {result['answer'][:100]}...")
+                print(f"[RAG] ✅ Found answer in documents")
                 answer_text = result["answer"]
                 if result.get("citations"):
                     cit_strs = [f"{c['document_group']}/{c.get('document_subgroup','')}/{c['document_name']} (trozo {c['chunk_index']})" for c in result['citations']]
                     answer_text += f"\n\nFuentes:\n" + "\n".join(f"- {s}" for s in cit_strs)
                 return make_response(answer_text)
             else:
-                print(f"[RAG] No relevant answer found, falling through to agent")
+                print(f"[RAG] ⚠️  No relevant answer found in documents, falling through to agent")
         except Exception as e:
-            print(f"[RAG] Error: {e}, falling through to agent")
+            print(f"[RAG] ❌ Error: {e}, falling through to agent")
             import traceback
             traceback.print_exc()
+    else:
+        if pid and (has_doc_keyword or has_content_verb):
+            print(f"[RAG] ⚠️  NOT activated despite doc keywords - should_activate_rag={should_activate_rag}")
 
     # -------------------------------------------------------------
     # New: Delegate all remaining intent handling to the Agent
