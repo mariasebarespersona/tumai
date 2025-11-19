@@ -79,6 +79,17 @@ class OrchestrationRouter:
             full_context["session_id"] = session_id
             full_context["property_id"] = property_id
             
+            # Add property_name to context so agent knows which property it's working with
+            if property_id:
+                try:
+                    from tools.property_tools import get_property
+                    prop_info = get_property(property_id)
+                    if prop_info:
+                        full_context["property_name"] = prop_info.get("name")
+                        logger.info(f"[orchestrator] Working with property: {full_context['property_name']} ({property_id})")
+                except Exception as e:
+                    logger.warning(f"[orchestrator] Could not get property name: {e}")
+            
             # If use_main_agent is True, skip routing entirely
             if use_main_agent:
                 logger.info(f"[orchestrator] Using MainAgent directly (skip routing)")
@@ -144,7 +155,7 @@ class OrchestrationRouter:
                                       "redirects": redirect_count
                                   })
                         
-                        return {
+                        orchestrator_result = {
                             "status": "completed",
                             "response": result.get("response"),
                             "agent_path": agent_path,
@@ -153,6 +164,13 @@ class OrchestrationRouter:
                             "tool_calls": result.get("tool_calls", []),
                             "total_latency_ms": int((time.time() - start_time) * 1000)
                         }
+                        
+                        # If agent returned a property_id (e.g., after switching properties), include it
+                        if result.get("property_id"):
+                            orchestrator_result["property_id"] = result["property_id"]
+                            logger.info(f"[orchestrator] 📍 Property changed to: {result['property_id']}")
+                        
+                        return orchestrator_result
                     
                     elif action == "redirect":
                         # Agent redirected to another agent

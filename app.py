@@ -81,30 +81,26 @@ def get_session(session_id: str):
             "email_subject": None,
             "email_document": None,
             "focus": None,  # can be "documents" | "numbers" | "summary"
-            "messages": [],  # Conversation history for agent context
+            # "messages": [],  # REMOVED: Messages handled by LangGraph checkpointer
             "last_email_used": None,
             "last_assistant_response": None,
             "last_doc_ref": None,
         }
     else:
         print(f"[DEBUG] Using EXISTING session: {session_id}, current property_id: {SESSIONS[session_id].get('property_id')}")
-        # Ensure messages field exists in old sessions
-        if "messages" not in SESSIONS[session_id]:
-            SESSIONS[session_id]["messages"] = []
     return SESSIONS[session_id]
 
 
 def add_to_conversation(session_id: str, user_text: str, assistant_text: str):
-    """Add user and assistant messages to conversation history for context."""
-    from langchain_core.messages import HumanMessage, AIMessage
-    STATE = get_session(session_id)
+    """Add user and assistant messages to conversation history for context.
     
-    if user_text:
-        STATE["messages"].append(HumanMessage(content=user_text))
-    if assistant_text:
-        STATE["messages"].append(AIMessage(content=assistant_text))
-    
-    save_sessions()
+    NOTE: Messages are now stored in LangGraph checkpointer (PostgreSQL/SQLite),
+    not in STATE. This function is kept for compatibility but doesn't save messages anymore.
+    Only property_id and other metadata are saved to STATE.
+    """
+    # Messages are handled by LangGraph checkpointer
+    # We only save property_id and other metadata to STATE
+    pass
 
 
 def _normalize(s: str) -> str:
@@ -827,18 +823,10 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     
     # LangGraph with checkpointer automatically maintains message history using thread_id
     # DON'T pass messages - let the checkpointer load the full history automatically
-    # Optional: router log-only
+    # Optional: router log-only (DISABLED - causes "event loop already running" error)
+    # The orchestrator's active_router will handle intent detection
     intent_guess = None
     intent_conf = 0.0
-    try:
-        if os.getenv("ENABLE_ROUTER", "1") == "1" and text:
-            decision = __import__("asyncio").get_event_loop().run_until_complete(
-                router.decide(text, {"session_id": session_id, "property_id": property_id or STATE.get("property_id")})
-            )
-            intent_guess = decision.get("intent")
-            intent_conf = float(decision.get("confidence") or 0.0)
-    except Exception as _e:
-        print(f"[ROUTER] error: {_e}")
     
     # === MULTI-AGENT ROUTING ===
     # Use orchestrator to determine which agent should handle this request
@@ -851,7 +839,9 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             import nest_asyncio
             
             # Check if direct execution is enabled (Phase 2b)
-            direct_execution = os.getenv("USE_DIRECT_EXECUTION", "0") == "1"
+            # DISABLED: Direct execution causes empty responses because agents can't execute tools
+            # The MainAgent will handle tool execution instead
+            direct_execution = False  # os.getenv("USE_DIRECT_EXECUTION", "0") == "1"
             
             # Allow nested event loops (FastAPI already has one running)
             try:
@@ -866,13 +856,28 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
+            # Prepare context with current state (including numbers_template)
+            # NOTE: Messages history is handled by LangGraph checkpointer, not needed in context
+            context = {}
+            
+            # Try to get numbers_template from LangGraph state
+            try:
+                from agentic import agent as langgraph_agent
+                config = {"configurable": {"thread_id": session_id}}
+                current_state = langgraph_agent.get_state(config)
+                if current_state and current_state.values.get("numbers_template"):
+                    context["numbers_template"] = current_state.values["numbers_template"]
+                    print(f"[ORCHESTRATOR] Current numbers_template: {context['numbers_template']}")
+            except Exception as e:
+                print(f"[ORCHESTRATOR] Could not read numbers_template from state: {e}")
+            
             # Run async function
             routing_result = asyncio.get_event_loop().run_until_complete(
                 orchestrator.route_and_execute(
                     user_input=text,
                     session_id=session_id,
                     property_id=property_id or STATE.get("property_id"),
-                    context={"history": STATE.get("messages", [])},
+                    context=context,
                     direct_execution=direct_execution
                 )
             )
@@ -886,7 +891,11 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             if routing_result.get("status") == "completed":
                 agent_response = routing_result.get("response")
                 print(f"[ORCHESTRATOR] ✅ Agent {routing_result['final_agent']} completed directly")
-                print(f"[ORCHESTRATOR] Response: {agent_response[:100]}...")
+                print(f"[ORCHESTRATOR] Response type: {type(agent_response)}, len: {len(agent_response) if agent_response else 0}")
+                print(f"[ORCHESTRATOR] Response: {agent_response[:200] if agent_response else '(empty)'}")
+                
+                # Get property_id from orchestrator result if available (e.g., after property switch)
+                final_property_id = routing_result.get("property_id") or property_id or STATE.get("property_id")
                 
                 # Return agent response directly (skip MainAgent)
                 result = {
@@ -894,11 +903,16 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                         {"role": "user", "content": text},
                         {"role": "assistant", "content": agent_response}
                     ],
-                    "property_id": property_id or STATE.get("property_id"),
+                    "property_id": final_property_id,
                     "agent_path": routing_result.get("agent_path", []),
                     "redirects": routing_result.get("redirects", 0),
                     "routing_latency_ms": routing_result.get("total_latency_ms", 0)
                 }
+                
+                # Update STATE with new property_id if it changed
+                if final_property_id and final_property_id != STATE.get("property_id"):
+                    print(f"[ORCHESTRATOR] 📍 Updating STATE property_id: {STATE.get('property_id')} → {final_property_id}")
+                    STATE["property_id"] = final_property_id
                 
                 # Save conversation to state
                 add_to_conversation(session_id, text, agent_response)
@@ -1161,14 +1175,8 @@ async def ui_chat(
                 transcript = user_text
                 print(f"[DEBUG] Transcribed text: {user_text}")
                 
-                # Add user message to state for better context
-                if "messages" not in STATE:
-                    STATE["messages"] = []
-                STATE["messages"].append({
-                    "role": "user",
-                    "content": user_text
-                })
-                save_sessions()
+                # Messages are handled by LangGraph checkpointer
+                # No need to add to STATE
                 
                 # Continue with normal flow using the transcribed text
                 # Don't return here, let the normal processing continue
@@ -1187,7 +1195,26 @@ async def ui_chat(
     # Handle sync request (empty message from frontend to get current state)
     if not user_text.strip() and len(files) == 0 and not audio:
         current_pid = STATE.get('property_id')
-        print(f"[DEBUG] Sync request - returning current property_id: {current_pid}")
+        print(f"[DEBUG] Sync request - STATE property_id: {current_pid}")
+        
+        # If STATE is empty (e.g., after backend restart), read from checkpointer
+        if not current_pid:
+            try:
+                from agentic import agent as langgraph_agent
+                config = {"configurable": {"thread_id": session_id}}
+                final_state = langgraph_agent.get_state(config)
+                if final_state and final_state.values.get("property_id"):
+                    current_pid = final_state.values["property_id"]
+                    print(f"[DEBUG] Sync: Restored property_id from checkpointer: {current_pid}")
+                    # Update STATE so we don't have to read from checkpointer every time
+                    STATE["property_id"] = current_pid
+                    save_sessions()
+                else:
+                    print(f"[DEBUG] Sync: No property_id in checkpointer state")
+            except Exception as e:
+                print(f"[DEBUG] Sync: Could not read from checkpointer: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Get property name if we have a property_id
         property_name = None
@@ -1196,8 +1223,9 @@ async def ui_chat(
                 from tools.property_tools import get_property
                 prop_info = get_property(current_pid)
                 property_name = prop_info['name'] if prop_info else None
-            except:
-                pass
+                print(f"[DEBUG] Sync: property_name = {property_name}")
+            except Exception as e:
+                print(f"[DEBUG] Sync: Error getting property: {e}")
         
         response_text = f"Trabajando en: {property_name}" if property_name else ""
         return make_response(response_text, extra=None)
@@ -1453,7 +1481,18 @@ async def ui_chat(
     
     is_summarize = any(w in qnorm for w in ["resume", "resumen", "resúmeme", "resumeme", "sintetiza"])
     has_action = any(w in qnorm for w in action_words)
-    is_question = any(w in qnorm for w in question_words) and not is_summarize and not has_action
+    
+    # Detect questions about current STATE (property, template, etc.) - NOT RAG queries
+    state_question_patterns = [
+        "en que propiedad", "en qué propiedad", "cual propiedad", "cuál propiedad",
+        "que propiedad", "qué propiedad", "propiedad actual", "propiedad estamos",
+        "donde estamos", "dónde estamos", "con que propiedad", "con qué propiedad",
+        "en que plantilla", "en qué plantilla", "que plantilla", "qué plantilla",
+        "plantilla actual", "plantilla estamos"
+    ]
+    is_state_question = any(pattern in qnorm for pattern in state_question_patterns)
+    
+    is_question = any(w in qnorm for w in question_words) and not is_summarize and not has_action and not is_state_question
     
     if is_question and pid:
         print(f"[RAG] Detected question: '{user_text}'")
@@ -1500,8 +1539,11 @@ async def ui_chat(
     # -------------------------------------------------------------
     out = run_turn(session_id=session_id, text=user_text, property_id=STATE.get("property_id"))
     
-    # Update property_id if the agent changed it (messages are handled by PostgreSQL checkpointer)
-    if out.get("property_id") and out["property_id"] != STATE.get("property_id"):
+    # Update property_id if the agent has one (messages are handled by PostgreSQL checkpointer)
+    # Always sync from result to STATE to keep them in sync, even if STATE was cleared
+    if out.get("property_id"):
+        if out["property_id"] != STATE.get("property_id"):
+            print(f"[DEBUG] Property sync: STATE {STATE.get('property_id')} → {out['property_id']}")
         STATE["property_id"] = out["property_id"]
         save_sessions()
     
@@ -2201,7 +2243,17 @@ async def ui_chat(
                     "pon", "poner", "set", "actualiza", "actualizar", "calcula", "calcular"]
     has_action = any(w in qnorm for w in action_words)
     
-    is_question = any(w in qnorm for w in question_words) and not is_summarize_request and not has_action
+    # Detect questions about current STATE (property, template, etc.) - NOT RAG queries
+    state_question_patterns = [
+        "en que propiedad", "en qué propiedad", "cual propiedad", "cuál propiedad",
+        "que propiedad", "qué propiedad", "propiedad actual", "propiedad estamos",
+        "donde estamos", "dónde estamos", "con que propiedad", "con qué propiedad",
+        "en que plantilla", "en qué plantilla", "que plantilla", "qué plantilla",
+        "plantilla actual", "plantilla estamos"
+    ]
+    is_state_question = any(pattern in qnorm for pattern in state_question_patterns)
+    
+    is_question = any(w in qnorm for w in question_words) and not is_summarize_request and not has_action and not is_state_question
     
     if is_question and pid:
         # Prioritize document mentioned in current text
@@ -2318,9 +2370,10 @@ async def ui_chat(
             print(f"[DEBUG] ⚠️  No property_id in final state")
     except Exception as e:
         print(f"[DEBUG] ❌ Error reading final state: {e}")
-        # Fallback to old logic
-        if out.get("property_id") and out["property_id"] != STATE.get("property_id"):
-            print(f"[DEBUG] Property changed! Updating STATE from {STATE.get('property_id')} to {out['property_id']}")
+        # Fallback to old logic - always sync property_id from result to STATE
+        if out.get("property_id"):
+            if out["property_id"] != STATE.get("property_id"):
+                print(f"[DEBUG] Property sync (old): STATE {STATE.get('property_id')} → {out['property_id']}")
             STATE["property_id"] = out["property_id"]
             save_sessions()
     

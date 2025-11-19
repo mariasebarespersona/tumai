@@ -122,8 +122,22 @@ class BaseAgent:
                 }
             
             # Build messages
+            # Try to pass property_name and numbers_template to system prompt if available in context
+            property_name = context.get("property_name") if context else None
+            numbers_template = context.get("numbers_template") if context else None
+            try:
+                # Try to call with property_name and numbers_template parameters (NumbersAgent supports this)
+                system_prompt = self.get_system_prompt(property_name=property_name, numbers_template=numbers_template)
+            except TypeError:
+                try:
+                    # Try with just property_name
+                    system_prompt = self.get_system_prompt(property_name=property_name)
+                except TypeError:
+                    # Fallback for agents that don't accept any parameters
+                    system_prompt = self.get_system_prompt()
+            
             messages = [
-                SystemMessage(content=self.get_system_prompt())
+                SystemMessage(content=system_prompt)
             ]
             
             # Add context if provided
