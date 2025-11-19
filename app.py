@@ -844,10 +844,12 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     
     # === MULTI-AGENT ROUTING ===
     # Use orchestrator to determine which agent should handle this request
+    # This is now the DEFAULT behavior - orchestrator routes to specialized agents
     routing_result = None
     agent_response = None
     
-    if os.getenv("USE_MULTI_AGENT", "0") == "1" and text:
+    # Multi-agent routing is now ALWAYS enabled (unless explicitly disabled)
+    if os.getenv("USE_MULTI_AGENT", "1") == "1" and text:
         try:
             import asyncio
             import nest_asyncio

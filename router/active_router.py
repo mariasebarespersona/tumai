@@ -43,73 +43,100 @@ class ActiveRouter:
             Tuple of (intent, confidence, target_agent)
         """
         s = (user_text or "").lower()
+        ctx = context or {}
         
         # ========== PROPERTY OPERATIONS ==========
-        if any(phrase in s for phrase in ["crear propiedad", "nueva propiedad", "crea casa", "crea villa"]):
+        # Create property
+        if any(phrase in s for phrase in ["crear propiedad", "nueva propiedad", "crea casa", "crea villa", "añadir propiedad", "agregar propiedad"]):
             return ("property.create", 0.95, "PropertyAgent")
         
-        if any(phrase in s for phrase in ["cambiar a", "cambio a", "trabajar con", "usar propiedad", "selecciona"]):
-            if not any(x in s for x in ["números", "plantilla", "r2b"]):  # Not about numbers template
+        # Switch property (explicit change commands)
+        if any(phrase in s for phrase in ["cambiar a", "cambio a", "trabajar con", "usar propiedad", "selecciona", "metete en", "entrar en"]):
+            # Not about numbers template
+            if not any(x in s for x in ["números", "plantilla", "r2b", "tabla"]):
                 return ("property.switch", 0.90, "PropertyAgent")
         
-        if any(phrase in s for phrase in ["lista propiedades", "mis propiedades", "qué propiedades"]):
-            return ("property.list", 0.92, "PropertyAgent")
+        # List properties
+        if "propiedades" in s or "properties" in s:
+            if any(w in s for w in ["lista", "listar", "ver", "mostrar", "cuales", "cuántas", "qué", "mis"]):
+                if not any(x in s for x in ["trabajar", "usar", "crear", "nueva"]):
+                    return ("property.list", 0.92, "PropertyAgent")
         
+        # Delete property
         if "elimina propiedad" in s or "borra propiedad" in s:
             return ("property.delete", 0.90, "PropertyAgent")
         
         # ========== NUMBERS OPERATIONS ==========
-        # High-priority: cell updates
-        if any(verb in s for verb in ["pon", "escribe", "actualiza", "coloca"]) and CELL_RE.search(s):
+        # High-priority: cell updates (pon B5 a 1000)
+        if any(verb in s for verb in ["pon", "escribe", "actualiza", "coloca", "asigna"]) and CELL_RE.search(s):
             return ("numbers.set_cell", 0.95, "NumbersAgent")
         
-        # Clear cell
+        # Clear cell (borra B5, elimina el valor de B7)
         if any(verb in s for verb in ["borra", "elimina", "limpia"]) and CELL_RE.search(s):
             return ("numbers.clear_cell", 0.90, "NumbersAgent")
         
-        # Export
+        # Export numbers (exporta R2B, descarga números)
         if any(word in s for word in ["exporta", "descarga"]) and ("r2b" in s or "números" in s or "plantilla" in s):
             if "email" not in s:
                 return ("numbers.export", 0.88, "NumbersAgent")
         
-        # Delete template
-        if "elimina" in s and ("tabla" in s or "plantilla de números" in s):
+        # Delete template (elimina la tabla de números)
+        if any(word in s for word in ["elimina", "borra"]) and any(x in s for x in ["tabla", "plantilla de números", "plantilla de numeros"]):
             return ("numbers.delete_template", 0.85, "NumbersAgent")
         
-        # Select template
-        if ("números" in s or "r2b" in s or "plantilla" in s) and not any(x in s for x in ["email", "enviar"]):
+        # Upload numbers template (upload Excel, subir R2B)
+        if any(word in s for word in ["sube", "subir", "upload", "cargar"]) and any(x in s for x in ["r2b", "números", "numeros", "plantilla", "excel"]):
+            return ("numbers.upload", 0.90, "NumbersAgent")
+        
+        # Select/focus numbers template (números, R2B, plantilla)
+        if ("números" in s or "numeros" in s or "r2b" in s or "plantilla" in s) and not any(x in s for x in ["email", "enviar", "documento"]):
+            # Focus mode if just "números" alone
+            if s.strip() in ["números", "numeros", "r2b", "plantilla"]:
+                return ("numbers.focus", 0.85, "NumbersAgent")
             return ("numbers.select_template", 0.82, "NumbersAgent")
         
         # Send numbers by email
-        if any(word in s for word in ["manda", "envía", "enviar"]) and ("números" in s or "r2b" in s or "plantilla" in s):
+        if any(word in s for word in ["manda", "envía", "enviar", "mandame", "enviame"]) and ("números" in s or "numeros" in s or "r2b" in s or "plantilla" in s):
             return ("numbers.send_email", 0.90, "NumbersAgent")
         
         # ========== DOCS OPERATIONS ==========
-        # Upload document
-        if any(word in s for word in ["sube", "subir", "upload"]):
-            return ("docs.upload", 0.92, "DocsAgent")
+        # List documents (qué documentos he subido, lista documentos, mostrar documentos)
+        if any(phrase in s for phrase in ["qué documentos", "que documentos", "lista documentos", "mostrar documentos", "listar documentos"]):
+            return ("docs.list", 0.92, "DocsAgent")
+        if "documentos" in s and any(w in s for w in ["subido", "subidos", "tengo", "hay", "cuales", "cuáles"]):
+            return ("docs.list", 0.90, "DocsAgent")
         
-        # Send document by email (high priority)
+        # List missing/pending documents
+        if "documentos" in s and any(w in s for w in ["faltan", "falta", "pendientes", "por subir"]):
+            return ("docs.list_pending", 0.88, "DocsAgent")
+        
+        # Upload document (sube contrato, subir factura)
+        if any(word in s for word in ["sube", "subir", "upload", "cargar"]):
+            # Not numbers (handled above)
+            if not any(x in s for x in ["r2b", "números", "numeros", "plantilla"]):
+                return ("docs.upload", 0.92, "DocsAgent")
+        
+        # Send document by email (manda contrato por email, envía factura)
         if any(word in s for word in ["manda", "envía", "enviar", "mandame", "enviame"]):
             # Check for document keywords
-            if any(doc in s for doc in ["contrato", "factura", "escritura", "certificado", "documento", "plantilla"]):
+            if any(doc in s for doc in ["contrato", "factura", "escritura", "certificado", "documento"]):
                 # But NOT if it's about números/R2B (already handled above)
-                if not any(x in s for x in ["números", "r2b", "tabla"]):
+                if not any(x in s for x in ["números", "numeros", "r2b", "tabla", "plantilla"]):
                     return ("docs.send_email", 0.90, "DocsAgent")
-        
-        # List documents
-        if "lista" in s and ("documentos" in s or "docs" in s):
-            return ("docs.list", 0.88, "DocsAgent")
         
         # List facturas
         if "facturas" in s and ("asociadas" in s or "relacionadas" in s):
             return ("docs.list_facturas", 0.85, "DocsAgent")
         
+        # Focus documents mode
+        if s.strip() in ["documentos", "documents", "docs"]:
+            return ("docs.focus", 0.85, "DocsAgent")
+        
         # ========== GENERAL/FALLBACK ==========
         if any(word in s for word in ["ayuda", "help", "qué puedes hacer", "cómo funciona"]):
             return ("general.help", 0.75, "MainAgent")
         
-        # Default fallback
+        # Default fallback - let MainAgent handle complex queries
         return ("general.chat", 0.50, "MainAgent")
     
     async def decide(self, user_text: str, context: Optional[Dict] = None) -> Dict:
