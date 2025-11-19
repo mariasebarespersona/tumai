@@ -1550,7 +1550,18 @@ async def ui_chat(
     ]
     is_state_question = any(pattern in qnorm for pattern in state_question_patterns)
     
-    is_question = any(w in qnorm for w in question_words) and not is_summarize and not has_action and not is_state_question
+    # RAG should ONLY activate for questions about DOCUMENT CONTENT
+    # NOT for general queries like "qué casas hay", "lista propiedades", "qué documentos he subido"
+    non_rag_patterns = [
+        "casas hay", "propiedades hay", "propiedades tengo", "lista propiedades", "mis propiedades",
+        "documentos he subido", "documentos subidos", "documentos tengo", "lista documentos",
+        "que puedo hacer", "qué puedo hacer", "ayuda", "help",
+        "frameworks", "plantillas", "esquemas",
+        "facturas asociadas", "facturas relacionadas"
+    ]
+    is_non_rag_question = any(pattern in qnorm for pattern in non_rag_patterns)
+    
+    is_question = any(w in qnorm for w in question_words) and not is_summarize and not has_action and not is_state_question and not is_non_rag_question
     
     if is_question and pid:
         print(f"[RAG] Detected question: '{user_text}'")
