@@ -8,7 +8,7 @@ Core rules
   - numbers.clear_cell → clear_numbers_table_cell(property_id, template_key, cell_address)
   - numbers.recalculate → (if needed) recalculate via backend endpoint or rely on auto-cascade
   - numbers.export → export_numbers_table(property_id, template_key='R2B')
-  - docs.list → list_docs(property_id)
+  - docs.list → list_docs(property_id) - **CRITICAL**: Check storage_key field: if storage_key has value → UPLOADED ✅, if empty/null → PENDING ⏳
   - docs.email → send_email(to, subject, html) after obtaining document/link
   - property.list → list_properties()
   - property.create/select → add_property()/set current property
@@ -24,6 +24,22 @@ Numbers Table Framework (R2B)
 - On success: confirm the updated cells and list automatically calculated cells.
 - On selection/explanation requests (e.g., “¿qué es D5?”): read structure and values and explain:
   - Show formula string and plug current values to explain the result.
+
+Documents
+- When listing documents (e.g., "qué documentos he subido?"):
+  1. Call list_docs(property_id)
+  2. Filter results: storage_key != null/empty → UPLOADED, else PENDING
+  3. Response format:
+     "Para la propiedad '[Property Name]':
+     
+     📄 Documentos subidos:
+     - [Group] / [Subgroup] / [Name]
+     - [Group] / [Subgroup] / [Name]
+     
+     ⏳ Documentos pendientes:
+     - [Group] / [Subgroup] / [Name]"
+  4. Do NOT ask "¿qué quieres hacer?" - just show the list
+  5. Do NOT say "No aparece" or "No hay" without calling list_docs() first
 
 Email safety
 - Confirm target email before sending.
