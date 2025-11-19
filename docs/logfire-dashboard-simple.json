@@ -1,0 +1,51 @@
+{
+  "title": "RAMA AI Monitoring",
+  "version": 1,
+  "panels": [
+    {
+      "title": "API Request Rate",
+      "type": "graph",
+      "query": "SELECT date_trunc('minute', start_timestamp) as time, count(*) as requests GROUP BY 1 ORDER BY 1 DESC LIMIT 1000",
+      "targets": [
+        {
+          "expr": "SELECT date_trunc('minute', start_timestamp) as time, count(*) as requests GROUP BY 1 ORDER BY 1 DESC LIMIT 1000",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "title": "LLM Calls",
+      "type": "graph",
+      "query": "SELECT date_trunc('minute', start_timestamp) as time, count(*) as llm_calls WHERE span_name LIKE '%openai%' GROUP BY 1 ORDER BY 1 DESC LIMIT 1000",
+      "targets": [
+        {
+          "expr": "SELECT date_trunc('minute', start_timestamp) as time, count(*) as llm_calls WHERE span_name LIKE '%openai%' GROUP BY 1 ORDER BY 1 DESC LIMIT 1000",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "title": "Status Codes",
+      "type": "pie",
+      "query": "SELECT CAST(attributes['http.status_code'] AS TEXT) as status, count(*) as count GROUP BY 1",
+      "targets": [
+        {
+          "expr": "SELECT CAST(attributes['http.status_code'] AS TEXT) as status, count(*) as count GROUP BY 1",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "title": "Total Requests",
+      "type": "singlestat",
+      "query": "SELECT count(*) as total",
+      "targets": [
+        {
+          "expr": "SELECT count(*) as total",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}
+
