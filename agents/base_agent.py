@@ -157,6 +157,29 @@ class BaseAgent:
             # Invoke LLM
             response = llm_with_tools.invoke(messages)
             
+            # Log LLM usage
+            try:
+                from tools.metrics import log_llm_usage
+                usage = getattr(response, "usage_metadata", None) or getattr(response, "response_metadata", {}).get("token_usage", {})
+                if usage:
+                    prompt_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+                    
+                    # Calculate cost (OpenAI pricing)
+                    PRICING = {
+                        "gpt-4o": {"prompt": 0.0025 / 1000, "completion": 0.01 / 1000},
+                        "gpt-4o-mini": {"prompt": 0.00015 / 1000, "completion": 0.0006 / 1000},
+                        "gpt-4": {"prompt": 0.03 / 1000, "completion": 0.06 / 1000},
+                        "gpt-3.5-turbo": {"prompt": 0.0005 / 1000, "completion": 0.0015 / 1000}
+                    }
+                    pricing = PRICING.get(self.model, PRICING["gpt-4o"])
+                    cost_usd = (prompt_tokens * pricing["prompt"]) + (completion_tokens * pricing["completion"])
+                    
+                    log_llm_usage(self.model, prompt_tokens, completion_tokens, cost_usd, self.name, property_id or "")
+                    logger.debug(f"[{self.name}] LLM: {prompt_tokens}+{completion_tokens}={prompt_tokens+completion_tokens} tokens | ${cost_usd:.4f}")
+            except Exception as e:
+                logger.warning(f"[{self.name}] Failed to log LLM usage: {e}")
+            
             # Extract response
             result = {
                 "action": "complete",
