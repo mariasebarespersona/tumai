@@ -13,8 +13,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - run: pip install pytest
-      - run: pytest -q || true
+      - run: pip install pytest pytest-cov
+      - name: Run tests with coverage
+        run: pytest --cov=. --cov-report=term --cov-report=html -v || true
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: htmlcov/
   web:
     runs-on: ubuntu-latest
     defaults:
