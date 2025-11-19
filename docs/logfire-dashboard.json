@@ -1,0 +1,528 @@
+{
+  "dashboard": {
+    "title": "RAMA AI - Production Monitoring",
+    "description": "Observability completa: API, LLM, Agents, y Business Metrics",
+    "panels": [
+      {
+        "id": "panel_1",
+        "title": "API Request Rate (Requests por Minuto)",
+        "description": "Volumen de requests en tiempo real",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 24,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT date_trunc('minute', start_timestamp) as time, count(*) as requests GROUP BY 1 ORDER BY 1 DESC LIMIT 1000"
+        },
+        "visualization": {
+          "type": "line",
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": {
+            "field": "requests",
+            "label": "Requests",
+            "type": "number"
+          }
+        },
+        "options": {
+          "legend": {
+            "show": true,
+            "position": "bottom"
+          },
+          "tooltip": {
+            "show": true
+          }
+        }
+      },
+      {
+        "id": "panel_2",
+        "title": "API Status Codes",
+        "description": "Distribución de códigos de respuesta",
+        "type": "pie",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT COALESCE(CAST(attributes['http.status_code'] AS TEXT), 'unknown') as status_code, count(*) as count GROUP BY 1 ORDER BY 2 DESC"
+        },
+        "visualization": {
+          "type": "pie",
+          "labelField": "status_code",
+          "valueField": "count"
+        },
+        "options": {
+          "legend": {
+            "show": true,
+            "position": "right"
+          },
+          "colors": {
+            "200": "#22c55e",
+            "201": "#22c55e",
+            "422": "#f59e0b",
+            "500": "#ef4444",
+            "503": "#dc2626"
+          }
+        }
+      },
+      {
+        "id": "panel_3",
+        "title": "Error Rate Over Time",
+        "description": "Porcentaje de errores por minuto",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT date_trunc('minute', start_timestamp) as time, count(*) FILTER (WHERE CAST(attributes['http.status_code'] AS INTEGER) >= 400) * 100.0 / NULLIF(count(*), 0) as error_rate_pct GROUP BY 1 ORDER BY 1 DESC LIMIT 1000"
+        },
+        "visualization": {
+          "type": "area",
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": {
+            "field": "error_rate_pct",
+            "label": "Error Rate %",
+            "type": "number"
+          }
+        },
+        "options": {
+          "thresholds": [
+            {
+              "value": 5,
+              "color": "#ef4444"
+            }
+          ]
+        }
+      },
+      {
+        "id": "panel_4",
+        "title": "Top 10 Slowest Endpoints",
+        "description": "Endpoints más lentos",
+        "type": "table",
+        "gridPos": {
+          "x": 0,
+          "y": 16,
+          "w": 24,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT span_name as endpoint, avg(duration) as avg_latency_ms, count(*) as requests, max(duration) as max_latency_ms GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+        },
+        "visualization": {
+          "type": "table",
+          "columns": [
+            {
+              "field": "endpoint",
+              "header": "Endpoint"
+            },
+            {
+              "field": "avg_latency_ms",
+              "header": "Avg Latency (ms)",
+              "format": "number"
+            },
+            {
+              "field": "requests",
+              "header": "Requests",
+              "format": "number"
+            },
+            {
+              "field": "max_latency_ms",
+              "header": "Max Latency (ms)",
+              "format": "number"
+            }
+          ]
+        }
+      },
+      {
+        "id": "panel_5",
+        "title": "P95 Latency by Endpoint",
+        "description": "Latency percentiles",
+        "type": "table",
+        "gridPos": {
+          "x": 0,
+          "y": 24,
+          "w": 12,
+          "h": 10
+        },
+        "query": {
+          "sql": "SELECT span_name as endpoint, count(*) as requests, ROUND(avg(duration), 0) as avg_ms, ROUND(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration), 0) as p50_ms, ROUND(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration), 0) as p95_ms, ROUND(percentile_cont(0.99) WITHIN GROUP (ORDER BY duration), 0) as p99_ms GROUP BY 1 ORDER BY 5 DESC LIMIT 20"
+        },
+        "visualization": {
+          "type": "table",
+          "columns": [
+            {
+              "field": "endpoint",
+              "header": "Endpoint"
+            },
+            {
+              "field": "requests",
+              "header": "Requests"
+            },
+            {
+              "field": "avg_ms",
+              "header": "Avg"
+            },
+            {
+              "field": "p50_ms",
+              "header": "P50"
+            },
+            {
+              "field": "p95_ms",
+              "header": "P95",
+              "highlight": {
+                "condition": "> 2000",
+                "color": "#f59e0b"
+              }
+            },
+            {
+              "field": "p99_ms",
+              "header": "P99",
+              "highlight": {
+                "condition": "> 5000",
+                "color": "#ef4444"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "panel_6",
+        "title": "Agent Performance",
+        "description": "Comparación entre agentes",
+        "type": "table",
+        "gridPos": {
+          "x": 12,
+          "y": 24,
+          "w": 12,
+          "h": 10
+        },
+        "query": {
+          "sql": "SELECT COALESCE(attributes['agent'], 'MainAgent') as agent_name, count(*) as total_calls, ROUND(avg(duration), 0) as avg_latency_ms, count(*) FILTER (WHERE attributes['action'] = 'complete') as completed, count(*) FILTER (WHERE attributes['action'] = 'error') as errors GROUP BY 1 ORDER BY 2 DESC"
+        },
+        "visualization": {
+          "type": "table",
+          "columns": [
+            {
+              "field": "agent_name",
+              "header": "Agent"
+            },
+            {
+              "field": "total_calls",
+              "header": "Calls"
+            },
+            {
+              "field": "avg_latency_ms",
+              "header": "Avg Latency (ms)"
+            },
+            {
+              "field": "completed",
+              "header": "Completed"
+            },
+            {
+              "field": "errors",
+              "header": "Errors",
+              "highlight": {
+                "condition": "> 0",
+                "color": "#ef4444"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "panel_7",
+        "title": "LLM Calls per Minute",
+        "description": "Volumen de llamadas a OpenAI",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 34,
+          "w": 24,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT date_trunc('minute', start_timestamp) as time, count(*) as llm_calls WHERE span_name LIKE '%ChatOpenAI%' OR span_name LIKE '%openai%' GROUP BY 1 ORDER BY 1 DESC LIMIT 1000"
+        },
+        "visualization": {
+          "type": "line",
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": {
+            "field": "llm_calls",
+            "label": "LLM Calls",
+            "type": "number"
+          }
+        },
+        "options": {
+          "color": "#8b5cf6"
+        }
+      },
+      {
+        "id": "panel_8",
+        "title": "LLM Usage by Model",
+        "description": "Distribución de calls por modelo",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 42,
+          "w": 12,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT date_trunc('5 minutes', start_timestamp) as time, COALESCE(attributes['llm.request.model'], attributes['gen_ai.request.model'], 'unknown') as model, count(*) as calls WHERE span_name LIKE '%ChatOpenAI%' OR span_name LIKE '%openai%' GROUP BY 1, 2 ORDER BY 1 DESC LIMIT 1000"
+        },
+        "visualization": {
+          "type": "bar",
+          "stacked": true,
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": {
+            "field": "calls",
+            "label": "Calls",
+            "type": "number"
+          },
+          "groupBy": "model"
+        },
+        "options": {
+          "colors": {
+            "gpt-4o": "#3b82f6",
+            "gpt-4o-mini": "#93c5fd",
+            "gpt-4": "#1e40af"
+          }
+        }
+      },
+      {
+        "id": "panel_9",
+        "title": "Router Decision Breakdown",
+        "description": "A qué agente rutea más",
+        "type": "pie",
+        "gridPos": {
+          "x": 12,
+          "y": 42,
+          "w": 12,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT COALESCE(attributes['intent'], 'unknown') as intent, count(*) as count WHERE span_name LIKE '%route%' OR attributes['intent'] IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+        },
+        "visualization": {
+          "type": "pie",
+          "labelField": "intent",
+          "valueField": "count"
+        },
+        "options": {
+          "legend": {
+            "show": true,
+            "position": "right"
+          }
+        }
+      },
+      {
+        "id": "panel_10",
+        "title": "Token Usage Over Time",
+        "description": "Tokens consumidos (input + output)",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 50,
+          "w": 24,
+          "h": 8
+        },
+        "query": {
+          "sql": "SELECT date_trunc('5 minutes', start_timestamp) as time, sum(COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), CAST(attributes['gen_ai.usage.prompt_tokens'] AS INTEGER), 0)) as input_tokens, sum(COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), CAST(attributes['gen_ai.usage.completion_tokens'] AS INTEGER), 0)) as output_tokens WHERE span_name LIKE '%ChatOpenAI%' OR span_name LIKE '%openai%' GROUP BY 1 ORDER BY 1 DESC LIMIT 1000"
+        },
+        "visualization": {
+          "type": "area",
+          "stacked": true,
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": [
+            {
+              "field": "input_tokens",
+              "label": "Input Tokens",
+              "type": "number",
+              "color": "#22c55e"
+            },
+            {
+              "field": "output_tokens",
+              "label": "Output Tokens",
+              "type": "number",
+              "color": "#f59e0b"
+            }
+          ]
+        }
+      },
+      {
+        "id": "panel_11",
+        "title": "LLM Cost by Model (Last Hour)",
+        "description": "Costo detallado por modelo",
+        "type": "table",
+        "gridPos": {
+          "x": 0,
+          "y": 58,
+          "w": 12,
+          "h": 10
+        },
+        "query": {
+          "sql": "SELECT COALESCE(attributes['llm.request.model'], attributes['gen_ai.request.model'], 'unknown') as model, count(*) as calls, sum(COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), 0)) as prompt_tokens, sum(COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), 0)) as completion_tokens, sum(COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), 0) + COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), 0)) as total_tokens, CASE WHEN attributes['llm.request.model'] = 'gpt-4o' THEN ROUND((sum(COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), 0)) * 0.0025 / 1000) + (sum(COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), 0)) * 0.01 / 1000), 4) WHEN attributes['llm.request.model'] = 'gpt-4o-mini' THEN ROUND((sum(COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), 0)) * 0.00015 / 1000) + (sum(COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), 0)) * 0.0006 / 1000), 4) ELSE 0 END as cost_usd WHERE span_name LIKE '%ChatOpenAI%' OR span_name LIKE '%openai%' GROUP BY 1 ORDER BY 6 DESC"
+        },
+        "visualization": {
+          "type": "table",
+          "columns": [
+            {
+              "field": "model",
+              "header": "Model"
+            },
+            {
+              "field": "calls",
+              "header": "Calls"
+            },
+            {
+              "field": "prompt_tokens",
+              "header": "Input Tokens",
+              "format": "number"
+            },
+            {
+              "field": "completion_tokens",
+              "header": "Output Tokens",
+              "format": "number"
+            },
+            {
+              "field": "total_tokens",
+              "header": "Total Tokens",
+              "format": "number"
+            },
+            {
+              "field": "cost_usd",
+              "header": "Cost (USD)",
+              "format": "currency",
+              "bold": true
+            }
+          ]
+        }
+      },
+      {
+        "id": "panel_12",
+        "title": "LLM Cost Over Time",
+        "description": "Gasto acumulado en OpenAI",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 58,
+          "w": 12,
+          "h": 10
+        },
+        "query": {
+          "sql": "SELECT date_trunc('hour', start_timestamp) as time, sum(CASE WHEN attributes['llm.request.model'] = 'gpt-4o' THEN (COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), 0) * 0.0025 / 1000) + (COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), 0) * 0.01 / 1000) WHEN attributes['llm.request.model'] = 'gpt-4o-mini' THEN (COALESCE(CAST(attributes['llm.usage.prompt_tokens'] AS INTEGER), 0) * 0.00015 / 1000) + (COALESCE(CAST(attributes['llm.usage.completion_tokens'] AS INTEGER), 0) * 0.0006 / 1000) ELSE 0 END) as cost_usd WHERE span_name LIKE '%ChatOpenAI%' OR span_name LIKE '%openai%' GROUP BY 1 ORDER BY 1 DESC LIMIT 168"
+        },
+        "visualization": {
+          "type": "line",
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": {
+            "field": "cost_usd",
+            "label": "Cost (USD)",
+            "type": "number",
+            "format": "currency"
+          }
+        },
+        "options": {
+          "color": "#22c55e"
+        }
+      },
+      {
+        "id": "panel_13",
+        "title": "Emails Sent",
+        "description": "Total de emails enviados",
+        "type": "stat",
+        "gridPos": {
+          "x": 0,
+          "y": 68,
+          "w": 6,
+          "h": 6
+        },
+        "query": {
+          "sql": "SELECT count(*) as emails_sent WHERE span_name LIKE '%email%' OR attributes['to'] IS NOT NULL"
+        },
+        "visualization": {
+          "type": "stat",
+          "valueField": "emails_sent",
+          "icon": "✉️",
+          "color": "#3b82f6"
+        }
+      },
+      {
+        "id": "panel_14",
+        "title": "Numbers Table Operations",
+        "description": "Actividad en tabla R2B",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 6,
+          "y": 68,
+          "w": 18,
+          "h": 6
+        },
+        "query": {
+          "sql": "SELECT date_trunc('5 minutes', start_timestamp) as time, count(*) FILTER (WHERE span_name LIKE '%cell_updated%') as cell_updates, count(*) FILTER (WHERE span_name LIKE '%import%template%') as template_imports, count(*) FILTER (WHERE span_name LIKE '%export%') as exports WHERE span_name LIKE '%numbers%' OR span_name LIKE '%cell%' OR span_name LIKE '%template%' GROUP BY 1 ORDER BY 1 DESC LIMIT 1000"
+        },
+        "visualization": {
+          "type": "bar",
+          "xAxis": {
+            "field": "time",
+            "type": "time"
+          },
+          "yAxis": [
+            {
+              "field": "cell_updates",
+              "label": "Cell Updates",
+              "color": "#3b82f6"
+            },
+            {
+              "field": "template_imports",
+              "label": "Imports",
+              "color": "#22c55e"
+            },
+            {
+              "field": "exports",
+              "label": "Exports",
+              "color": "#f59e0b"
+            }
+          ]
+        }
+      }
+    ],
+    "settings": {
+      "timeRange": {
+        "default": "1h",
+        "options": ["15m", "30m", "1h", "6h", "24h", "7d"]
+      },
+      "refreshInterval": {
+        "default": "30s",
+        "options": ["off", "10s", "30s", "1m", "5m"]
+      },
+      "timezone": "browser"
+    }
+  }
+}
+
