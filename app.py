@@ -1142,6 +1142,119 @@ async def get_llm_metrics(time_range: str = "1h"):
         logger.error(f"Error fetching LLM metrics: {e}", exc_info=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+@app.get("/api/evals/metrics")
+async def get_eval_metrics(time_range: str = "24h"):
+    """
+    Get evaluation metrics for the dashboard.
+    
+    Returns:
+        - total_feedback: Total feedback count
+        - thumbs_up_count: Positive feedback count
+        - thumbs_down_count: Negative feedback count
+        - satisfaction_rate: Percentage of thumbs up
+        - tool_accuracy_avg: Average tool selection score
+        - response_quality_avg: Average LLM-as-Judge score
+        - task_success_avg: Average task success verification score
+        - feedback_over_time: Time series of feedback
+        - agent_satisfaction: Satisfaction rate per agent
+        - recent_negative_feedback: Recent thumbs down with details
+    """
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        from tools.supabase_client import sb
+        from datetime import datetime, timedelta
+        
+        # Calculate time window
+        time_map = {"1h": 1, "24h": 24, "7d": 24 * 7, "30d": 24 * 30}
+        hours = time_map.get(time_range, 24)
+        cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+        
+        # Fetch all feedback within time range
+        result = sb.table("agent_feedback") \
+            .select("*") \
+            .gte("created_at", cutoff) \
+            .order("created_at", desc=True) \
+            .execute()
+        
+        feedbacks = result.data or []
+        
+        # Calculate metrics
+        total = len(feedbacks)
+        thumbs_up = [f for f in feedbacks if f.get("rating") == 1]
+        thumbs_down = [f for f in feedbacks if f.get("rating") == -1]
+        
+        thumbs_up_count = len(thumbs_up)
+        thumbs_down_count = len(thumbs_down)
+        satisfaction_rate = (thumbs_up_count / total * 100) if total > 0 else 0
+        
+        # Calculate average scores (only from evaluated feedback)
+        tool_scores = [f.get("tool_selection_score") for f in feedbacks if f.get("tool_selection_score") is not None]
+        quality_scores = [f.get("response_quality_score") for f in feedbacks if f.get("response_quality_score") is not None]
+        success_scores = [f.get("task_success_score") for f in feedbacks if f.get("task_success_score") is not None]
+        
+        tool_accuracy_avg = (sum(tool_scores) / len(tool_scores)) if tool_scores else None
+        response_quality_avg = (sum(quality_scores) / len(quality_scores)) if quality_scores else None
+        task_success_avg = (sum(success_scores) / len(success_scores)) if success_scores else None
+        
+        # Feedback over time (group by hour)
+        feedback_over_time = []
+        from collections import defaultdict
+        time_buckets = defaultdict(lambda: {"thumbs_up": 0, "thumbs_down": 0})
+        
+        for f in feedbacks:
+            # Round to nearest hour
+            created = datetime.fromisoformat(f["created_at"].replace("Z", "+00:00"))
+            hour_key = created.replace(minute=0, second=0, microsecond=0).isoformat()
+            
+            if f.get("rating") == 1:
+                time_buckets[hour_key]["thumbs_up"] += 1
+            elif f.get("rating") == -1:
+                time_buckets[hour_key]["thumbs_down"] += 1
+        
+        feedback_over_time = [
+            {"time": k, "thumbs_up": v["thumbs_up"], "thumbs_down": v["thumbs_down"]}
+            for k, v in sorted(time_buckets.items())
+        ]
+        
+        # Agent satisfaction
+        agent_stats = defaultdict(lambda: {"total": 0, "thumbs_up": 0})
+        for f in feedbacks:
+            agent = f.get("agent_name") or "Unknown"
+            agent_stats[agent]["total"] += 1
+            if f.get("rating") == 1:
+                agent_stats[agent]["thumbs_up"] += 1
+        
+        agent_satisfaction = [
+            {
+                "agent_name": agent,
+                "satisfaction_rate": (stats["thumbs_up"] / stats["total"] * 100) if stats["total"] > 0 else 0,
+                "count": stats["total"]
+            }
+            for agent, stats in agent_stats.items()
+        ]
+        
+        # Recent negative feedback (last 10)
+        recent_negative = [f for f in feedbacks if f.get("rating") == -1][:10]
+        
+        return JSONResponse({
+            "total_feedback": total,
+            "thumbs_up_count": thumbs_up_count,
+            "thumbs_down_count": thumbs_down_count,
+            "satisfaction_rate": round(satisfaction_rate, 1),
+            "tool_accuracy_avg": round(tool_accuracy_avg, 2) if tool_accuracy_avg is not None else None,
+            "response_quality_avg": round(response_quality_avg, 2) if response_quality_avg is not None else None,
+            "task_success_avg": round(task_success_avg, 2) if task_success_avg is not None else None,
+            "feedback_over_time": feedback_over_time,
+            "agent_satisfaction": agent_satisfaction,
+            "recent_negative_feedback": recent_negative
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching eval metrics: {e}", exc_info=True)
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.get("/debug/excel-config")
 async def debug_excel_config():
     """Debug endpoint to check Excel configuration (without exposing tokens)"""
