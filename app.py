@@ -3502,8 +3502,8 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
         
         # Calculate summary metrics
         total = len(feedbacks)
-        positive = len([f for f in feedbacks if f.get("feedback_type") == "thumbs_up"])
-        negative = len([f for f in feedbacks if f.get("feedback_type") == "thumbs_down"])
+        positive = len([f for f in feedbacks if f.get("rating") == 1])
+        negative = len([f for f in feedbacks if f.get("rating") == -1])
         
         satisfaction_rate = (positive / total * 100) if total > 0 else 0
         
@@ -3541,7 +3541,7 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
                 "comment": f.get("comment")
             }
             for f in feedbacks
-            if f.get("feedback_type") == "thumbs_down"
+            if f.get("rating") == -1
         ][:20]  # Last 20 negative feedbacks
         
         # By agent breakdown
@@ -3551,9 +3551,9 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
         for f in feedbacks:
             agent = f.get("agent_name", "unknown")
             by_agent[agent]["total"] += 1
-            if f.get("feedback_type") == "thumbs_up":
+            if f.get("rating") == 1:
                 by_agent[agent]["positive"] += 1
-            elif f.get("feedback_type") == "thumbs_down":
+            elif f.get("rating") == -1:
                 by_agent[agent]["negative"] += 1
         
         # Calculate satisfaction rate per agent
