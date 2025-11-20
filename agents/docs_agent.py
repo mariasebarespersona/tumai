@@ -25,6 +25,69 @@ class DocsAgent(BaseAgent):
     def __init__(self):
         super().__init__(name="DocsAgent", model="gpt-4o", temperature=0.5)
     
+    def run(self, user_input: str, property_id: str | None = None, context: dict | None = None):
+        """Override run to force list_docs call when listing documents."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Detect if user is asking to list documents
+        user_lower = user_input.lower()
+        should_force_list_docs = any(phrase in user_lower for phrase in [
+            "lista", "listar", "mostrar", "muestrame", "ver", "dame", "enseña",
+            "qué documentos", "que documentos", "cuales documentos", "cuáles documentos"
+        ]) and ("documento" in user_lower or "documentos" in user_lower)
+        
+        if should_force_list_docs and property_id:
+            logger.info(f"[{self.name}] 🔒 Forcing list_docs call for property {property_id[:8]}...")
+            
+            # Call list_docs directly
+            from tools.docs_tools import list_docs
+            try:
+                docs = list_docs(property_id)
+                
+                # Format response with ALL documents
+                uploaded = [d for d in docs if d.get("storage_key")]
+                pending = [d for d in docs if not d.get("storage_key")]
+                
+                # Group by document_group
+                groups = {}
+                for doc in uploaded:
+                    grp = doc.get("document_group", "Sin grupo")
+                    if grp not in groups:
+                        groups[grp] = []
+                    groups[grp].append(doc)
+                
+                response_text = f"📄 Documentos de la propiedad:\n\n"
+                response_text += f"**Documentos subidos:**\n\n"
+                
+                if uploaded:
+                    for group, docs_in_group in groups.items():
+                        response_text += f"**{group}**\n"
+                        for doc in docs_in_group:
+                            sg = doc.get("document_subgroup", "")
+                            name = doc.get("document_name", "")
+                            response_text += f"- {sg}: {name}\n" if sg else f"- {name}\n"
+                        response_text += "\n"
+                else:
+                    response_text += "No hay documentos subidos aún.\n\n"
+                
+                logger.info(f"[{self.name}] ✅ Forced list_docs returned {len(uploaded)} uploaded docs")
+                
+                return {
+                    "action": "response",
+                    "agent": self.name,
+                    "response": response_text.strip(),
+                    "latency_ms": 0,
+                    "success": True
+                }
+            except Exception as e:
+                logger.error(f"[{self.name}] ❌ Error forcing list_docs: {e}")
+                # Fall back to parent's run method
+                pass
+        
+        # Default: use parent's run method
+        return super().run(user_input, property_id, context)
+    
     def get_system_prompt(self) -> str:
         return """Eres un asistente especializado en **gestión de documentos**.
 
