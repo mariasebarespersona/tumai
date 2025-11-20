@@ -150,7 +150,28 @@ class ListDocsInput(BaseModel):
 def list_docs_tool(property_id: str) -> List[Dict]:
     """List all document rows for this property. Each row has: document_group, document_subgroup, document_name, storage_key, metadata. 
     IMPORTANT: Check storage_key to determine status - if storage_key has value → document is UPLOADED, if empty/null → PENDING."""
-    return _list_docs(property_id)
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    docs = _list_docs(property_id)
+    
+    # Log summary for debugging
+    total_docs = len(docs)
+    uploaded_docs = [d for d in docs if d.get("storage_key")]
+    pending_docs = [d for d in docs if not d.get("storage_key")]
+    
+    logger.info(f"🔍 [list_docs_tool] Property {property_id[:8]}...")
+    logger.info(f"   - Total docs: {total_docs}")
+    logger.info(f"   - Uploaded (with storage_key): {len(uploaded_docs)}")
+    logger.info(f"   - Pending (no storage_key): {len(pending_docs)}")
+    
+    # Log all uploaded documents for verification
+    if uploaded_docs:
+        logger.info(f"   - Uploaded documents:")
+        for doc in uploaded_docs:
+            logger.info(f"     * {doc.get('document_group')} / {doc.get('document_subgroup')} / {doc.get('document_name')}")
+    
+    return docs
 
 
 class SignedUrlInput(BaseModel):

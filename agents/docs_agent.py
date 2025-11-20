@@ -78,6 +78,15 @@ Si el usuario pide "manda X por email" o "envía X a [email]":
 - `upload_and_link`: Subir documento y asociarlo a un slot
 - `list_related_facturas`: Listar facturas asociadas a un contrato
 
+**CRÍTICO - CUANDO LISTAS DOCUMENTOS**:
+- `list_docs` devuelve una lista con TODOS los documentos (tanto subidos como pendientes)
+- Cada documento tiene: document_group, document_subgroup, document_name, storage_key
+- Si storage_key tiene valor → documento SUBIDO ✅
+- Si storage_key está vacío/null → documento PENDIENTE ⏳
+- DEBES MOSTRAR **TODOS** los documentos de la lista, organizados por grupo/subgrupo
+- NO filtres la lista - muestra TODO lo que devuelve list_docs
+- Agrupa por document_group (R2B, Promoción, etc.) y muestra cada documento con su status
+
 **Ejemplos**:
 Usuario: "manda el contrato arquitecto a tumai@hotmail.com"
 Tú: 
@@ -90,10 +99,17 @@ Usuario: "sube esta factura al contrato abogado"
 Tú: "✅ He subido la factura y la he asociado al contrato de abogado."
 
 Usuario: "lista los documentos"
-Tú: "📄 Documentos de la propiedad:
-- Contrato arquitecto (subido)
-- Factura arquitecto (subida)
-- Escritura notarial (pendiente)"
+Tú: *[Llamas list_docs y recibes una lista con 50+ documentos]*
+"📄 Documentos de la propiedad:
+
+**R2B**
+- Diseño/Obra: Contrato arquitecto ✅
+- Compra: Señal / Arras ✅
+- Compra: Acuerdo compraventa (pendiente) ⏳
+
+**Promoción**
+- Obra nueva: Contrato obra (pendiente) ⏳
+- Obra nueva: Escritura obra nueva (pendiente) ⏳"
 """
     
     def get_tools(self) -> List:

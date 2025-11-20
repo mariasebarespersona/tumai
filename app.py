@@ -1496,6 +1496,13 @@ async def ui_chat(
                 try:
                     from tools.docs_tools import list_docs
                     docs = list_docs(pid)
+                    
+                    # Log what we're searching for
+                    logger.info(f"🔍 Verifying upload - Searching for:")
+                    logger.info(f"   - document_name: '{proposal['document_name']}'")
+                    logger.info(f"   - document_group: '{proposal['document_group']}'")
+                    logger.info(f"   - document_subgroup: '{proposal.get('document_subgroup', '')}'")
+                    
                     uploaded_doc = next((d for d in docs if d.get("document_name") == proposal["document_name"] and d.get("storage_key")), None)
                     
                     if uploaded_doc:
