@@ -3493,32 +3493,32 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
         
         # Calculate summary metrics
         total = len(feedbacks)
-        positive = len([f for f in feedbacks if f.get("rating") == 1])
-        negative = len([f for f in feedbacks if f.get("rating") == -1])
+        positive = len([f for f in feedbacks if f.get("feedback_type") == "thumbs_up"])
+        negative = len([f for f in feedbacks if f.get("feedback_type") == "thumbs_down"])
         
         satisfaction_rate = (positive / total * 100) if total > 0 else 0
         
-        # Tool accuracy (average across feedbacks that have tool_eval)
+        # Tool accuracy (average tool_selection_score)
         tool_accuracies = [
-            f["tool_eval"]["accuracy"] 
+            f["tool_selection_score"] 
             for f in feedbacks 
-            if f.get("tool_eval") and f["tool_eval"].get("accuracy") is not None
+            if f.get("tool_selection_score") is not None
         ]
         avg_tool_accuracy = (sum(tool_accuracies) / len(tool_accuracies)) if tool_accuracies else None
         
-        # Response quality (average overall score)
+        # Response quality (average response_quality_score)
         response_qualities = [
-            f["response_eval"]["overall"]
+            f["response_quality_score"]
             for f in feedbacks
-            if f.get("response_eval") and "overall" in f["response_eval"]
+            if f.get("response_quality_score") is not None
         ]
         avg_response_quality = (sum(response_qualities) / len(response_qualities)) if response_qualities else None
         
-        # Task success rate
+        # Task success rate (average task_success_score * 100)
         task_successes = [
-            f["task_success_eval"]["success"]
+            f["task_success_score"]
             for f in feedbacks
-            if f.get("task_success_eval") and "success" in f["task_success_eval"]
+            if f.get("task_success_score") is not None
         ]
         task_success_rate = (sum(task_successes) / len(task_successes) * 100) if task_successes else None
         
@@ -3528,11 +3528,11 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
                 "id": f["id"],
                 "created_at": f["created_at"],
                 "agent_name": f["agent_name"],
-                "user_message": f["user_message"][:100] + "..." if len(f["user_message"]) > 100 else f["user_message"],
+                "user_message": f["user_input"][:100] + "..." if len(f.get("user_input", "")) > 100 else f.get("user_input", ""),
                 "comment": f.get("comment")
             }
             for f in feedbacks
-            if f.get("rating") == -1
+            if f.get("feedback_type") == "thumbs_down"
         ][:20]  # Last 20 negative feedbacks
         
         # By agent breakdown
@@ -3542,9 +3542,9 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
         for f in feedbacks:
             agent = f.get("agent_name", "unknown")
             by_agent[agent]["total"] += 1
-            if f.get("rating") == 1:
+            if f.get("feedback_type") == "thumbs_up":
                 by_agent[agent]["positive"] += 1
-            elif f.get("rating") == -1:
+            elif f.get("feedback_type") == "thumbs_down":
                 by_agent[agent]["negative"] += 1
         
         # Calculate satisfaction rate per agent
