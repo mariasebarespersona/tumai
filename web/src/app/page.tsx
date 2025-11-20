@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { mcpExcel } from '@/lib/mcp/client'
 import Spreadsheet from '@/components/Spreadsheet'
+import { FeedbackButtons } from '@/components/FeedbackButtons'
 import type { DragEvent } from 'react'
 // Removed EditableExcel import - using iframe instead
 
@@ -10,6 +11,10 @@ type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
   content: string
+  agentName?: string
+  toolCalls?: any[]
+  toolResults?: any[]
+  userMessage?: string  // Store user message for feedback
 }
 
 export default function ChatPage() {
@@ -165,6 +170,7 @@ export default function ChatPage() {
     if (!input.trim() && files.length === 0) return
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: input }
     setMessages(prev => [...prev, userMessage])
+    const userMessageContent = input  // Store for feedback
     setInput('')
 
     const form = new FormData()
@@ -194,7 +200,15 @@ export default function ChatPage() {
       }
       const data = await resp.json()
       const answer = String(data?.answer ?? '')
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: answer }])
+      setMessages(prev => [...prev, { 
+        id: crypto.randomUUID(), 
+        role: 'assistant', 
+        content: answer,
+        agentName: data?.agent_name || 'MainAgent',
+        toolCalls: data?.tool_calls || [],
+        toolResults: data?.tool_results || [],
+        userMessage: userMessageContent  // Store user message for feedback
+      }])
       
       // Auto-reload Numbers table if agent confirms a value update or deletion
       if (excelTemplate && propertyId) {
@@ -1551,7 +1565,7 @@ export default function ChatPage() {
           </div>
         ) : (
           <div className="space-y-5">
-            {messages.map(m => (
+            {messages.map((m, idx) => (
               <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div className={
                   'max-w-[85%] whitespace-pre-wrap rounded-3xl px-6 py-4 nature-shadow-lg ' +
@@ -1560,6 +1574,19 @@ export default function ChatPage() {
                     : 'glass border-2 border-[color:var(--c-green-200)] text-[color:var(--c-green-900)]')
                 }>
                   {m.role === 'assistant' ? renderMessageContent(m.content) : m.content}
+                  
+                  {/* Add feedback buttons for assistant messages */}
+                  {m.role === 'assistant' && (
+                    <FeedbackButtons
+                      messageId={m.id}
+                      agentName={m.agentName || 'MainAgent'}
+                      userMessage={m.userMessage || (idx > 0 && messages[idx - 1]?.role === 'user' ? messages[idx - 1].content : '')}
+                      agentResponse={m.content}
+                      toolCalls={m.toolCalls}
+                      toolResults={m.toolResults}
+                      propertyId={propertyId}
+                    />
+                  )}
                 </div>
               </div>
             ))}

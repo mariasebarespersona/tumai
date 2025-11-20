@@ -3206,4 +3206,255 @@ async def numbers_chart_sens(property_id: str = Form(...), precio_vec_json: str 
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# ============================================================================
+# EVALUATION / FEEDBACK ENDPOINTS
+# ============================================================================
+
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    rating: int  # -1 or 1
+    comment: Optional[str] = None
+    property_id: Optional[str] = None
+    agent_name: str
+    user_message: str
+    agent_response: str
+    tool_calls: list = []
+    tool_results: list = []
+
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """
+    Submit user feedback (thumbs up/down + optional comment).
+    
+    Triggers async evaluation pipeline to compute:
+    - Tool selection accuracy
+    - Response quality (LLM-as-Judge)
+    - Task success (DB verification)
+    """
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"[Feedback] Received feedback: message_id={req.message_id}, rating={req.rating}")
+        
+        # 1. Store feedback in database
+        feedback_data = {
+            "message_id": req.message_id,
+            "rating": req.rating,
+            "comment": req.comment,
+            "property_id": req.property_id,
+            "agent_name": req.agent_name,
+            "user_message": req.user_message,
+            "agent_response": req.agent_response,
+            "tool_calls": req.tool_calls,
+            "tool_results": req.tool_results,
+            "created_at": datetime.now().isoformat()
+        }
+        
+        result = sb.table("agent_feedback").insert(feedback_data).execute()
+        
+        if not result.data or len(result.data) == 0:
+            logger.error("[Feedback] Failed to insert feedback")
+            return JSONResponse(
+                {"ok": False, "error": "Failed to store feedback"},
+                status_code=500
+            )
+        
+        feedback_id = result.data[0]["id"]
+        logger.info(f"[Feedback] Stored feedback: {feedback_id}")
+        
+        # 2. Trigger async evaluation pipeline (background task)
+        try:
+            from tools.eval_pipeline import trigger_eval_pipeline
+            trigger_eval_pipeline(feedback_id)
+            logger.info(f"[Feedback] Triggered eval pipeline for {feedback_id}")
+        except Exception as e:
+            logger.warning(f"[Feedback] Could not trigger eval pipeline: {e}")
+            # Don't fail the request if eval pipeline fails
+        
+        # 3. Return confirmation
+        return JSONResponse({
+            "ok": True,
+            "feedback_id": feedback_id,
+            "message": "¡Gracias por tu feedback! 🙏"
+        })
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Feedback] Error: {e}", exc_info=True)
+        return JSONResponse(
+            {"ok": False, "error": str(e)},
+            status_code=500
+        )
+
+
+@app.get("/api/dashboard/evals")
+async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str] = None):
+    """
+    Get evaluation metrics for dashboard.
+    
+    Returns:
+    - summary: KPIs (satisfaction rate, tool accuracy, response quality, task success rate)
+    - trends: Time-series data for charts
+    - recent_negative: List of recent negative feedback
+    - by_agent: Metrics broken down by agent
+    """
+    try:
+        import logging
+        from datetime import timedelta
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"[Dashboard] Fetching eval metrics (last {time_range_hours}h)")
+        
+        # Calculate cutoff time
+        cutoff = datetime.now() - timedelta(hours=time_range_hours)
+        
+        # Build query
+        query = sb.table("agent_feedback").select("*").gte("created_at", cutoff.isoformat())
+        
+        if property_id:
+            query = query.eq("property_id", property_id)
+        
+        result = query.order("created_at", desc=True).execute()
+        
+        feedbacks = result.data or []
+        
+        if len(feedbacks) == 0:
+            return JSONResponse({
+                "summary": {
+                    "total_feedbacks": 0,
+                    "satisfaction_rate": None,
+                    "avg_tool_accuracy": None,
+                    "avg_response_quality": None,
+                    "task_success_rate": None
+                },
+                "trends": [],
+                "recent_negative": [],
+                "by_agent": {}
+            })
+        
+        # Calculate summary metrics
+        total = len(feedbacks)
+        positive = len([f for f in feedbacks if f.get("rating") == 1])
+        negative = len([f for f in feedbacks if f.get("rating") == -1])
+        
+        satisfaction_rate = (positive / total * 100) if total > 0 else 0
+        
+        # Tool accuracy (average across feedbacks that have tool_eval)
+        tool_accuracies = [
+            f["tool_eval"]["accuracy"] 
+            for f in feedbacks 
+            if f.get("tool_eval") and f["tool_eval"].get("accuracy") is not None
+        ]
+        avg_tool_accuracy = (sum(tool_accuracies) / len(tool_accuracies)) if tool_accuracies else None
+        
+        # Response quality (average overall score)
+        response_qualities = [
+            f["response_eval"]["overall"]
+            for f in feedbacks
+            if f.get("response_eval") and "overall" in f["response_eval"]
+        ]
+        avg_response_quality = (sum(response_qualities) / len(response_qualities)) if response_qualities else None
+        
+        # Task success rate
+        task_successes = [
+            f["task_success_eval"]["success"]
+            for f in feedbacks
+            if f.get("task_success_eval") and "success" in f["task_success_eval"]
+        ]
+        task_success_rate = (sum(task_successes) / len(task_successes) * 100) if task_successes else None
+        
+        # Recent negative feedback
+        recent_negative = [
+            {
+                "id": f["id"],
+                "created_at": f["created_at"],
+                "agent_name": f["agent_name"],
+                "user_message": f["user_message"][:100] + "..." if len(f["user_message"]) > 100 else f["user_message"],
+                "comment": f.get("comment")
+            }
+            for f in feedbacks
+            if f.get("rating") == -1
+        ][:20]  # Last 20 negative feedbacks
+        
+        # By agent breakdown
+        from collections import defaultdict
+        by_agent = defaultdict(lambda: {"total": 0, "positive": 0, "negative": 0})
+        
+        for f in feedbacks:
+            agent = f.get("agent_name", "unknown")
+            by_agent[agent]["total"] += 1
+            if f.get("rating") == 1:
+                by_agent[agent]["positive"] += 1
+            elif f.get("rating") == -1:
+                by_agent[agent]["negative"] += 1
+        
+        # Calculate satisfaction rate per agent
+        by_agent_formatted = {}
+        for agent, stats in by_agent.items():
+            by_agent_formatted[agent] = {
+                **stats,
+                "satisfaction_rate": (stats["positive"] / stats["total"] * 100) if stats["total"] > 0 else 0
+            }
+        
+        return JSONResponse({
+            "summary": {
+                "total_feedbacks": total,
+                "positive_count": positive,
+                "negative_count": negative,
+                "satisfaction_rate": round(satisfaction_rate, 1),
+                "avg_tool_accuracy": round(avg_tool_accuracy, 3) if avg_tool_accuracy is not None else None,
+                "avg_response_quality": round(avg_response_quality, 3) if avg_response_quality is not None else None,
+                "task_success_rate": round(task_success_rate, 1) if task_success_rate is not None else None
+            },
+            "trends": [],  # TODO: Add time-series data
+            "recent_negative": recent_negative,
+            "by_agent": by_agent_formatted,
+            "time_range_hours": time_range_hours
+        })
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Dashboard] Error: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=500
+        )
+
+
+@app.get("/api/feedback/{feedback_id}")
+async def get_feedback_detail(feedback_id: str):
+    """
+    Get detailed view of a single feedback entry.
+    
+    Includes all evaluation results.
+    """
+    try:
+        result = sb.table("agent_feedback").select("*").eq("id", feedback_id).execute()
+        
+        if not result.data or len(result.data) == 0:
+            return JSONResponse(
+                {"error": "Feedback not found"},
+                status_code=404
+            )
+        
+        return JSONResponse(result.data[0])
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"[Feedback Detail] Error: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": str(e)},
+            status_code=500
+        )
+
+
 
