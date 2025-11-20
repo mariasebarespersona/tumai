@@ -1,0 +1,32 @@
+# Python files and backend
+__pycache__/
+*.py
+*.pyc
+.venv/
+venv/
+agents/
+router/
+tools/
+prompts/
+migrations/
+scripts/
+vendor/
+*.db
+*.db-shm
+*.db-wal
+*.log
+backend.log
+
+# Data and logs
+data/
+logs/
+
+# Python requirements
+requirements.txt
+env_loader.py
+agentic.py
+app.py
+
+# Keep only web directory for Vercel
+!web/
+

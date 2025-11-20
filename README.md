@@ -22,18 +22,44 @@ It helps teams organize documentation, perform financial calculations, generate 
 
 ## 🚀 Public Demo Deployment
 
-Click to deploy both backend (FastAPI) and frontend (Next.js) on Render using the provided Blueprint:
+### Quick Deploy Options
+
+#### Option 1: Vercel (Frontend) + Render (Backend) - **Recommended**
+
+**Frontend on Vercel** (Next.js - serverless, edge-optimized):
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/mariasebarespersona/tumai&env=NEXT_PUBLIC_API_URL&envDescription=Backend%20API%20URL%20from%20Render&project-name=rama-agentic-ai&repository-name=rama-agentic-ai&root-directory=web)
+
+**Backend on Render** (FastAPI - stateful server required):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mariasebarespersona/tumai)
+
+**Setup Steps**:
+1. **Deploy Backend First**: Click Render button, add `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `ALLOW_ALL_CORS=1`
+2. **Copy Backend URL**: After Render deployment, copy the URL (e.g., `https://rama-api-xxx.onrender.com`)
+3. **Deploy Frontend**: Click Vercel button, set `NEXT_PUBLIC_API_URL` to your backend URL
+4. **Done!** Visit your Vercel URL to start using the app
+
+📖 **Detailed Guide**: See [DEPLOY_QUICKSTART.md](DEPLOY_QUICKSTART.md) for 5-minute setup or [docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md) for complete documentation.
+
+#### Option 2: Both on Render (All-in-One)
+
+Click to deploy both backend and frontend on Render:
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mariasebarespersona/tumai)
 
 After clicking:
-- For the backend service (`rama-backend`), add at least `OPENAI_API_KEY`. Optionally add `SUPABASE_URL`, `SUPABASE_KEY`, `DATABASE_URL` (for persistence), and SMTP variables if you want email sending.
-- The frontend service (`rama-frontend`) will automatically get `BACKEND_URL` pointing to the backend URL.
-- Once both services are live, share the frontend URL (e.g., `https://rama-frontend.onrender.com`) with recruiters.
+- For `rama-backend`: add `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, `ALLOW_ALL_CORS=1`
+- For `rama-frontend`: environment variables are auto-configured
+- Share the frontend URL (e.g., `https://rama-frontend.onrender.com`)
 
-Alternative (Vercel + Render):
-- Deploy backend on Render (as above) and copy its URL.
-- Deploy frontend on Vercel (root: `web/`) and set `BACKEND_URL` in Vercel Project Settings → Environment Variables to the backend URL.
+### Why Vercel for Frontend?
+
+- ⚡ **Faster global CDN**: Edge deployment for <100ms response times
+- 🚀 **Automatic optimization**: Image optimization, code splitting, ISR
+- 💰 **Better free tier**: 100GB bandwidth vs Render's sleep-after-15min
+- 🔄 **Instant deploys**: <30s deploy time with zero-downtime rollouts
+- 📊 **Built-in analytics**: Web Vitals tracking (Pro plan)
 
 ---
 
