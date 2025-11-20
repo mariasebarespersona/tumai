@@ -1002,7 +1002,9 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
 app = FastAPI(title="RAMA AI Backend")
 
 # Instrument FastAPI with Logfire (auto-logs all requests)
-logfire.instrument_fastapi(app)
+# TEMPORARILY DISABLED due to dependency conflicts with opentelemetry-instrumentation-fastapi
+# TODO: Re-enable after resolving websockets/httpx version conflicts
+# logfire.instrument_fastapi(app)
 
 cors_env = os.getenv("WEB_BASE", "http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3005,http://localhost:3006")
 allow_all = os.getenv("ALLOW_ALL_CORS", "0") == "1" or cors_env.strip() == "*"
