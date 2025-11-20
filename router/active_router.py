@@ -100,11 +100,15 @@ class ActiveRouter:
             return ("numbers.send_email", 0.90, "NumbersAgent")
         
         # ========== DOCS OPERATIONS ==========
-        # List documents (qué documentos he subido, lista documentos, mostrar documentos)
-        if any(phrase in s for phrase in ["qué documentos", "que documentos", "lista documentos", "mostrar documentos", "listar documentos"]):
-            return ("docs.list", 0.92, "DocsAgent")
-        if "documentos" in s and any(w in s for w in ["subido", "subidos", "tengo", "hay", "cuales", "cuáles"]):
-            return ("docs.list", 0.90, "DocsAgent")
+        # List documents (PRIORITY: must catch all variations)
+        # Direct list requests: "lista documentos", "muestrame documentos", "ver documentos"
+        if "documentos" in s or "documento" in s:
+            # List/show commands
+            if any(w in s for w in ["lista", "listar", "mostrar", "muestrame", "ver", "dame", "enseña", "enséñame"]):
+                return ("docs.list", 0.95, "DocsAgent")
+            # Query about documents: "qué documentos", "cuáles documentos", "tengo documentos"
+            if any(w in s for w in ["qué", "que", "cuales", "cuáles", "tengo", "hay", "subido", "subidos"]):
+                return ("docs.list", 0.92, "DocsAgent")
         
         # List missing/pending documents
         if "documentos" in s and any(w in s for w in ["faltan", "falta", "pendientes", "por subir"]):
