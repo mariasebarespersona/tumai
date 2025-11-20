@@ -1490,7 +1490,37 @@ async def ui_chat(
                 
                 # Confirm with property name AND property_id so user knows where it was uploaded
                 logger.info(f"✅ Upload confirmed: document='{proposal['document_name']}', property='{prop_name}', property_id={pid}")
-                return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}' (ID: {pid[:8]}...).")
+                
+                # CRITICAL: Verify document is actually in the database with detailed logging
+                verification_status = "⚠️ sin verificar"
+                try:
+                    from tools.docs_tools import list_docs
+                    docs = list_docs(pid)
+                    uploaded_doc = next((d for d in docs if d.get("document_name") == proposal["document_name"] and d.get("storage_key")), None)
+                    
+                    if uploaded_doc:
+                        verification_status = f"✅ VERIFICADO en DB (storage_key: {uploaded_doc.get('storage_key')})"
+                        logger.info(f"✅ VERIFICATION SUCCESS: Document '{proposal['document_name']}' found in DB with storage_key")
+                        logger.info(f"   - document_group: {uploaded_doc.get('document_group')}")
+                        logger.info(f"   - document_subgroup: {uploaded_doc.get('document_subgroup')}")
+                        logger.info(f"   - document_name: {uploaded_doc.get('document_name')}")
+                        logger.info(f"   - storage_key: {uploaded_doc.get('storage_key')}")
+                    else:
+                        verification_status = "❌ NO ENCONTRADO en DB"
+                        logger.error(f"❌ VERIFICATION FAILED: Document '{proposal['document_name']}' NOT found in DB after upload!")
+                        logger.error(f"   - Expected: document_name='{proposal['document_name']}'")
+                        logger.error(f"   - Document group: {proposal['document_group']}")
+                        logger.error(f"   - Document subgroup: {proposal.get('document_subgroup', '')}")
+                        logger.error(f"   - Total docs in DB: {len(docs)}")
+                        logger.error(f"   - Docs with storage_key: {len([d for d in docs if d.get('storage_key')])}")
+                        
+                        # Log all document names for debugging
+                        logger.error(f"   - All docs in DB: {[d.get('document_name') for d in docs]}")
+                except Exception as e:
+                    verification_status = f"❌ ERROR verificando: {e}"
+                    logger.error(f"❌ Error during verification: {e}", exc_info=True)
+                
+                return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'. {verification_status}")
             except Exception as e:
                 STATE["pending_proposal"] = None
                 save_sessions()

@@ -34,6 +34,12 @@ Tu trabajo es:
 3. **Listar documentos** de la propiedad
 4. **Gestionar facturas** asociadas a contratos
 
+**CRÍTICO - DESPUÉS DE CADA SUBIDA**:
+- SIEMPRE llama a `list_docs` después de subir un documento para verificar que se guardó
+- Confirma al usuario: "✅ Documento subido y guardado: [nombre]"
+- Si `list_docs` muestra el documento con storage_key, significa que se guardó correctamente
+- Si NO aparece con storage_key, avisa: "⚠️ Hubo un problema guardando el documento"
+
 **FLUJO PARA ENVIAR DOCUMENTOS POR EMAIL**:
 Si el usuario pide "manda X por email" o "envía X a [email]":
 1. Usa `list_docs` para verificar si el documento existe (tiene storage_key)
