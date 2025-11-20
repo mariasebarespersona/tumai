@@ -1,3 +1,52 @@
+services:
+  # Python FastAPI backend
+  - type: web
+    name: rama-api
+    env: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      # Easiest CORS for first deploy; tighten later by setting WEB_BASE instead
+      - key: ALLOW_ALL_CORS
+        value: "1"
+      - key: OPENAI_API_KEY
+        fromSecret: OPENAI_API_KEY
+      - key: SUPABASE_URL
+        fromSecret: SUPABASE_URL
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromSecret: SUPABASE_SERVICE_ROLE_KEY
+      - key: LOGFIRE_TOKEN
+        fromSecret: LOGFIRE_TOKEN
+
+  # Next.js frontend
+  - type: web
+    name: rama-web
+    env: node
+    plan: free
+    buildCommand: |
+      cd web
+      npm ci || npm i
+      npm run build
+    startCommand: |
+      cd web
+      npm run start -- -p $PORT
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      # Frontend calls backend via this public URL
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          name: rama-api
+          type: web
+          property: url
+
 # Render Blueprint - Deploys backend (FastAPI) and frontend (Next.js)
 services:
   - type: web
