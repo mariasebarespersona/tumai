@@ -148,8 +148,13 @@ class ListDocsInput(BaseModel):
 
 @tool("list_docs")
 def list_docs_tool(property_id: str) -> List[Dict]:
-    """List all document rows for this property. Each row has: document_group, document_subgroup, document_name, storage_key, metadata. 
-    IMPORTANT: Check storage_key to determine status - if storage_key has value → document is UPLOADED, if empty/null → PENDING."""
+    """List all document rows for this property in REAL-TIME from the database.
+    
+    CRITICAL: ALWAYS call this tool when user asks to list/show/see documents. DO NOT rely on memory or previous calls.
+    
+    Returns: Each row has: document_group, document_subgroup, document_name, storage_key, metadata.
+    - If storage_key has value → document is UPLOADED ✅
+    - If storage_key is empty/null → document is PENDING ⏳"""
     import logging
     logger = logging.getLogger(__name__)
     
