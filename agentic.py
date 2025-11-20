@@ -1343,15 +1343,45 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     # Sin guardias: dejamos que el LLM decida con el SYSTEM_PROMPT reforzado
 
     # Modelo principal para planificación y respuestas
+    import time as _time
     try:
         if messages and isinstance(messages[-1], ToolMessage):
             # Respuesta final (texto)
             llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800)
+            _llm_start = _time.time()
             ai = llm.invoke(msgs)
+            _llm_latency = int((_time.time() - _llm_start) * 1000)
         else:
             # Planificación con tools
             llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
+            _llm_start = _time.time()
             ai = llm.invoke(msgs)
+            _llm_latency = int((_time.time() - _llm_start) * 1000)
+        
+        # Track LLM metrics
+        try:
+            from tools.metrics_collector import record_llm_call
+            _prompt_tokens = 0
+            _completion_tokens = 0
+            _cost_usd = 0.0
+            
+            if hasattr(ai, "response_metadata") and "token_usage" in ai.response_metadata:
+                _usage = ai.response_metadata["token_usage"]
+                _prompt_tokens = _usage.get("prompt_tokens", 0)
+                _completion_tokens = _usage.get("completion_tokens", 0)
+                # GPT-4o pricing
+                _cost_usd = (_prompt_tokens * 0.0000025) + (_completion_tokens * 0.00001)
+            
+            record_llm_call(
+                model="gpt-4o",
+                prompt_tokens=_prompt_tokens,
+                completion_tokens=_completion_tokens,
+                cost_usd=_cost_usd,
+                latency_ms=_llm_latency,
+                agent="MainAgent"
+            )
+        except Exception as _e:
+            logger.warning(f"[metrics] Failed to record LLM call: {_e}")
             # Log-only: validate tool calls against registry
             try:
                 if os.getenv("ENABLE_TOOL_CONTRACTS", "1") == "1":
