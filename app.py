@@ -3477,6 +3477,15 @@ async def dashboard_evals(time_range_hours: int = 24, property_id: Optional[str]
         
         feedbacks = result.data or []
         
+        # DEBUG: Log evaluation columns for recent feedbacks
+        logger.info(f"[Dashboard DEBUG] Retrieved {len(feedbacks)} feedbacks")
+        if feedbacks:
+            recent = feedbacks[0]
+            logger.info(f"[Dashboard DEBUG] Most recent feedback columns: {list(recent.keys())}")
+            logger.info(f"[Dashboard DEBUG] tool_selection_score={recent.get('tool_selection_score')}, response_quality_score={recent.get('response_quality_score')}")
+            evals_count = len([f for f in feedbacks if f.get('tool_selection_score') is not None or f.get('response_quality_score') is not None])
+            logger.info(f"[Dashboard DEBUG] Feedbacks with evaluations: {evals_count}/{len(feedbacks)}")
+        
         if len(feedbacks) == 0:
             return JSONResponse({
                 "summary": {
