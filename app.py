@@ -1032,6 +1032,15 @@ async def add_request_id(request, call_next):
     try:
         _logger.info(f"[metrics] {request.method} {request.url.path} status={response.status_code} ms={ms} rid={rid}")
         # Logfire automatically logs all requests via instrument_fastapi()
+        
+        # Also record in local metrics collector for dashboard
+        from tools.metrics_collector import record_request
+        record_request(
+            endpoint=request.url.path,
+            method=request.method,
+            status_code=response.status_code,
+            latency_ms=ms
+        )
     except Exception:
         pass
     response.headers["x-request-id"] = rid
@@ -1072,16 +1081,22 @@ async def healthcheck():
 # Logfire Metrics Dashboard API
 @app.get("/api/dashboard/metrics")
 async def get_dashboard_metrics(time_range: str = "1h"):
-    """Get all metrics from Logfire for custom dashboard"""
+    """Get all metrics for custom dashboard (from local collector)"""
     try:
-        from tools.logfire_client import get_logfire_client
+        from tools.metrics_collector import get_metrics
         
-        client = get_logfire_client()
-        data = client.get_dashboard_summary(time_range)
+        # Parse time range (e.g., "1h" -> 1, "24h" -> 24)
+        hours = 1
+        if time_range.endswith("h"):
+            hours = int(time_range[:-1])
+        elif time_range.endswith("d"):
+            hours = int(time_range[:-1]) * 24
+        
+        data = get_metrics(time_range_hours=hours)
         
         return JSONResponse({"ok": True, "data": data})
     except Exception as e:
-        logger.error(f"Error fetching Logfire metrics: {e}", exc_info=True)
+        logger.error(f"Error fetching metrics: {e}", exc_info=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @app.get("/api/dashboard/api-metrics")
