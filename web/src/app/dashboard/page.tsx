@@ -27,12 +27,12 @@ export default function DashboardPage() {
           </div>
           
           <a
-            href="https://logfire-eu.pydantic.dev/mariasebarespersona/rama-ai"
+            href="https://logfire-eu.pydantic.dev/mariasebarespersona/rama-ai/live"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors"
           >
-            🔥 Abrir Dashboard de Logfire
+            🔥 Ver Datos en Vivo (Live)
             <svg
               className="w-4 h-4"
               fill="none"
@@ -179,12 +179,12 @@ export default function DashboardPage() {
                   Incluye gráficos interactivos, filtros avanzados y análisis en tiempo real.
                 </p>
                 <a
-                  href="https://logfire-eu.pydantic.dev/mariasebarespersona/rama-ai"
+                  href="https://logfire-eu.pydantic.dev/mariasebarespersona/rama-ai/live"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl"
                 >
-                  🔥 Ver Dashboard Completo en Logfire
+                  🔥 Ver Eventos en Tiempo Real (Live)
                   <svg
                     className="w-5 h-5"
                     fill="none"
@@ -213,13 +213,12 @@ export default function DashboardPage() {
             <div className="flex-1">
               <p className="text-sm text-gray-700">
                 <strong className="text-blue-900">Tu proyecto de Logfire:</strong> 
-                <a href="https://logfire-eu.pydantic.dev/mariasebarespersona/rama-ai" target="_blank" rel="noopener noreferrer" className="ml-2 text-blue-600 hover:text-blue-800 underline font-mono text-xs">
+                <a href="https://logfire-eu.pydantic.dev/mariasebarespersona/rama-ai/live" target="_blank" rel="noopener noreferrer" className="ml-2 text-blue-600 hover:text-blue-800 underline font-mono text-xs">
                   mariasebarespersona/rama-ai
                 </a>
               </p>
               <p className="text-xs text-gray-600 mt-1">
-                💡 El dashboard se genera automáticamente con tus datos. No necesitas configurar nada. 
-                Los datos se retienen por 30 días en el plan gratuito.
+                💡 Los datos aparecen automáticamente en la vista "Live". Haz algunas acciones en tu app (enviar mensajes, subir documentos) y verás los eventos aparecer en tiempo real.
               </p>
             </div>
           </div>
