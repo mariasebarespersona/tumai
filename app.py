@@ -2731,7 +2731,35 @@ async def ui_chat(
     extra = {"transcript": transcript} if transcript else None
     print(f"[DEBUG] Final response extra: {extra}")
     return make_response(answer or "(sin respuesta)", extra)
-# --- Minimal Numbers Agent endpoints for testing and UI integration ---
+
+# --- REST API endpoints for direct data access (not through chat) ---
+
+@app.get("/api/documents")
+async def get_documents_api(property_id: str):
+    """Get all documents for a property. Returns both uploaded and pending documents."""
+    try:
+        from tools.docs_tools import list_docs
+        logger.info(f"[API] GET /api/documents for property_id: {property_id}")
+        
+        docs = list_docs(property_id)
+        
+        # Separate uploaded vs pending
+        uploaded = [d for d in docs if d.get("storage_key")]
+        pending = [d for d in docs if not d.get("storage_key")]
+        
+        logger.info(f"[API] Returning {len(uploaded)} uploaded, {len(pending)} pending documents")
+        
+        return JSONResponse({
+            "ok": True,
+            "property_id": property_id,
+            "uploaded": uploaded,
+            "pending": pending,
+            "total": len(docs)
+        })
+    except Exception as e:
+        logger.error(f"[API] Error fetching documents: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
 @app.get("/api/numbers")
 async def get_numbers_api(property_id: str, template_key: str | None = None):
     """Get all numbers for a property. Returns the template structure even if values are NULL."""

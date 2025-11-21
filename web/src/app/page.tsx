@@ -31,6 +31,10 @@ export default function ChatPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  
+  // Document list state
+  const [documents, setDocuments] = useState<{uploaded: any[], pending: any[]}>({uploaded: [], pending: []})
+  const [documentsLoading, setDocumentsLoading] = useState(false)
 
   // Sync with backend on mount - send a ping to get current property_id
   useEffect(() => {
@@ -84,6 +88,39 @@ export default function ChatPage() {
       localStorage.setItem('property_name', propertyName)
     }
   }, [propertyId, propertyName])
+
+  // Fetch documents when property changes
+  const fetchDocuments = useCallback(async (pid: string) => {
+    if (!pid) return
+    setDocumentsLoading(true)
+    try {
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
+      const resp = await fetch(`${BACKEND_URL}/api/documents?property_id=${pid}`)
+      const data = await resp.json()
+      if (data.ok) {
+        setDocuments({
+          uploaded: data.uploaded || [],
+          pending: data.pending || []
+        })
+        console.log(`[Documents] Fetched ${data.uploaded?.length || 0} uploaded, ${data.pending?.length || 0} pending`)
+      } else {
+        console.error('[Documents] Error:', data.error)
+      }
+    } catch (e) {
+      console.error('[Documents] Failed to fetch:', e)
+    } finally {
+      setDocumentsLoading(false)
+    }
+  }, [])
+
+  // Fetch documents when property_id changes
+  useEffect(() => {
+    if (propertyId) {
+      fetchDocuments(propertyId)
+    } else {
+      setDocuments({uploaded: [], pending: []})
+    }
+  }, [propertyId, fetchDocuments])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -209,6 +246,18 @@ export default function ChatPage() {
         toolResults: data?.tool_results || [],
         userMessage: userMessageContent  // Store user message for feedback
       }])
+      
+      // Auto-reload documents if agent confirms a document was uploaded
+      if (propertyId && files.length > 0) {
+        const uploadKeywords = ['subido', 'guardado', 'documento subido', 'he subido', 'documento guardado']
+        const answerLower = answer.toLowerCase()
+        if (uploadKeywords.some(keyword => answerLower.includes(keyword))) {
+          console.log('[Documents] 🔄 Detected document upload in chat response, reloading documents...')
+          setTimeout(() => {
+            fetchDocuments(propertyId)
+          }, 500)
+        }
+      }
       
       // Auto-reload Numbers table if agent confirms a value update or deletion
       if (excelTemplate && propertyId) {
@@ -842,11 +891,11 @@ export default function ChatPage() {
   }, [])
 
   const filePreviews = useMemo(() => files.map((f, i) => (
-    <div key={i} className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[color:var(--c-green-300)] glass px-4 py-3 text-sm nature-shadow">
-      <span className="truncate max-w-[16rem] font-medium text-[color:var(--c-green-800)]" title={f.name}>
+    <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--bg-surface)] px-3 py-2 text-sm shadow-sm">
+      <span className="truncate max-w-[16rem] font-medium text-[color:var(--text-primary)]" title={f.name}>
         📄 {f.name}
       </span>
-      <button onClick={() => removeFile(i)} className="rounded-xl px-3 py-1.5 text-[color:var(--c-green-700)] hover:bg-[color:var(--c-green-200)] font-semibold transition-all hover:scale-105">
+      <button onClick={() => removeFile(i)} className="rounded-md px-2 py-1 text-[color:var(--text-tertiary)] hover:bg-[color:var(--stone-100)] transition-colors">
         ✕
       </button>
     </div>
@@ -871,7 +920,7 @@ export default function ChatPage() {
       let m: RegExpExecArray | null
       while ((m = boldRegex.exec(s)) !== null) {
         if (m.index > lastIndex) bits.push(s.slice(lastIndex, m.index))
-        bits.push(<strong key={`b-${m.index}`} className="font-semibold">{m[1]}</strong>)
+        bits.push(<strong key={`b-${m.index}`} className="font-bold text-[color:var(--text-primary)]">{m[1]}</strong>)
         lastIndex = m.index + m[0].length
       }
       if (lastIndex < s.length) bits.push(s.slice(lastIndex))
@@ -888,13 +937,13 @@ export default function ChatPage() {
         if (!listType || listItems.length === 0) return
         if (listType === 'ul') {
           out.push(
-            <ul key={`ul-${out.length}`} className="list-disc pl-6 space-y-1">
+            <ul key={`ul-${out.length}`} className="list-disc pl-6 space-y-1 text-[color:var(--text-secondary)] marker:text-[color:var(--stone-400)]">
               {listItems.map((li, i) => (<li key={i}>{renderInline(li)}</li>))}
             </ul>
           )
         } else {
           out.push(
-            <ol key={`ol-${out.length}`} className="list-decimal pl-6 space-y-1">
+            <ol key={`ol-${out.length}`} className="list-decimal pl-6 space-y-1 text-[color:var(--text-secondary)] marker:text-[color:var(--stone-400)]">
               {listItems.map((li, i) => (<li key={i}>{renderInline(li)}</li>))}
             </ol>
           )
@@ -905,12 +954,12 @@ export default function ChatPage() {
       for (const raw of lines) {
         const line = raw.trimEnd()
         if (!line.trim()) { flush(); out.push(<div key={`sp-${out.length}`} className="h-2" />); continue }
-        if (line.startsWith('### ')) { flush(); out.push(<div key={`h3-${out.length}`} className="mt-3 mb-2 text-[color:var(--c-green-800)] font-extrabold text-[18px]">{renderInline(line.slice(4))}</div>); continue }
-        if (line.startsWith('## '))  { flush(); out.push(<div key={`h2-${out.length}`} className="mt-3 mb-2 text-[color:var(--c-green-800)] font-extrabold text-[20px]">{renderInline(line.slice(3))}</div>); continue }
+        if (line.startsWith('### ')) { flush(); out.push(<div key={`h3-${out.length}`} className="mt-4 mb-2 text-[color:var(--text-primary)] font-serif font-bold text-lg">{renderInline(line.slice(4))}</div>); continue }
+        if (line.startsWith('## '))  { flush(); out.push(<div key={`h2-${out.length}`} className="mt-5 mb-3 text-[color:var(--text-primary)] font-serif font-bold text-xl border-b border-[color:var(--border-subtle)] pb-1">{renderInline(line.slice(3))}</div>); continue }
         if (/^\d+\./.test(line)) { if (listType !== 'ol') { flush(); listType = 'ol' } listItems.push(line.replace(/^\d+\.\s*/, '')); continue }
         if (line.startsWith('- ')) { if (listType !== 'ul') { flush(); listType = 'ul' } listItems.push(line.slice(2)); continue }
         flush();
-        out.push(<p key={`p-${out.length}`} className="leading-relaxed">{renderInline(line)}</p>)
+        out.push(<p key={`p-${out.length}`} className="leading-relaxed text-[color:var(--text-secondary)] mb-2 last:mb-0">{renderInline(line)}</p>)
       }
       flush()
       return out
@@ -919,8 +968,8 @@ export default function ChatPage() {
     // Callout: emphasize the "choose one of II/III/IV" rule whenever present
     if (/elegir\s+una\s+entre\s+ii\/iii\/iv/i.test(processedText)) {
       nodes.push(
-        <div key="callout-optional" className="mb-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 font-semibold flex items-start gap-3 nature-shadow">
-          <span>⚠️</span>
+        <div key="callout-optional" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm flex items-start gap-3 shadow-sm">
+          <span className="text-amber-600 mt-0.5">⚠️</span>
           <span>Completa SOLO UNA de las secciones opcionales: II, III o IV. Dime cuál y te guiaré paso a paso.</span>
         </div>
       )
@@ -934,7 +983,7 @@ export default function ChatPage() {
       if (isImg) {
         nodes.push(
           <div key={`img-${i}`} className="mt-3 mb-3">
-            <img src={token} alt="gráfico" className="max-w-full max-h-[500px] rounded-xl border border-[color:var(--c-green-200)] shadow-lg" />
+            <img src={token} alt="gráfico" className="max-w-full max-h-[400px] rounded-lg border border-[color:var(--border-subtle)] shadow-sm" />
           </div>
         )
       } else if (isDoc) {
@@ -947,10 +996,10 @@ export default function ChatPage() {
               download={filename}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white font-semibold hover:scale-105 transition-all nature-shadow hover:shadow-xl"
+              className="inline-flex items-center gap-3 px-4 py-2.5 rounded-lg border border-[color:var(--border-subtle)] bg-white hover:bg-[color:var(--stone-50)] text-[color:var(--text-primary)] transition-colors shadow-sm group"
             >
-              <span>📄</span>
-              <span>Descargar {ext}</span>
+              <span className="p-1.5 rounded bg-[color:var(--stone-100)] text-[color:var(--text-tertiary)] group-hover:text-[color:var(--text-primary)]">📄</span>
+              <span className="font-medium text-sm">Descargar {ext}</span>
             </a>
           </div>
         )
@@ -964,31 +1013,23 @@ export default function ChatPage() {
   const ExcelPanel = useMemo(() => {
     if (!excelTemplate) return null
     return (
-      <div className="rounded-3xl border-2 border-[color:var(--c-green-400)] bg-white/95 backdrop-blur-sm shadow-2xl overflow-hidden transition-all duration-300 hover:shadow-3xl flex flex-col h-auto max-h-[80vh] min-h-0">
+      <div className="flex flex-col h-full rounded-xl border border-[color:var(--border-subtle)] bg-white shadow-sm overflow-hidden">
         {/* Header with gradient and better styling */}
-        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white flex-shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border-subtle)] bg-[color:var(--stone-50)]">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
-              <span className="text-2xl">📊</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-white shadow-sm text-lg border border-[color:var(--border-subtle)]">
+              📊
             </div>
             <div>
-              <div className="font-bold text-lg">Excel — {excelTemplate}</div>
-              <div className="text-xs text-white/80 mt-0.5">Actualización en tiempo real vía chat</div>
+              <div className="font-serif font-bold text-[color:var(--text-primary)]">Excel — {excelTemplate}</div>
+              <div className="text-[10px] uppercase tracking-wider text-[color:var(--text-tertiary)]">Edición en tiempo real</div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-1 bg-white/20 rounded-lg px-1 py-0.5">
-              <button onClick={() => setZoom(z => Math.max(0.4, Math.round((z-0.1)*100)/100))} className="px-2 py-1 text-white/90 hover:text-white">−</button>
-              <button onClick={() => setZoom(1)} className="px-2 py-1 text-white/90 hover:text-white">100%</button>
-              <button onClick={() => {
-                const box = panelRef.current
-                if (!box) return
-                const w = box.clientWidth - 24
-                const h = box.clientHeight - 24
-                const fit = Math.min(w/BASE_W, h/BASE_H)
-                setZoom(Math.max(0.4, Math.min(1.2, Math.round(fit*100)/100)))
-              }} className="px-2 py-1 text-white/90 hover:text-white">Ajustar</button>
-              <button onClick={() => setZoom(z => Math.min(1.2, Math.round((z+0.1)*100)/100))} className="px-2 py-1 text-white/90 hover:text-white">＋</button>
+          <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-px rounded-lg border border-[color:var(--border-subtle)] bg-white p-0.5">
+              <button onClick={() => setZoom(z => Math.max(0.4, Math.round((z-0.1)*100)/100))} className="px-2 py-1 text-xs hover:bg-[color:var(--stone-100)] rounded text-[color:var(--text-secondary)]">−</button>
+              <button onClick={() => setZoom(1)} className="px-2 py-1 text-xs font-medium hover:bg-[color:var(--stone-100)] rounded text-[color:var(--text-primary)]">100%</button>
+              <button onClick={() => setZoom(z => Math.min(1.2, Math.round((z+0.1)*100)/100))} className="px-2 py-1 text-xs hover:bg-[color:var(--stone-100)] rounded text-[color:var(--text-secondary)]">＋</button>
             </div>
             <button 
               onClick={() => {
@@ -997,13 +1038,15 @@ export default function ChatPage() {
                 // Manual reload should show progress briefly
                 loadAddresses(true)
               }}
-              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105"
+              className="p-2 rounded-lg hover:bg-[color:var(--stone-200)] text-[color:var(--text-secondary)] transition-colors"
+              title="Recargar"
             >
-              ↻ Recargar
+              ↻
             </button>
             <button 
               onClick={() => setExcelTemplate(null)} 
-              className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white font-semibold transition-all duration-200 hover:scale-105"
+              className="p-2 rounded-lg hover:bg-[color:var(--stone-200)] text-[color:var(--text-secondary)] transition-colors"
+              title="Cerrar"
             >
               ✕
             </button>
@@ -1011,57 +1054,30 @@ export default function ChatPage() {
         </div>
         
         {/* Spreadsheet replica (DB-backed) */}
-        <div className="relative bg-gray-50 flex-1 flex flex-col min-h-0">
-          <div className="absolute top-2 right-2 z-10 px-3 py-1.5 rounded-lg bg-[color:var(--c-green-100)] text-[color:var(--c-green-800)] text-xs font-semibold flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[color:var(--c-green-500)] animate-pulse"></span>
-            <span>Sincronizado</span>
-          </div>
+        <div className="relative flex-1 flex flex-col min-h-0 bg-[color:var(--stone-50)]">
           {/* Show mirrored in-app Spreadsheet for realtime editing/viewing */}
-          <div className="relative w-full h-[70vh] flex flex-col">
-              <div className="flex-1 overflow-auto p-4 relative" style={{ minHeight: '400px' }}>
+          <div className="relative w-full h-full flex flex-col">
+              <div className="flex-1 overflow-auto p-0 relative" style={{ minHeight: '400px' }}>
                 {/* Progress bar overlay - ALWAYS show when addressesLoading is true */}
                 {addressesLoading ? (
                   <div 
-                    className="absolute inset-0 flex items-center justify-center"
-                    style={{ 
-                      zIndex: 9999,
-                      backgroundColor: 'rgba(255, 255, 255, 0.98)',
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0
-                    }}
+                    className="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50"
                   >
-                    <div className="text-center w-full max-w-lg px-8 py-6 bg-white rounded-lg shadow-2xl border-4 border-blue-500">
-                      <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto mb-6"></div>
-                      <div className="font-bold mb-6 text-2xl text-gray-800">Procesando archivo Excel...</div>
+                    <div className="text-center w-full max-w-sm p-6 bg-white rounded-xl shadow-lg border border-[color:var(--border-subtle)]">
+                      <div className="animate-spin rounded-full h-10 w-10 border-2 border-[color:var(--stone-200)] border-t-[color:var(--forest-900)] mx-auto mb-4"></div>
+                      <div className="font-medium mb-4 text-[color:var(--text-primary)]">Procesando archivo Excel...</div>
                       
-                      {/* Progress Bar - BLUE and VERY visible */}
-                      <div className="w-full bg-gray-300 rounded-full h-8 mb-6 overflow-hidden shadow-xl border-4 border-gray-400" style={{ minHeight: '32px' }}>
+                      {/* Progress Bar */}
+                      <div className="w-full bg-[color:var(--stone-200)] rounded-full h-2 mb-4 overflow-hidden">
                         <div 
-                          className="bg-gradient-to-r from-blue-500 via-blue-600 to-blue-700 h-full rounded-full transition-all duration-300 ease-out shadow-lg flex items-center justify-end pr-2"
+                          className="bg-[color:var(--forest-900)] h-full rounded-full transition-all duration-300 ease-out"
                           style={{ width: `${Math.max(10, Math.min(100, importProgress))}%` }}
-                        >
-                          {importProgress >= 15 && (
-                            <span className="text-white text-xs font-bold">{Math.round(importProgress)}%</span>
-                          )}
-                        </div>
+                        ></div>
                       </div>
                       
-                      {/* Progress percentage - Large and blue */}
-                      <div className="text-4xl text-blue-600 mt-6 font-black mb-4" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                      <div className="text-2xl font-serif font-bold text-[color:var(--forest-900)]">
                         {Math.round(Math.max(10, Math.min(100, importProgress)))}%
                       </div>
-                      
-                      {/* Time remaining */}
-                      {timeRemaining > 0 && (
-                        <div className="text-lg text-gray-700 font-semibold">
-                          {timeRemaining > 1 
-                            ? `⏱️ Tiempo estimado: ${timeRemaining} segundos`
-                            : '⏱️ Finalizando...'}
-                        </div>
-                      )}
               </div>
             </div>
                 ) : null}
@@ -1124,36 +1140,33 @@ export default function ChatPage() {
                     }}
                   />
                 ) : !addressesLoading && addressesError ? (
-                  <div className={`p-4 ${addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'text-red-600' : 'text-[color:var(--c-green-700)]'}`}>
-                    <div className="font-semibold mb-2">
-                      {addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido') ? 'Error:' : 'Información:'}
+                  <div className="p-8 text-center">
+                    <div className="mb-2 text-lg font-medium text-red-600">
+                      {addressesError.includes('Error') ? 'Error de carga' : 'Información'}
                     </div>
-                    <div className="whitespace-pre-wrap">{addressesError}</div>
-                    {(addressesError.includes('Error') || addressesError.includes('expir') || addressesError.includes('inválido')) && (
-                      <button 
-                        onClick={() => loadAddresses()} 
-                        className="mt-2 px-3 py-1 rounded bg-[color:var(--c-green-700)] text-white text-sm"
-                      >
-                        Reintentar
-                      </button>
-                    )}
+                    <p className="text-sm text-[color:var(--text-tertiary)] max-w-md mx-auto mb-4">{addressesError}</p>
+                    <button 
+                      onClick={() => loadAddresses()} 
+                      className="btn-secondary text-sm"
+                    >
+                      Reintentar
+                    </button>
                   </div>
                 ) : (
-                  <div className="text-[color:var(--c-green-700)] flex items-center justify-center h-full">
-                    <div className="text-center p-8">
-                      <div className="text-4xl mb-4">📊</div>
-                      <div className="font-semibold mb-2">Sube el archivo Excel R2B</div>
-                      <div className="text-sm text-[color:var(--c-green-600)] mb-4">
-                        Haz clic en "Subir Excel R2B" para comenzar
-                      </div>
-                      <div className="text-xs text-[color:var(--c-green-500)]">
-                        Solo necesitas subirlo una vez. Los valores que añadas se guardarán automáticamente.
-                      </div>
+                  <div className="flex flex-col items-center justify-center h-full text-center p-8">
+                    <div className="mb-4 p-4 rounded-full bg-[color:var(--stone-100)] text-3xl text-[color:var(--stone-400)]">
+                      📊
                     </div>
+                    <h3 className="font-serif font-bold text-lg text-[color:var(--text-primary)] mb-2">
+                      Plantilla de Números
+                    </h3>
+                    <p className="text-sm text-[color:var(--text-secondary)] max-w-xs mb-6">
+                      Sube el archivo Excel para comenzar a trabajar con los datos.
+                    </p>
                   </div>
                 )}
               </div>
-              <div className="px-4 py-2 bg-white border-t flex gap-2 items-center justify-between">
+              <div className="px-4 py-3 bg-[color:var(--stone-50)] border-t border-[color:var(--border-subtle)] flex gap-3 items-center justify-between">
                 <div className="flex gap-2 items-center">
                   <input 
                     type="file" 
@@ -1344,9 +1357,9 @@ export default function ChatPage() {
                   />
                   <label 
                     htmlFor="excel-upload-input"
-                    className="px-4 py-2 rounded bg-[color:var(--c-green-600)] text-white cursor-pointer hover:bg-[color:var(--c-green-700)] font-semibold"
+                    className="btn-primary cursor-pointer text-sm flex items-center gap-2"
                   >
-                    📤 Subir Excel R2B
+                    <span>📤</span> Subir Excel
                   </label>
                 </div>
                 
@@ -1377,9 +1390,9 @@ export default function ChatPage() {
                         setAddressesLoading(false)
                       }
                     }}
-                    className="px-4 py-2 rounded bg-[color:var(--c-green-600)] text-white hover:bg-[color:var(--c-green-700)] font-semibold"
+                    className="btn-secondary text-sm flex items-center gap-2"
                   >
-                    📥 Exportar Excel
+                    <span>📥</span> Exportar
                   </button>
                 )}
               </div>
@@ -1387,10 +1400,10 @@ export default function ChatPage() {
         </div>
         
         {/* Footer with helpful hints - compact */}
-        <div className="px-4 py-2 bg-gradient-to-r from-[color:var(--c-green-50)] to-[color:var(--c-green-100)] border-t border-[color:var(--c-green-200)] flex-shrink-0">
-          <div className="text-xs text-[color:var(--c-green-700)] flex items-center gap-2">
+        <div className="px-4 py-2 bg-[color:var(--stone-100)] border-t border-[color:var(--border-subtle)] flex-shrink-0">
+          <div className="text-xs text-[color:var(--text-secondary)] flex items-center gap-2">
             <span>💡</span>
-            <span>Di "pon [campo] a [valor]" o "borra [campo]"</span>
+            <span>Di "pon [campo] a [valor]" o "borra [campo]" para editar.</span>
           </div>
         </div>
       </div>
@@ -1401,48 +1414,59 @@ export default function ChatPage() {
   const hasExcel = !!excelTemplate
 
   return (
-    <div className="flex h-[calc(100vh-140px)] flex-col gap-3">
+    <div className="flex h-[calc(100vh-6rem)] flex-col gap-4">
       {/* Property indicator */}
       {propertyName && (
-        <div className="rounded-2xl bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-5 py-3 text-white font-semibold nature-shadow-lg flex items-center gap-3">
-          <span className="text-xl">🏡</span>
-          <span>Propiedad actual: {propertyName}</span>
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-[color:var(--text-tertiary)]">Propiedad actual:</span>
+            <span className="font-serif font-bold text-[color:var(--forest-900)] bg-[color:var(--forest-50)] px-3 py-1 rounded-full border border-[color:var(--forest-100)]">
+              {propertyName}
+            </span>
+            {documents.uploaded.length > 0 && (
+              <span className="text-xs text-[color:var(--text-tertiary)] bg-[color:var(--stone-100)] px-2 py-1 rounded-full">
+                📄 {documents.uploaded.length} documento{documents.uploaded.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
         </div>
       )}
       
       {/* Main content area: split layout when Excel is open */}
-      <div className={`flex-1 flex gap-4 ${hasExcel ? 'flex-row' : 'flex-col'}`}>
+      <div className={`flex-1 flex gap-6 ${hasExcel ? 'flex-row' : 'flex-col'}`}>
         {/* Excel Panel - Left side when open (larger) */}
         {hasExcel && (
-          <div className="flex-[7] flex flex-col min-w-0">
+          <div className="flex-[7] flex flex-col min-w-0 animate-fade-in">
             {ExcelPanel}
           </div>
         )}
         
         {/* Chat area - Right side when Excel is open (smaller), full width otherwise */}
-        <div className={`${hasExcel ? 'flex-[2] flex-shrink-0 h-[70vh]' : 'flex-1'} flex flex-col min-h-0`}>
-          <div ref={scrollRef} className="flex-1 overflow-auto rounded-3xl p-6 glass nature-shadow-lg scrollbar-thin">
+        <div className={`${hasExcel ? 'flex-[3] flex-shrink-0 h-full' : 'flex-1'} flex flex-col min-h-0`}>
+          <div ref={scrollRef} className={`flex-1 overflow-auto p-4 ${hasExcel ? 'rounded-xl border border-[color:var(--border-subtle)] bg-white' : ''} scrollbar-thin`}>
             {!hasExcel && ExcelPanel}
             {hasExcel && (
               <>
                 {/* Quick actions for MCP excel tools (visible only when completing a Numbers template) */}
                 <div className="mb-4 flex flex-wrap gap-2 items-center">
-                  <button onClick={quickGetRange} className="rounded-xl px-3 py-1.5 bg-[color:var(--c-green-600)] text-white text-sm font-semibold">Leer A1:B10</button>
-                  <button onClick={quickSetA1} className="rounded-xl px-3 py-1.5 bg-[color:var(--c-green-600)] text-white text-sm font-semibold">Escribir A1</button>
-                  <button onClick={quickAppend} className="rounded-xl px-3 py-1.5 bg-[color:var(--c-green-600)] text-white text-sm font-semibold">Añadir fila a Tabla1</button>
+                  <button onClick={quickGetRange} className="text-xs px-2 py-1 rounded bg-[color:var(--stone-100)] hover:bg-[color:var(--stone-200)] text-[color:var(--text-secondary)] border border-[color:var(--border-subtle)]">Leer A1:B10</button>
+                  <button onClick={quickSetA1} className="text-xs px-2 py-1 rounded bg-[color:var(--stone-100)] hover:bg-[color:var(--stone-200)] text-[color:var(--text-secondary)] border border-[color:var(--border-subtle)]">Escribir A1</button>
+                  <button onClick={quickAppend} className="text-xs px-2 py-1 rounded bg-[color:var(--stone-100)] hover:bg-[color:var(--stone-200)] text-[color:var(--text-secondary)] border border-[color:var(--border-subtle)]">Añadir fila</button>
                   {selectedCell && (
-                    <div className="ml-3 px-3 py-1 rounded bg-[color:var(--c-green-50)] text-[color:var(--c-green-700)] font-medium">Seleccionada: {selectedCell}</div>
+                    <div className="ml-auto text-xs px-2 py-1 rounded bg-[color:var(--forest-50)] text-[color:var(--forest-900)] border border-[color:var(--forest-100)]">
+                      Selección: <b>{selectedCell}</b>
+                    </div>
                   )}
                 </div>
 
                 {toolLogs.length > 0 && (
-                  <div className="mb-4 rounded-2xl border-2 border-[color:var(--c-green-200)] bg-white p-3 text-xs text-[color:var(--c-green-900)]">
-                    <div className="font-bold mb-1">Logs de tools</div>
-                    <div className="space-y-2 max-h-48 overflow-auto">
+                  <div className="mb-4 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--stone-50)] p-3 text-xs text-[color:var(--text-secondary)]">
+                    <div className="font-bold mb-2 text-[color:var(--text-primary)]">Debug Log</div>
+                    <div className="space-y-1.5 max-h-32 overflow-auto">
                       {toolLogs.map((l, i) => (
-                        <div key={i} className="border-b last:border-b-0 pb-1">
-                          <div className="font-semibold">{l.tool} <span className="opacity-70">({l.mode}, {l.ms}ms)</span></div>
-                          <div className="opacity-80">args: {JSON.stringify(l.args)}</div>
+                        <div key={i} className="border-b border-[color:var(--border-subtle)] last:border-b-0 pb-1">
+                          <div className="font-mono text-[10px] text-[color:var(--forest-800)]">{l.tool} <span className="text-[color:var(--text-tertiary)]">({l.ms}ms)</span></div>
+                          <div className="opacity-70 truncate">{JSON.stringify(l.args)}</div>
                         </div>
                       ))}
                     </div>
@@ -1451,141 +1475,112 @@ export default function ChatPage() {
               </>
             )}
             {messages.length === 0 ? (
-          <div className="text-center text-[color:var(--c-green-800)]">
-            <div className="mb-4 text-5xl animate-pulse-soft">🌾</div>
-            <div className="mb-3 text-3xl font-bold bg-gradient-to-r from-[color:var(--c-green-700)] to-[color:var(--c-green-600)] bg-clip-text text-transparent">
-              ¡Bienvenido a RAMA Country Living!
-            </div>
-            <div className="opacity-80 text-lg mb-8 text-[color:var(--c-green-700)]">
-              Tu asistente inteligente para gestionar propiedades rurales
-            </div>
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-5 max-w-4xl mx-auto">
+          <div className="flex flex-col items-center justify-center h-full py-12">
+            <div className="mb-6 text-6xl opacity-90">🌾</div>
+            <h2 className="mb-2 text-3xl font-serif font-bold text-[color:var(--text-primary)] text-center">
+              Bienvenido a RAMA
+            </h2>
+            <p className="text-lg text-[color:var(--text-secondary)] mb-12 text-center max-w-md">
+              Tu asistente inteligente para la gestión integral de propiedades rurales.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl w-full">
               {/* Crear ficha propiedad */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+              <div className="rama-card p-5 cursor-pointer hover:bg-[color:var(--stone-50)] group">
                 <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-400)] to-[color:var(--c-green-500)] flex items-center justify-center text-2xl nature-shadow">
+                  <div className="flex-shrink-0 h-10 w-10 rounded-full bg-[color:var(--forest-50)] flex items-center justify-center text-xl group-hover:bg-[color:var(--forest-100)] transition-colors">
                     🏡
                   </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Crear ficha propiedad
-                    </div>
-                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      Añade nuevas propiedades al sistema
-                    </div>
+                  <div>
+                    <h3 className="font-serif font-bold text-[color:var(--text-primary)] mb-1">
+                      Nueva Propiedad
+                    </h3>
+                    <p className="text-sm text-[color:var(--text-tertiary)]">
+                      Crear ficha y configurar
+                    </p>
                   </div>
                 </div>
               </div>
               
               {/* Gestión documentos */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect" title="Al entrar en Números, verás la plantilla + acciones (calcular, what-if, break-even, sensibilidad, gráficos, Excel)">
+              <div className="rama-card p-5 cursor-pointer hover:bg-[color:var(--stone-50)] group">
                 <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-sage-400)] to-[color:var(--c-sage-500)] flex items-center justify-center text-2xl nature-shadow">
-                    📁
+                  <div className="flex-shrink-0 h-10 w-10 rounded-full bg-[color:var(--stone-100)] flex items-center justify-center text-xl group-hover:bg-[color:var(--stone-200)] transition-colors">
+                    📊
                   </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Gestión de documentos / Números
-                    </div>
-                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      Sube documentos o entra en el framework de números
-                    </div>
+                  <div>
+                    <h3 className="font-serif font-bold text-[color:var(--text-primary)] mb-1">
+                      Números y Documentos
+                    </h3>
+                    <p className="text-sm text-[color:var(--text-tertiary)]">
+                      Gestionar archivos y finanzas
+                    </p>
                   </div>
                 </div>
               </div>
               
               {/* Consultas inteligentes */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+              <div className="rama-card p-5 cursor-pointer hover:bg-[color:var(--stone-50)] group">
                 <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-300)] to-[color:var(--c-green-400)] flex items-center justify-center text-2xl nature-shadow">
+                  <div className="flex-shrink-0 h-10 w-10 rounded-full bg-amber-50 flex items-center justify-center text-xl group-hover:bg-amber-100 transition-colors">
                     🤖
                   </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Consultas inteligentes
-                    </div>
-                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      Pregunta sobre tus documentos
-                    </div>
+                  <div>
+                    <h3 className="font-serif font-bold text-[color:var(--text-primary)] mb-1">
+                      Consultas
+                    </h3>
+                    <p className="text-sm text-[color:var(--text-tertiary)]">
+                      Pregunta sobre tus contratos
+                    </p>
                   </div>
                 </div>
               </div>
               
-              {/* Email automatizado */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
+              {/* Resúmenes */}
+              <div className="rama-card p-5 cursor-pointer hover:bg-[color:var(--stone-50)] group">
                 <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-earth-300)] to-[color:var(--c-earth-400)] flex items-center justify-center text-2xl nature-shadow">
-                    ✉️
+                  <div className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center text-xl group-hover:bg-blue-100 transition-colors">
+                    📝
                   </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Email automatizado
-                    </div>
-                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      Envía información por correo
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Resúmenes automáticos */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
-                <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] flex items-center justify-center text-2xl nature-shadow">
-                    📊
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Resúmenes automáticos
-                    </div>
-                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      Analiza contratos al instante
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Recordatorios */}
-              <div className="field-card h-auto min-h-[90px] rounded-3xl border-2 border-[color:var(--c-green-200)] text-left p-5 nature-shadow cursor-pointer shine-effect">
-                <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--c-earth-400)] to-[color:var(--c-earth-500)] flex items-center justify-center text-2xl nature-shadow">
-                    🔔
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-[17px] font-bold leading-5 text-[color:var(--c-green-800)] mb-1">
-                      Recordatorios inteligentes
-                    </div>
-                    <div className="text-[13px] text-[color:var(--c-green-600)] leading-relaxed">
-                      No olvides fechas de pago importantes
-                    </div>
+                  <div>
+                    <h3 className="font-serif font-bold text-[color:var(--text-primary)] mb-1">
+                      Resúmenes
+                    </h3>
+                    <p className="text-sm text-[color:var(--text-tertiary)]">
+                      Analiza documentos al instante
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-6 pb-4">
             {messages.map((m, idx) => (
-              <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+              <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={
-                  'max-w-[85%] whitespace-pre-wrap rounded-3xl px-6 py-4 nature-shadow-lg ' +
+                  'max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-4 shadow-sm ' +
                   (m.role === 'user'
-                    ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white font-medium'
-                    : 'glass border-2 border-[color:var(--c-green-200)] text-[color:var(--c-green-900)]')
+                    ? 'bg-[color:var(--forest-900)] text-white rounded-tr-sm'
+                    : 'bg-white border border-[color:var(--border-subtle)] text-[color:var(--text-primary)] rounded-tl-sm')
                 }>
-                  {m.role === 'assistant' ? renderMessageContent(m.content) : m.content}
+                  <div className={m.role === 'user' ? 'text-white/90' : ''}>
+                    {m.role === 'assistant' ? renderMessageContent(m.content) : m.content}
+                  </div>
                   
                   {/* Add feedback buttons for assistant messages */}
                   {m.role === 'assistant' && (
-                    <FeedbackButtons
-                      messageId={m.id}
-                      agentName={m.agentName || 'MainAgent'}
-                      userMessage={m.userMessage || (idx > 0 && messages[idx - 1]?.role === 'user' ? messages[idx - 1].content : '')}
-                      agentResponse={m.content}
-                      toolCalls={m.toolCalls}
-                      toolResults={m.toolResults}
-                      propertyId={propertyId}
-                    />
+                    <div className="mt-3 pt-3 border-t border-[color:var(--border-subtle)]">
+                      <FeedbackButtons
+                        messageId={m.id}
+                        agentName={m.agentName || 'MainAgent'}
+                        userMessage={m.userMessage || (idx > 0 && messages[idx - 1]?.role === 'user' ? messages[idx - 1].content : '')}
+                        agentResponse={m.content}
+                        toolCalls={m.toolCalls}
+                        toolResults={m.toolResults}
+                        propertyId={propertyId}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
@@ -1599,30 +1594,29 @@ export default function ChatPage() {
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={onDrop}
-              className="mt-3 rounded-2xl border-2 border-dashed border-[color:var(--c-green-400)] glass-strong p-4 text-[color:var(--c-green-800)] nature-shadow"
+              className="mt-3 rounded-xl border border-dashed border-[color:var(--border-strong)] bg-[color:var(--stone-50)] p-3 text-center"
             >
               <div className="flex items-center justify-between">
-                <div className="font-semibold text-sm flex items-center gap-2">
-                  <span className="text-lg">📎</span>
-                  <span>Arrastra PDFs</span>
+                <div className="text-xs text-[color:var(--text-tertiary)] flex items-center gap-2">
+                  <span>📎</span>
+                  <span>Arrastra archivos aquí</span>
                 </div>
-                <label className="cursor-pointer rounded-xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-4 py-2 text-white text-sm font-semibold nature-shadow hover:scale-105 transition-all duration-200">
-                  Archivos
+                <label className="cursor-pointer text-xs font-medium text-[color:var(--forest-900)] hover:underline">
+                  Explorar
                   <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
                 </label>
               </div>
               {files.length > 0 && (
-                <div className="mt-3 grid grid-cols-1 gap-2">
+                <div className="mt-2 grid grid-cols-1 gap-1 text-left">
                   {filePreviews}
                 </div>
               )}
-              {/* removed inspector of addresses to show only the real Excel */}
             </div>
           )}
           
           {/* Composer - Inside chat area when Excel is open */}
           {hasExcel && (
-            <div className="sticky bottom-0 mt-3 flex items-end gap-2 rounded-2xl p-3 glass-strong nature-shadow-lg backdrop-blur bg-white/60">
+            <div className="sticky bottom-0 mt-3 flex items-center gap-2 rounded-xl border border-[color:var(--border-subtle)] bg-white p-2 shadow-sm">
               <button
                 onMouseDown={startRecording}
                 onMouseUp={stopRecording}
@@ -1630,24 +1624,24 @@ export default function ChatPage() {
                 onTouchEnd={stopRecording}
                 disabled={isProcessingVoice}
                 className={
-                  `${hasExcel ? 'h-10 w-10' : 'h-14 w-14'} shrink-0 rounded-full border-2 border-[color:var(--c-green-400)] nature-shadow transition-all duration-300 ` +
+                  `flex h-8 w-8 items-center justify-center rounded-full transition-all ` +
                   (isRecording 
-                    ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110 animate-pulse' 
+                    ? 'bg-red-500 text-white animate-pulse' 
                     : isProcessingVoice
-                    ? 'bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white animate-pulse'
-                    : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-800)] hover:from-[color:var(--c-green-100)] hover:to-[color:var(--c-green-200)] hover:scale-105')
+                    ? 'bg-[color:var(--stone-200)] text-[color:var(--text-tertiary)]'
+                    : 'text-[color:var(--text-secondary)] hover:bg-[color:var(--stone-100)]')
                 }
               >
-                <span className={hasExcel ? 'text-base' : 'text-xl'}>
+                <span>
                   {isRecording ? '⏺' : isProcessingVoice ? '⏳' : '🎤'}
                 </span>
               </button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Escribe tu mensaje..."
+                placeholder="Escribe..."
                 rows={1}
-                className="min-h-[40px] flex-1 resize-none rounded-xl border-2 border-[color:var(--c-green-300)] bg-white px-3 py-2 text-sm font-medium outline-none focus:ring-2 focus:ring-[color:var(--c-green-500)] focus:border-[color:var(--c-green-500)] transition-all duration-200 placeholder:text-[color:var(--c-green-400)]"
+                className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-[color:var(--text-tertiary)]"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
@@ -1658,9 +1652,9 @@ export default function ChatPage() {
               <button
                 onClick={onSend}
                 disabled={uploading}
-                className="h-10 shrink-0 rounded-xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-4 text-white text-sm font-bold nature-shadow hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[color:var(--forest-900)] text-white hover:bg-[color:var(--forest-800)] disabled:opacity-50"
               >
-                {uploading ? '⏳' : '✈️'}
+                {uploading ? '⏳' : '↑'}
               </button>
             </div>
           )}
@@ -1672,20 +1666,20 @@ export default function ChatPage() {
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
-          className="rounded-3xl border-2 border-dashed border-[color:var(--c-green-400)] glass-strong p-6 text-[color:var(--c-green-800)] nature-shadow hover:nature-shadow-lg transition-all duration-300 hover:border-[color:var(--c-green-500)]"
+          className={`rounded-xl border border-dashed border-[color:var(--border-strong)] p-4 transition-colors ${files.length > 0 ? 'bg-[color:var(--forest-50)] border-[color:var(--forest-300)]' : 'bg-[color:var(--stone-50)] hover:bg-[color:var(--stone-100)]'}`}
         >
           <div className="flex items-center justify-between">
-            <div className="font-bold text-lg flex items-center gap-3">
-              <span className="text-2xl">📎</span>
-              <span>Arrastra PDFs aquí o haz click</span>
+            <div className="flex items-center gap-3 text-[color:var(--text-secondary)]">
+              <span className="text-xl text-[color:var(--stone-400)]">📎</span>
+              <span className="text-sm font-medium">Arrastra documentos aquí para analizarlos</span>
             </div>
-            <label className="cursor-pointer rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-6 py-3 text-white font-semibold nature-shadow-lg hover:scale-105 transition-all duration-200 shine-effect">
-              Elegir archivos
+            <label className="btn-secondary text-xs cursor-pointer">
+              Seleccionar archivos
               <input type="file" multiple className="hidden" onChange={(e) => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
             </label>
           </div>
           {files.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
               {filePreviews}
             </div>
           )}
@@ -1694,7 +1688,7 @@ export default function ChatPage() {
 
       {/* Composer - Outside chat area when Excel is NOT open */}
       {!hasExcel && (
-        <div className="flex items-end gap-4 rounded-3xl p-5 glass-strong nature-shadow-lg">
+        <div className="flex items-end gap-3 rounded-xl border border-[color:var(--border-subtle)] bg-white p-3 shadow-sm focus-within:ring-2 focus-within:ring-[color:var(--forest-100)] focus-within:border-[color:var(--forest-500)] transition-all">
           <button
             onMouseDown={startRecording}
             onMouseUp={stopRecording}
@@ -1702,31 +1696,31 @@ export default function ChatPage() {
             onTouchEnd={stopRecording}
             disabled={isProcessingVoice}
             className={
-              'h-14 w-14 shrink-0 rounded-full border-2 border-[color:var(--c-green-400)] nature-shadow transition-all duration-300 ' +
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all ' +
               (isRecording 
-                ? 'bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] text-white scale-110 animate-pulse' 
+                ? 'bg-red-50 text-red-600 border border-red-200 animate-pulse' 
                 : isProcessingVoice
-                ? 'bg-gradient-to-br from-[color:var(--c-green-500)] to-[color:var(--c-green-600)] text-white animate-pulse'
-                : 'bg-gradient-to-br from-white to-[color:var(--c-green-50)] text-[color:var(--c-green-800)] hover:from-[color:var(--c-green-100)] hover:to-[color:var(--c-green-200)] hover:scale-105')
+                ? 'bg-[color:var(--stone-100)] text-[color:var(--text-tertiary)]'
+                : 'bg-[color:var(--stone-50)] text-[color:var(--text-secondary)] hover:bg-[color:var(--stone-100)] border border-[color:var(--border-subtle)]')
             }
             title={
               isRecording 
                 ? 'Suelta para detener' 
                 : isProcessingVoice 
-                ? 'Procesando mensaje de voz...' 
-                : 'Mantén para grabar voz'
+                ? 'Procesando...' 
+                : 'Mantén para grabar'
             }
           >
-            <span className="text-xl">
+            <span className="text-lg">
               {isRecording ? '⏺' : isProcessingVoice ? '⏳' : '🎤'}
             </span>
           </button>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Escribe tu mensaje sobre propiedades..."
+            placeholder="Escribe tu mensaje..."
             rows={1}
-            className="min-h-[56px] flex-1 resize-none rounded-2xl border-2 border-[color:var(--c-green-300)] bg-white px-5 py-4 text-base font-medium outline-none focus:ring-2 focus:ring-[color:var(--c-green-500)] focus:border-[color:var(--c-green-500)] transition-all duration-200 placeholder:text-[color:var(--c-green-400)]"
+            className="min-h-[40px] flex-1 resize-none bg-transparent py-2.5 text-[color:var(--text-primary)] placeholder:text-[color:var(--stone-400)] outline-none"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -1737,9 +1731,9 @@ export default function ChatPage() {
           <button
             onClick={onSend}
             disabled={uploading}
-            className="h-14 shrink-0 rounded-2xl bg-gradient-to-br from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] px-8 text-white font-bold nature-shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-60 disabled:hover:scale-100 shine-effect"
+            className="h-10 rounded-lg bg-[color:var(--forest-900)] px-6 text-sm font-medium text-white shadow-sm hover:bg-[color:var(--forest-800)] disabled:opacity-50 disabled:hover:bg-[color:var(--forest-900)] transition-colors"
           >
-            {uploading ? '⏳ Enviando…' : '✈️ Enviar'}
+            {uploading ? '...' : 'Enviar'}
           </button>
         </div>
       )}
