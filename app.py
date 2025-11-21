@@ -1642,7 +1642,40 @@ async def ui_chat(
                     verification_status = f"❌ ERROR verificando: {e}"
                     logger.error(f"❌ Error during verification: {e}", exc_info=True)
                 
-                return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'. {verification_status}")
+                # After upload+verification, return an updated documents summary so UI always sees the latest state
+                try:
+                    from tools.docs_tools import list_docs as _list_docs
+                    docs_now = _list_docs(pid)
+                    uploaded_now = [d for d in docs_now if d.get("storage_key")]
+                    pending_now = [d for d in docs_now if not d.get("storage_key")]
+                    resp_lines = [f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'. {verification_status}", "", "📄 Documentos subidos:"]
+                    if uploaded_now:
+                        groups_now = {}
+                        for d in uploaded_now:
+                            grp = d.get("document_group", "Sin grupo")
+                            groups_now.setdefault(grp, []).append(d)
+                        for grp, docs_in_grp in groups_now.items():
+                            resp_lines.append(f"**{grp}**")
+                            for doc in docs_in_grp:
+                                sg = doc.get("document_subgroup", "")
+                                name = doc.get("document_name", "")
+                                resp_lines.append(f"- {sg}: {name}" if sg else f"- {name}")
+                            resp_lines.append("")
+                    else:
+                        resp_lines.append("No hay documentos subidos aún.")
+                        resp_lines.append("")
+                    resp_lines.append("⌛ Documentos pendientes:")
+                    if pending_now:
+                        for p in pending_now:
+                            sg = p.get("document_subgroup", "")
+                            name = p.get("document_name", "")
+                            resp_lines.append(f"- {sg}: {name}" if sg else f"- {name}")
+                    else:
+                        resp_lines.append("No hay documentos pendientes.")
+                    return make_response("\n".join(resp_lines))
+                except Exception as e:
+                    logger.warning(f"Could not build updated docs summary: {e}")
+                    return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'. {verification_status}")
             except Exception as e:
                 STATE["pending_proposal"] = None
                 save_sessions()
