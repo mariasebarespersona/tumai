@@ -1772,7 +1772,30 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
     # 2c. send_email: Direct confirmation to avoid LLM misinterpretation
     if last_tool_msg.name == "send_email":
         try:
-            result_data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            # Debug: log what we received
+            logger.info(f"[post_tool send_email] content type: {type(last_tool_msg.content)}")
+            logger.info(f"[post_tool send_email] content repr: {repr(last_tool_msg.content)[:200]}")
+            
+            # Parse content safely
+            result_data = None
+            if isinstance(last_tool_msg.content, str):
+                content_str = last_tool_msg.content.strip()
+                if content_str:  # Only parse if not empty
+                    try:
+                        result_data = json.loads(content_str)
+                        logger.info(f"[post_tool send_email] Parsed JSON successfully: {result_data}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"[post_tool] Could not parse send_email content as JSON: {e}, content: {content_str[:100]}")
+                else:
+                    logger.warning(f"[post_tool send_email] Content is empty string")
+            elif isinstance(last_tool_msg.content, dict):
+                result_data = last_tool_msg.content
+                logger.info(f"[post_tool send_email] Content is already dict: {result_data}")
+            elif isinstance(last_tool_msg.content, list):
+                # Sometimes LangChain wraps content in a list
+                if last_tool_msg.content and isinstance(last_tool_msg.content[0], dict):
+                    result_data = last_tool_msg.content[0]
+                    logger.info(f"[post_tool send_email] Content was list[dict], extracted: {result_data}")
             
             # Check if email was sent successfully
             if isinstance(result_data, dict) and result_data.get("sent") is True:
@@ -1785,8 +1808,10 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                 
                 logger.info(f"[post_tool] send_email succeeded → rendering confirmation")
                 return {"messages": [AIMessage(content=confirmation)]}
+            else:
+                logger.warning(f"[post_tool send_email] Could not extract 'sent=True' from result_data: {result_data}")
         except Exception as e:
-            logger.warning(f"[post_tool] Error rendering send_email confirmation: {e}")
+            logger.warning(f"[post_tool] Error rendering send_email confirmation: {e}", exc_info=True)
             pass
     
     # 3. get_numbers: renderizado directo de plantilla de números
