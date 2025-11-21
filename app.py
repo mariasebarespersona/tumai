@@ -1752,6 +1752,10 @@ async def ui_chat(
         "pdf", "archivo", "anexo", "cláusula", "clausula", "artículo", "articulo",
         "apartado", "sección", "seccion", "página", "pagina", "párrafo", "parrafo"
     ]
+    # Extend keywords to better capture payment-related content and roles
+    doc_content_keywords += [
+        "arquitecto", "ingeniero", "contratista", "pago", "pagar", "fecha", "venc", "vencer", "vencimiento"
+    ]
     has_doc_keyword = any(word in qnorm for word in doc_content_keywords)
     
     # Content question verbs (asking ABOUT document content)
@@ -1760,6 +1764,8 @@ async def ui_chat(
         "lee el", "lee la", "explica el", "explica la", "resume", "resumen", "resúmeme", "resumeme",
         "sintetiza", "extracto", "información sobre", "informacion sobre", "datos sobre"
     ]
+    # Also treat questions asking 'qué día' or 'cuando' as content verbs for payment/date queries
+    content_verbs += ["qué día", "que dia", "cuando", "qué fecha", "que fecha", "qué vence", "que vence"]
     has_content_verb = any(verb in qnorm for verb in content_verbs)
     
     # Summarize requests are always document-related
