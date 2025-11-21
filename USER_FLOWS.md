@@ -150,7 +150,7 @@ Expected: Property created, name appears in header
    - If YES: Continues to step 4
 4. Agent calls `signed_url_for(document_name)`
    - This verifies document exists
-   - Generates secure 24h link
+   - Generates secure download link
 5. Agent IMMEDIATELY calls `send_email` (no text between)
 6. `post_tool` hook intercepts and auto-confirms
 7. Chat shows: "✅ Email enviado correctamente a [email]"

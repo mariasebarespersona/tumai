@@ -590,7 +590,11 @@ def list_docs(property_id: str) -> List[Dict]:
             return []
 
 
-def signed_url_for(property_id: str, document_group: str, document_subgroup: str, document_name: str, expires: int = 3600) -> str:
+def signed_url_for(property_id: str, document_group: str, document_subgroup: str, document_name: str, expires: int = 31536000) -> str:
+    """
+    Generate a signed URL for a document.
+    Default expires = 31536000 seconds (1 year) - effectively permanent for user purposes.
+    """
     sg = document_subgroup or ""
     # Always use RPC to avoid PGRST205
     key = sb.rpc(

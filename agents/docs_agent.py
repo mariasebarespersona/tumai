@@ -187,9 +187,6 @@ class DocsAgent(BaseAgent):
                                 📄 Descargar {doc_name}
                             </a>
                         </p>
-                        <p style="color: #999; font-size: 12px;">
-                            <em>Este enlace expira en 24 horas.</em>
-                        </p>
                     </div>
                     '''
                     
@@ -204,7 +201,7 @@ class DocsAgent(BaseAgent):
                         return {
                             "action": "response",
                             "agent": self.name,
-                            "response": f"✅ Email enviado correctamente a {email_address} con el documento \"{doc_name}\". El enlace estará disponible por 24 horas.",
+                            "response": f"✅ Email enviado correctamente a {email_address} con el documento \"{doc_name}\".",
                             "latency_ms": 0,
                             "success": True
                         }
@@ -310,7 +307,7 @@ Cuando el usuario pide "manda X por email" o "envía X a [email]":
 3. **INMEDIATAMENTE llama a `send_email`** (sin texto intermedio):
    - to: ["email_del_usuario"]
    - subject: "Documento: [nombre]"
-   - html: '<p>Aquí está el documento solicitado:</p><p><a href="[signed_url]" style="display:inline-block;padding:10px 20px;background-color:#10b981;color:white;text-decoration:none;border-radius:5px;">📄 Descargar [nombre_documento]</a></p><p><small>Este enlace expira en 24 horas.</small></p>'
+   - html: '<p>Aquí está el documento solicitado:</p><p><a href="[signed_url]" style="display:inline-block;padding:10px 20px;background-color:#10b981;color:white;text-decoration:none;border-radius:5px;">📄 Descargar [nombre_documento]</a></p>'
    - NO escribas "ahora procederé" o "un momento" ❌
    - NO escribas "voy a enviar" ❌
    - EJECUTA `send_email` directamente después de `signed_url_for`
@@ -351,7 +348,7 @@ Tú: [llama signed_url_for("Contrato arquitecto")]
 - El único texto que escribes es DESPUÉS de que send_email se ejecute
 
 **Cuando envíes emails**:
-- SIEMPRE usa `signed_url_for` para generar un link seguro (expira en 24h)
+- SIEMPRE usa `signed_url_for` para generar un link seguro
 - Incluye el link en el HTML del email como un botón o enlace clickeable
 - NUNCA muestres el HTML del email en el chat
 - Confirma el envío: "✅ Email enviado a [email] con [documento]"
@@ -366,7 +363,7 @@ Tú: [llama signed_url_for("Contrato arquitecto")]
 
 **Herramientas disponibles**:
 - `list_docs`: Listar documentos de la propiedad (devuelve storage_key si está subido)
-- `signed_url_for`: Generar URL firmada para acceso seguro (24h)
+- `signed_url_for`: Generar URL firmada para acceso seguro
 - `send_email`: Enviar email con link al documento
 - `upload_and_link`: Subir documento y asociarlo a un slot
 - `list_related_facturas`: Listar facturas asociadas a un contrato
@@ -392,7 +389,7 @@ Tú:
 *[Llamas signed_url_for con document_name="Contrato arquitecto"]*
 *[signed_url_for devuelve un link - documento existe ✅]*
 *[INMEDIATAMENTE llamas send_email con el link, SIN texto intermedio]*
-"✅ He enviado el contrato de arquitecto por email a tumai@hotmail.com. El link estará disponible por 24 horas."
+"✅ He enviado el contrato de arquitecto por email a tumai@hotmail.com."
 
 EJEMPLO 2 - Usuario acaba de subir documento y lo pide por email (MEMORIA DESACTUALIZADA):
 *[Usuario sube "Contrato arquitecto" hace 10 segundos]*
