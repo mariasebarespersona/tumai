@@ -1602,13 +1602,20 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
             data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
             docs = data if isinstance(data, list) else []
             
-            # CRÍTICO: Detectar si venimos de un flujo de recordatorio
-            # Si el penúltimo mensaje del usuario menciona "recordatorio" y "cada mes"
+            # CRÍTICO: Detectar si venimos de un flujo de recordatorio O de EMAIL
+            # Si el usuario pide enviar por email, NO interceptar - dejar que el agente continúe
             user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
             logger.info(f"[post_tool list_docs] Detectando flujo... user_msgs count: {len(user_msgs)}")
             if user_msgs:
                 last_user_text = (user_msgs[-1].content or "").lower() if isinstance(user_msgs[-1].content, str) else ""
                 logger.info(f"[post_tool list_docs] last_user_text: {last_user_text[:100]}")
+                
+                # NO INTERCEPTAR si es un flujo de EMAIL
+                email_keywords = ["manda", "mandame", "envía", "enviame", "enviar", "mandar", "email", "correo", "mail"]
+                is_email_flow = any(kw in last_user_text for kw in email_keywords)
+                if is_email_flow:
+                    logger.info(f"[post_tool list_docs] ✋ FLUJO EMAIL DETECTADO - NO interceptar, dejar que agente continúe con signed_url + send_email")
+                    return None  # No interceptar - let agent continue
                 if "recordatorio" in last_user_text and "cada mes" in last_user_text and "dia que haya que pagar" in last_user_text:
                     logger.info(f"[post_tool list_docs] ✅ FLUJO RECORDATORIO DETECTADO!")
                     # Estamos en flujo de recordatorio - NO renderizar, continuar con extract_payment_date
