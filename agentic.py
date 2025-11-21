@@ -1769,6 +1769,26 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
             logger.warning(f"[post_tool] Error auto-chaining send_email: {e}")
             pass
     
+    # 2c. send_email: Direct confirmation to avoid LLM misinterpretation
+    if last_tool_msg.name == "send_email":
+        try:
+            result_data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+            
+            # Check if email was sent successfully
+            if isinstance(result_data, dict) and result_data.get("sent") is True:
+                to_emails = result_data.get("to", [])
+                subject = result_data.get("subject", "documento")
+                
+                # Generate clear success message
+                email_list = ", ".join(to_emails) if isinstance(to_emails, list) else str(to_emails)
+                confirmation = f"✅ Email enviado correctamente a {email_list}\n\nEl enlace al documento estará disponible por 24 horas."
+                
+                logger.info(f"[post_tool] send_email succeeded → rendering confirmation")
+                return {"messages": [AIMessage(content=confirmation)]}
+        except Exception as e:
+            logger.warning(f"[post_tool] Error rendering send_email confirmation: {e}")
+            pass
+    
     # 3. get_numbers: renderizado directo de plantilla de números
     if last_tool_msg.name == "get_numbers":
         try:
