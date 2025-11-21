@@ -79,8 +79,8 @@ def index_document(property_id: str, document_group: str, document_subgroup: str
 
     try:
         # Upsert rows into rag_chunks. If the embedding column exists, it will be stored.
-        sb.table(\"rag_chunks\").upsert(rows, on_conflict=\"property_id,document_group,document_subgroup,document_name,chunk_index\").execute()
-        return {\"indexed\": len(rows)}
+        sb.table("rag_chunks").upsert(rows, on_conflict="property_id,document_group,document_subgroup,document_name,chunk_index").execute()
+        return {"indexed": len(rows)}
     except Exception as e:
         # If embedding column doesn't exist, retry without it
         if "embedding" in str(e).lower():
