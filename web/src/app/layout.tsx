@@ -2,49 +2,79 @@ import './globals.css'
 import React from 'react'
 import type { Metadata } from 'next'
 import Image from 'next/image'
+import { Inter, Lora } from 'next/font/google'
+
+const inter = Inter({ 
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+})
+
+const lora = Lora({
+  subsets: ['latin'],
+  variable: '--font-lora',
+  display: 'swap',
+})
 
 export const metadata: Metadata = {
-  title: 'RAMA country living AI assistant',
-  description: 'Chat with your countryside AI helper 🌿 🐝 🌾',
+  title: 'RAMA Country Living',
+  description: 'Your intelligent countryside property assistant.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen">
-        <header className="sticky top-0 z-10 glass-strong nature-shadow-lg">
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-6 px-6 py-5">
-            <div className="flex items-center gap-4">
-              {/* Logo space */}
-              <div className="relative h-[5rem] w-[5rem] overflow-hidden rounded-2xl ring-2 ring-[color:var(--c-green-300)] nature-shadow transition-transform hover:scale-105">
-                <Image alt="RAMA" src="/rama-logo.png" fill className="object-contain p-2" />
+    <html lang="en" className={`${inter.variable} ${lora.variable}`}>
+      <body className="min-h-screen bg-[color:var(--bg-app)] font-sans text-[color:var(--text-primary)] selection:bg-[color:var(--c-green-100)] selection:text-[color:var(--c-green-900)]">
+        
+        {/* Modern Header - Clean & Professional */}
+        <header className="sticky top-0 z-50 w-full border-b border-[color:var(--border-subtle)] bg-[color:var(--bg-surface-glass)] backdrop-blur-md transition-all duration-300">
+          <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-6">
+            
+            {/* Brand Identity */}
+            <div className="flex items-center gap-3 group cursor-pointer">
+              <div className="relative h-8 w-8 overflow-hidden transition-transform duration-500 group-hover:rotate-12">
+                 {/* Using emoji as fallback logo if image fails, or keep image if preferred. Keeping image for consistency. */}
+                <Image 
+                  alt="RAMA" 
+                  src="/rama-logo.png" 
+                  fill 
+                  className="object-contain" 
+                  sizes="32px"
+                />
               </div>
-              <div className="leading-tight">
-                <div className="text-4xl font-bold tracking-tight bg-gradient-to-r from-[color:var(--c-green-700)] to-[color:var(--c-green-600)] bg-clip-text text-transparent">
+              <div className="flex flex-col justify-center">
+                <h1 className="font-serif text-xl font-bold leading-none tracking-tight text-[color:var(--text-primary)]">
                   RAMA
-                </div>
-                <div className="text-base text-[color:var(--c-green-700)] flex items-center gap-2 font-medium">
-                  <span className="text-lg">🌾</span>
-                  <span>Country Living</span>
-                </div>
+                </h1>
+                <span className="text-[10px] font-medium uppercase tracking-widest text-[color:var(--text-secondary)] opacity-80 group-hover:opacity-100 transition-opacity">
+                  Country Living
+                </span>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <button className="rounded-2xl px-5 py-2.5 text-white text-sm font-semibold nature-shadow-lg transition-all hover:scale-105 bg-gradient-to-r from-[color:var(--c-green-600)] to-[color:var(--c-green-700)] hover:from-[color:var(--c-green-700)] hover:to-[color:var(--c-green-800)] shine-effect">
-                ✨ Asistente IA
-              </button>
+
+            {/* Status Indicator / Assistant Label */}
+            <div className="flex items-center gap-4">
+               <div className="flex items-center gap-2 rounded-full border border-[color:var(--border-subtle)] bg-white/50 px-3 py-1 text-xs font-medium text-[color:var(--text-secondary)] shadow-sm backdrop-blur-sm">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+                </span>
+                AI Assistant Active
+              </div>
             </div>
+            
           </div>
         </header>
-        <main className="mx-auto max-w-5xl px-6 py-6 country-pattern">
+
+        {/* Main Workspace - Full Width for Tools */}
+        <main className="mx-auto max-w-[1600px] px-4 py-6 md:px-6">
           {children}
         </main>
-        <footer className="mt-12 pb-8 text-center text-sm text-[color:var(--c-green-700)] opacity-70">
-          <div className="flex items-center justify-center gap-2">
-            <span>🏡</span>
-            <span>Hecho con cariño para el campo</span>
-            <span>🌿</span>
-          </div>
+
+        <footer className="mt-auto py-6 text-center">
+          <p className="font-serif text-xs italic text-[color:var(--text-tertiary)]">
+            Managed with care by RAMA AI
+          </p>
         </footer>
       </body>
     </html>

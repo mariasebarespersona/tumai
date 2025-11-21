@@ -3,176 +3,144 @@
 @tailwind utilities;
 
 :root {
-  /* Paleta verde campo natural */
-  --c-green-50: #f7fdf5;
-  --c-green-100: #e8f7e4;
-  --c-green-200: #d4eece;
-  --c-green-300: #b3dfaa;
-  --c-green-400: #8fcb7f;
-  --c-green-500: #6eb55e;
-  --c-green-600: #4f9542;
-  --c-green-700: #3d7435;
-  --c-green-800: #2e5828;
-  --c-green-900: #1f3d1e;
+  /* 
+    PALETTE: "Modern Rural" 
+    Concept: Warm Stone, Deep Forest, Crisp Paper, Clay.
+    Replaces the "Neon/Digital Green" with sophisticated earth tones.
+  */
+
+  /* Base Hues (Primitives) */
+  --stone-50:  #fafaf9;
+  --stone-100: #f5f5f4;
+  --stone-200: #e7e5e4;
+  --stone-300: #d6d3d1;
+  --stone-800: #292524;
+  --stone-900: #1c1917;
+
+  --forest-50:  #f2fcf5;
+  --forest-100: #e1f7e6;
+  --forest-500: #22c55e; /* Brighter for success states only */
+  --forest-700: #15803d;
+  --forest-800: #166534;
+  --forest-900: #14532d; /* RAMA Primary Brand Color */
+
+  /* Semantic Variables (Usage) */
   
-  /* Tonos tierra complementarios */
-  --c-earth-50: #fdfbf7;
-  --c-earth-100: #f9f5ed;
-  --c-earth-200: #f1e8d9;
-  --c-earth-300: #e3d4bd;
-  --c-earth-400: #d4c0a1;
-  --c-earth-500: #c5ac85;
-  --c-earth-600: #a8916f;
+  /* Backgrounds */
+  --bg-app: var(--stone-50);         /* Main app background (warm paper) */
+  --bg-surface: #ffffff;             /* Cards, inputs, panels */
+  --bg-surface-glass: rgba(255, 255, 255, 0.85); /* Header, floating inputs */
   
-  /* Acentos campo */
-  --c-sage-400: #9caf88;
-  --c-sage-500: #7a9165;
-  --c-olive-500: #808000;
-  --c-wheat-300: #f5deb3;
+  /* Text */
+  --text-primary: var(--stone-900);   /* Headings, main text */
+  --text-secondary: var(--stone-800); /* Subtitles, labels (slightly lighter) */
+  --text-tertiary: #78716c;           /* Meta data, timestamps */
+  --text-brand: var(--forest-900);    /* Brand highlights */
+
+  /* Borders & Lines */
+  --border-subtle: var(--stone-200);
+  --border-strong: var(--stone-300);
+  --border-focus: var(--forest-800);
+
+  /* Components */
+  --c-green-50:  var(--forest-50);
+  --c-green-100: var(--forest-100);
+  --c-green-200: #bbf7d0;
+  --c-green-300: #86efac;
+  --c-green-400: #4ade80;
+  --c-green-500: var(--forest-800); /* Mapping old primary to new deep forest */
+  --c-green-600: var(--forest-900);
+  --c-green-700: #052e16;
+  --c-green-800: #022c22;
+  --c-green-900: #064e3b;
 }
 
-html, body {
-  height: 100%;
+@layer base {
+  body {
+    @apply antialiased text-[color:var(--text-primary)] bg-[color:var(--bg-app)];
+  }
+  
+  /* Headings use Serif */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-lora), serif;
+  }
 }
 
-body {
-  @apply antialiased;
-  background: linear-gradient(
-    135deg,
-    #f7fdf5 0%,
-    #e8f7e4 25%,
-    #d4eece 50%,
-    #e8f7e4 75%,
-    #f7fdf5 100%
-  );
-  background-attachment: fixed;
-  color: var(--c-green-900);
+@layer components {
+  /* Modern Card - Clean, subtle border, soft shadow */
+  .rama-card {
+    @apply bg-white rounded-xl border border-[color:var(--border-subtle)] shadow-sm transition-shadow duration-200;
+  }
+  .rama-card:hover {
+    @apply shadow-md border-[color:var(--border-strong)];
+  }
+
+  /* Primary Button - Solid, Matte, Elegant */
+  .btn-primary {
+    @apply bg-[color:var(--forest-900)] text-white font-medium px-4 py-2 rounded-lg 
+           shadow-sm hover:bg-[color:var(--forest-800)] hover:shadow-md 
+           active:transform active:scale-[0.98] transition-all duration-200;
+  }
+
+  /* Secondary Button - Outline or Soft Background */
+  .btn-secondary {
+    @apply bg-white border border-[color:var(--border-strong)] text-[color:var(--text-secondary)] 
+           font-medium px-4 py-2 rounded-lg hover:bg-[color:var(--stone-50)] hover:text-[color:var(--text-primary)]
+           transition-all duration-200;
+  }
+
+  /* Scrollbar */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--stone-300) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--stone-300);
+    border-radius: 3px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: var(--stone-400);
+  }
 }
 
-.country-gradient {
-  background: linear-gradient(
-    180deg,
-    rgba(232, 247, 228, 0.8) 0%,
-    rgba(247, 253, 245, 0.6) 100%
-  );
-}
-
-.country-pattern {
-  background-image: 
-    radial-gradient(circle at 20% 50%, rgba(179, 223, 170, 0.1) 0%, transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(156, 175, 136, 0.1) 0%, transparent 50%);
-}
-
+/* Utilities */
 .glass {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: saturate(130%) blur(12px);
-  border: 1px solid rgba(179, 223, 170, 0.3);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
 }
 
 .glass-strong {
   background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: saturate(140%) blur(16px);
-  border: 1px solid rgba(179, 223, 170, 0.4);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
 }
 
-.field-card {
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(232, 247, 228, 0.85) 100%
-  );
-  backdrop-filter: blur(10px);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
 }
 
-.field-card:hover {
-  transform: translateY(-4px) scale(1.02);
-  box-shadow: 0 12px 24px -6px rgba(79, 149, 66, 0.25);
-}
-
+/* Overriding previous styles to be cleaner */
 .nature-shadow {
-  box-shadow: 
-    0 4px 6px -1px rgba(79, 149, 66, 0.1),
-    0 2px 4px -1px rgba(79, 149, 66, 0.06);
+  box-shadow: 0 2px 8px -2px rgba(28, 25, 23, 0.08);
 }
-
 .nature-shadow-lg {
-  box-shadow: 
-    0 10px 15px -3px rgba(79, 149, 66, 0.15),
-    0 4px 6px -2px rgba(79, 149, 66, 0.1);
+  box-shadow: 0 12px 24px -6px rgba(28, 25, 23, 0.12);
 }
-
-.scrollbar-thin {
-  scrollbar-width: thin;
-  scrollbar-color: var(--c-green-400) transparent;
-}
-
-.scrollbar-thin::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: linear-gradient(
-    180deg,
-    var(--c-green-400) 0%,
-    var(--c-green-500) 100%
-  );
-  border-radius: 10px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(
-    180deg,
-    var(--c-green-500) 0%,
-    var(--c-green-600) 100%
-  );
-  background-clip: padding-box;
-}
-
-.scrollbar-thin::-webkit-scrollbar-track {
-  background-color: rgba(212, 238, 206, 0.3);
-  border-radius: 10px;
-}
-
-/* Animación de pulso suave */
-@keyframes pulse-soft {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
-}
-
-.animate-pulse-soft {
-  animation: pulse-soft 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* Efecto de brillo sutil */
 .shine-effect {
+  /* Disabled shine for cleaner look, or keep it subtle */
   position: relative;
   overflow: hidden;
-}
-
-.shine-effect::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.3),
-    transparent
-  );
-  transition: left 0.5s;
-}
-
-.shine-effect:hover::before {
-  left: 100%;
 }
