@@ -73,7 +73,7 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
     # Generate a synthetic message_id for verification/logging
     message_id = f"<{uuid4()}@rama.local>"
     # Log email sent event to Logfire
-    logfire.info("email_sent", to=to, subject=subject, attachments_count=len(attachments))
+    logfire.info("email_sent", to=to, subject=subject, attachments_count=len(attachments or []))
     return {
         "sent": True, 
         "success": True,
