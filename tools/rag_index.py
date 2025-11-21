@@ -54,7 +54,14 @@ def index_document(property_id: str, document_group: str, document_subgroup: str
         # 1536 dims to match default vector(1536) schema
         embed_model = OpenAIEmbeddings(model="text-embedding-3-small")
         vectors = embed_model.embed_documents(chunks)
-    except Exception:
+    except Exception as emb_err:
+        # Log embedding failure and continue without embeddings
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f\"Embedding failed for document {document_name}: {emb_err}\")
+        except Exception:
+            pass
         vectors = [None] * len(chunks)
     for i, ch in enumerate(chunks):
         rows.append({
@@ -71,8 +78,9 @@ def index_document(property_id: str, document_group: str, document_subgroup: str
         return {"indexed": 0}
 
     try:
-        sb.table("rag_chunks").upsert(rows, on_conflict="property_id,document_group,document_subgroup,document_name,chunk_index").execute()
-        return {"indexed": len(rows)}
+        # Upsert rows into rag_chunks. If the embedding column exists, it will be stored.
+        sb.table(\"rag_chunks\").upsert(rows, on_conflict=\"property_id,document_group,document_subgroup,document_name,chunk_index\").execute()
+        return {\"indexed\": len(rows)}
     except Exception as e:
         # If embedding column doesn't exist, retry without it
         if "embedding" in str(e).lower():

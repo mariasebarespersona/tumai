@@ -336,8 +336,31 @@ def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
             "signed_url": signed.get("signedURL"),
             "expires_at": expires_at,
         }
-        sb.rpc("update_property_document_link", payload).execute()
-        logger.info(f"✅ Database updated via RPC for {document_name}")
+        result = sb.rpc("update_property_document_link", payload).execute()
+        logger.info(f"✅ Database RPC update executed for {document_name}: {result}")
+        # Verify the update is visible via list_property_documents (retry a few times if necessary)
+        verified = False
+        for attempt in range(3):
+            try:
+                all_docs_after = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data or []
+                found = [
+                    d for d in all_docs_after
+                    if d.get("document_group") == document_group
+                    and (d.get("document_subgroup") or "") == sg
+                    and d.get("document_name") == document_name
+                    and d.get("storage_key")
+                ]
+                if found:
+                    logger.info(f"✅ Verified DB link after RPC on attempt {attempt+1}")
+                    verified = True
+                    break
+            except Exception as _v_err:
+                logger.warning(f"Verification attempt {attempt+1} failed: {_v_err}")
+            # small backoff
+            import time as _time
+            _time.sleep(0.5)
+        if not verified:
+            logger.warning(f"⚠️ Could not verify document link in DB after RPC for {document_name}")
         
     except Exception as e:
         logger.error(f"❌ RPC update failed: {e}")
