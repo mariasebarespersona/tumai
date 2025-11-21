@@ -89,6 +89,148 @@ class DocsAgent(BaseAgent):
                 # Fall back to parent's run method
                 pass
         
+        # Detect if user is asking to send document by email
+        import re
+        email_keywords = ["manda", "envia", "envía", "mandar", "enviar", "send", "email", "correo", "mail"]
+        has_email_intent = any(kw in user_lower for kw in email_keywords) and ("email" in user_lower or "correo" in user_lower or "mail" in user_lower)
+        
+        if has_email_intent and property_id:
+            logger.info(f"[{self.name}] 🔒 Forcing email flow for property {property_id[:8]}...")
+            
+            # Extract email address if present
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            email_match = re.search(email_pattern, user_input)
+            email_address = email_match.group(0) if email_match else None
+            
+            # Extract document name from user input
+            # Common patterns: "contrato arquitecto", "contrato del arquitecto", etc.
+            doc_name = None
+            doc_patterns = [
+                r"(?:el |la |los |las )?contrato\s+(?:del\s+|de\s+|de\s+la\s+)?(\w+)",
+                r"(?:el |la |los |las )?(\w+\s+\w+)\s+por\s+email",
+                r"documento\s+[\"']?([^\"']+)[\"']?",
+            ]
+            for pattern in doc_patterns:
+                match = re.search(pattern, user_lower, re.IGNORECASE)
+                if match:
+                    doc_name = match.group(1).strip()
+                    break
+            
+            # If no specific document name found, try to extract any capitalized phrase
+            if not doc_name:
+                # Look for document names in the input
+                words = user_input.split()
+                for i, word in enumerate(words):
+                    if word.lower() in ["contrato", "documento", "factura", "escritura"]:
+                        # Get next 1-2 words
+                        potential_name = " ".join(words[i:min(i+3, len(words))])
+                        doc_name = potential_name
+                        break
+            
+            # Normalize document name (capitalize properly)
+            if doc_name:
+                doc_name = doc_name.title()
+                # Common document name corrections
+                if "arquitecto" in doc_name.lower():
+                    doc_name = "Contrato arquitecto"
+                elif "abogado" in doc_name.lower():
+                    doc_name = "Contrato abogado"
+                elif "obra" in doc_name.lower() and "contrato" in doc_name.lower():
+                    doc_name = "Contrato obra"
+            
+            logger.info(f"[{self.name}] 📧 Email flow detected: doc='{doc_name}', email='{email_address}'")
+            
+            # If we don't have email yet, ask for it
+            if not email_address:
+                logger.info(f"[{self.name}] ❓ No email provided, asking user...")
+                return {
+                    "action": "response",
+                    "agent": self.name,
+                    "response": f"¿A qué correo quieres que envíe el documento{f' \"{doc_name}\"' if doc_name else ''}?",
+                    "latency_ms": 0,
+                    "success": True
+                }
+            
+            # We have both document name and email - execute the flow
+            if doc_name and email_address:
+                logger.info(f"[{self.name}] ✅ Executing email flow: {doc_name} → {email_address}")
+                try:
+                    from tools.docs_tools import signed_url_for
+                    from tools.email_tool import send_email
+                    
+                    # Step 1: Get signed URL for document
+                    logger.info(f"[{self.name}] 🔗 Getting signed URL for '{doc_name}'...")
+                    signed_url = signed_url_for(property_id, doc_name)
+                    
+                    if not signed_url:
+                        logger.error(f"[{self.name}] ❌ Document not found: {doc_name}")
+                        return {
+                            "action": "response",
+                            "agent": self.name,
+                            "response": f"❌ No encontré el documento \"{doc_name}\". Por favor, verifica el nombre del documento.",
+                            "latency_ms": 0,
+                            "success": False
+                        }
+                    
+                    logger.info(f"[{self.name}] ✅ Got signed URL")
+                    
+                    # Step 2: Send email with the link
+                    logger.info(f"[{self.name}] 📧 Sending email to {email_address}...")
+                    email_html = f'''
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #2d5016;">📄 Documento: {doc_name}</h2>
+                        <p style="color: #666; font-size: 14px;">Aquí está el documento que solicitaste:</p>
+                        <p style="margin: 30px 0;">
+                            <a href="{signed_url}" 
+                               style="display: inline-block; padding: 12px 24px; background-color: #10b981; 
+                                      color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                                📄 Descargar {doc_name}
+                            </a>
+                        </p>
+                        <p style="color: #999; font-size: 12px;">
+                            <em>Este enlace expira en 24 horas.</em>
+                        </p>
+                    </div>
+                    '''
+                    
+                    email_result = send_email(
+                        to=[email_address],
+                        subject=f"Documento: {doc_name}",
+                        html=email_html
+                    )
+                    
+                    if email_result.get("sent") and email_result.get("success"):
+                        logger.info(f"[{self.name}] ✅ Email sent successfully")
+                        return {
+                            "action": "response",
+                            "agent": self.name,
+                            "response": f"✅ Email enviado correctamente a {email_address} con el documento \"{doc_name}\". El enlace estará disponible por 24 horas.",
+                            "latency_ms": 0,
+                            "success": True
+                        }
+                    else:
+                        logger.error(f"[{self.name}] ❌ Email send failed: {email_result}")
+                        return {
+                            "action": "response",
+                            "agent": self.name,
+                            "response": f"❌ Hubo un error al enviar el email. Por favor, intenta de nuevo.",
+                            "latency_ms": 0,
+                            "success": False
+                        }
+                        
+                except Exception as e:
+                    logger.error(f"[{self.name}] ❌ Error in forced email flow: {e}", exc_info=True)
+                    return {
+                        "action": "response",
+                        "agent": self.name,
+                        "response": f"❌ Error al procesar el email: {str(e)}",
+                        "latency_ms": 0,
+                        "success": False
+                    }
+            else:
+                logger.warning(f"[{self.name}] ⚠️ Could not extract document name from: {user_input}")
+                # Fall through to normal LLM processing
+        
         # Default: use parent's run method
         return super().run(user_input, property_id, context)
     
