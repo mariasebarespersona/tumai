@@ -139,7 +139,14 @@ export default function ChatPage() {
   }, [documents.uploaded.length])
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    // Auto-scroll to bottom when new messages arrive (only if already near bottom)
+    if (scrollRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = scrollRef.current
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100 // Within 100px of bottom
+      if (isNearBottom) {
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+      }
+    }
   }, [messages.length])
 
   const onDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -1510,7 +1517,7 @@ export default function ChatPage() {
         
         {/* Chat area - Right side when Excel is open (smaller), full width otherwise */}
         <div className={`${hasExcel ? 'flex-[3] flex-shrink-0 h-full' : 'flex-1'} flex flex-col min-h-0`}>
-          <div ref={scrollRef} className={`flex-1 overflow-auto p-4 ${hasExcel ? 'rounded-xl border border-[color:var(--border-subtle)] bg-white' : ''} scrollbar-thin`}>
+          <div ref={scrollRef} className={`flex-1 overflow-y-auto p-4 max-h-[600px] ${hasExcel ? 'rounded-xl border border-[color:var(--border-subtle)] bg-white' : ''} scrollbar-thin`}>
             {!hasExcel && ExcelPanel}
             {hasExcel && (
               <>
