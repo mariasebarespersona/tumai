@@ -1462,6 +1462,7 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
     Responsibilities:
     - set_current_property: persist property_id
     - Direct rendering for common queries (list_docs, get_numbers, list_properties) to skip LLM
+    - Auto-chain signed_url_for → send_email in email flows
     """
     messages = state.get("messages", [])
     
@@ -1698,6 +1699,74 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                 
                 return {"messages": [AIMessage(content=content)]}
         except Exception:
+            pass
+    
+    # 2b. signed_url_for: Auto-chain to send_email in email flows
+    if last_tool_msg.name == "signed_url_for":
+        try:
+            # Check if this is part of an email flow
+            user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+            if user_msgs:
+                # Look at the last few user messages for email intent + email address
+                last_user_texts = []
+                email_address = None
+                
+                for msg in reversed(user_msgs[-5:]):  # Check last 5 user messages
+                    content = (msg.content or "").lower() if isinstance(msg.content, str) else ""
+                    last_user_texts.append(content)
+                    
+                    # Extract email if present
+                    import re
+                    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                    found_emails = re.findall(email_pattern, content, re.IGNORECASE)
+                    if found_emails:
+                        email_address = found_emails[0]
+                
+                # Check if any recent message mentions email sending
+                email_keywords = ["manda", "mandame", "envía", "enviame", "enviar", "mandar", "email", "correo", "mail"]
+                is_email_flow = any(any(kw in text for kw in email_keywords) for text in last_user_texts)
+                
+                if is_email_flow and email_address:
+                    # Extract signed_url from tool result
+                    result_data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
+                    signed_url = result_data.get("signed_url") if isinstance(result_data, dict) else None
+                    
+                    if signed_url:
+                        # Determine document name from context
+                        doc_name = "documento"
+                        for msg in reversed(messages[-10:]):
+                            if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                for tc in msg.tool_calls:
+                                    if tc.get("name") == "signed_url_for":
+                                        args = tc.get("args", {})
+                                        doc_name = args.get("document_name", "documento")
+                                        break
+                        
+                        # Force send_email call
+                        logger.info(f"[post_tool] signed_url_for in email flow → forcing send_email to {email_address}")
+                        html_body = f'''<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+  <h2 style="color: #333;">Documento solicitado</h2>
+  <p>Aquí está el documento que solicitaste:</p>
+  <p style="margin: 20px 0;">
+    <a href="{signed_url}" style="display: inline-block; padding: 12px 24px; background-color: #10b981; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
+      📄 Descargar {doc_name}
+    </a>
+  </p>
+  <p style="color: #666; font-size: 14px;"><small>Este enlace expira en 24 horas.</small></p>
+</div>'''
+                        
+                        forced_send_email = AIMessage(content="", tool_calls=[{
+                            "name": "send_email",
+                            "args": {
+                                "to": [email_address],
+                                "subject": f"Documento: {doc_name}",
+                                "html": html_body
+                            },
+                            "id": "post_tool_send_email_1"
+                        }])
+                        return {"messages": [forced_send_email]}
+        except Exception as e:
+            logger.warning(f"[post_tool] Error auto-chaining send_email: {e}")
             pass
     
     # 3. get_numbers: renderizado directo de plantilla de números
