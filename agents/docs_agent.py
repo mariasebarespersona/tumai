@@ -142,20 +142,27 @@ Cuando el usuario pregunta sobre el CONTENIDO de un documento (fechas, pagos, cl
 
 **FLUJO PARA ENVIAR DOCUMENTOS POR EMAIL**:
 Si el usuario pide "manda X por email" o "envía X a [email]":
-1. Usa `list_docs` para verificar si el documento existe (tiene storage_key)
-2. Si existe:
-   a. Usa `signed_url_for` para generar el link seguro (recibirás {"signed_url": "https://..."})
-   b. INMEDIATAMENTE después, usa `send_email` con:
-      - to: lista con el email del usuario (ejemplo: ["tumai2025@hotmail.com"])
-      - subject: "Documento: [nombre del documento]"
-      - html: un HTML con el link (ejemplo: '<p>Aquí está tu documento: <a href="[signed_url]">Descargar [documento]</a></p>')
-   c. El sistema pedirá confirmación automáticamente - NO preguntes tú
-   d. Después de que send_email se ejecute, confirma: "✅ Email enviado a [email] con el [documento]"
-3. Si NO existe:
-   - Dile al usuario que ese documento no ha sido subido aún
-   - NO muestres toda la lista de documentos pendientes a menos que lo pida explícitamente
+1. Verifica si el usuario mencionó un email en su mensaje
+   - Si NO mencionó email: pregunta "¿A qué correo quieres que lo envíe?" y espera su respuesta
+   - Si SÍ mencionó email: continúa con el paso 2
+2. Una vez tengas el email, verifica el documento con `list_docs` (tiene storage_key?)
+3. Si existe el documento y tienes el email:
+   a. Llama `signed_url_for` para generar el link seguro
+   b. INMEDIATAMENTE después (en el MISMO turno), llama `send_email` con:
+      - to: ["email_del_usuario"]
+      - subject: "Documento: [nombre]"
+      - html: '<p>Aquí está el documento solicitado:</p><p><a href="[signed_url]" style="display:inline-block;padding:10px 20px;background-color:#10b981;color:white;text-decoration:none;border-radius:5px;">📄 Descargar [nombre_documento]</a></p><p><small>Este enlace expira en 24 horas.</small></p>'
+   c. El sistema pedirá confirmación - NO preguntes tú
+   d. Después de ejecutar, confirma: "✅ Email enviado a [email]"
+4. Si NO existe el documento:
+   - Dile al usuario que no ha sido subido aún
+   - NO muestres la lista completa de documentos
 
-**IMPORTANTE**: NO digas "voy a enviar" sin llamar a send_email. Debes EJECUTAR send_email con los parámetros correctos.
+**CRÍTICO**: 
+- SIEMPRE pide el email ANTES de llamar a signed_url_for
+- Una vez tengas email + signed_url, DEBES llamar a send_email inmediatamente
+- NO digas "voy a enviar" sin ejecutar send_email
+- NO esperes confirmación antes de llamar a send_email (el sistema la pedirá automáticamente)
 
 **Cuando envíes emails**:
 - SIEMPRE usa `signed_url_for` para generar un link seguro (expira en 24h)
