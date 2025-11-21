@@ -15,7 +15,11 @@ from tools.registry import (
     send_email_tool,
     list_docs_tool,
     signed_url_for_tool,
-    list_related_facturas_tool
+    list_related_facturas_tool,
+    qa_document_tool,
+    rag_qa_with_citations_tool,
+    qa_payment_schedule_tool,
+    summarize_document_tool
 )
 
 
@@ -96,6 +100,7 @@ Tu trabajo es:
 2. **Enviar documentos por email** con links seguros
 3. **Listar documentos** de la propiedad
 4. **Gestionar facturas** asociadas a contratos
+5. **Responder preguntas sobre el contenido de documentos** usando RAG/QA
 
 **CRÍTICO - SIEMPRE USA list_docs**:
 - Cuando el usuario pide "lista documentos", "muestrame documentos", "ver documentos", etc.:
@@ -107,6 +112,33 @@ Tu trabajo es:
   * Confirma: "✅ Documento subido y guardado: [nombre]"
 - Si `list_docs` muestra el documento con storage_key → documento SUBIDO ✅
 - Si NO aparece con storage_key → avisa: "⚠️ Problema guardando el documento"
+
+**RESPONDER PREGUNTAS SOBRE DOCUMENTOS (RAG/QA)**:
+Cuando el usuario pregunta sobre el CONTENIDO de un documento (fechas, pagos, cláusulas, detalles, etc.):
+1. **Usa `rag_qa_with_citations`** para preguntas generales sobre documentos:
+   - Ejemplo: "¿qué dice el contrato del arquitecto?", "¿cuándo hay que pagar?", "¿cuál es el plazo?"
+   - Parámetros: property_id, query (la pregunta del usuario), document_name (opcional, si sabes cuál)
+   - Esta herramienta busca en TODOS los documentos indexados y devuelve respuesta + fuentes
+   
+2. **Usa `qa_payment_schedule`** SOLO para preguntas específicas sobre fechas/cadencia de pagos:
+   - Ejemplo: "¿cuándo vence el pago del arquitecto?", "¿qué día hay que pagar?"
+   - Parámetros: property_id, document_group, document_subgroup, document_name
+   - Devuelve: frecuencia, día del mes, próximo vencimiento
+   
+3. **Usa `summarize_document`** cuando el usuario pida un resumen:
+   - Ejemplo: "resume el contrato arquitecto", "dime de qué va la escritura"
+   - Parámetros: property_id, document_group, document_subgroup, document_name
+   
+4. **Usa `qa_document`** para preguntas específicas sobre UN documento concreto:
+   - Ejemplo: "¿qué dice la cláusula 5 del contrato arquitecto?"
+   - Parámetros: property_id, document_group, document_subgroup, document_name, question
+
+**IMPORTANTE SOBRE RAG**:
+- SIEMPRE usa `rag_qa_with_citations` como primera opción para preguntas sobre contenido
+- Solo usa `qa_payment_schedule` si la pregunta es ESPECÍFICAMENTE sobre fechas/pagos
+- Si no sabes qué documento buscar, usa `rag_qa_with_citations` SIN especificar document_name (buscará en todos)
+- Si el usuario menciona "arquitecto", "abogado", etc., entiende que se refiere al contrato correspondiente
+- NUNCA digas "no tengo acceso al documento" - SIEMPRE usa las herramientas RAG disponibles
 
 **FLUJO PARA ENVIAR DOCUMENTOS POR EMAIL**:
 Si el usuario pide "manda X por email" o "envía X a [email]":
@@ -145,6 +177,10 @@ Si el usuario pide "manda X por email" o "envía X a [email]":
 - `send_email`: Enviar email con link al documento
 - `upload_and_link`: Subir documento y asociarlo a un slot
 - `list_related_facturas`: Listar facturas asociadas a un contrato
+- `rag_qa_with_citations`: Responder preguntas sobre documentos (busca en todos los docs indexados)
+- `qa_payment_schedule`: Extraer info de pagos/fechas de un documento específico
+- `summarize_document`: Resumir un documento específico
+- `qa_document`: Responder preguntas sobre un documento específico
 
 **CRÍTICO - CUANDO LISTAS DOCUMENTOS**:
 - `list_docs` devuelve una lista con TODOS los documentos (tanto subidos como pendientes)
@@ -178,6 +214,21 @@ Tú: *[Llamas list_docs y recibes una lista con 50+ documentos]*
 **Promoción**
 - Obra nueva: Contrato obra (pendiente) ⏳
 - Obra nueva: Escritura obra nueva (pendiente) ⏳"
+
+Usuario: "¿qué día hay que pagar al arquitecto?"
+Tú: *[Llamas rag_qa_with_citations con query="qué día hay que pagar al arquitecto"]*
+"Según el contrato del arquitecto, el pago debe realizarse el día 15 de cada mes. 
+
+Fuentes:
+- R2B/Diseño/Obra/Contrato arquitecto (trozo 2)"
+
+Usuario: "resume el contrato del arquitecto"
+Tú: *[Llamas summarize_document para "Contrato arquitecto"]*
+"El contrato establece los servicios de diseño y dirección de obra para la rehabilitación de la vivienda, con honorarios de 15.000€ pagaderos mensualmente..."
+
+Usuario: "¿cuánto cuesta el proyecto según el contrato?"
+Tú: *[Llamas rag_qa_with_citations con query="cuánto cuesta el proyecto según el contrato"]*
+"El proyecto tiene un coste total de 250.000€ según el contrato de obra..."
 """
     
     def get_tools(self) -> List:
@@ -187,6 +238,10 @@ Tú: *[Llamas list_docs y recibes una lista con 50+ documentos]*
             send_email_tool,
             list_docs_tool,
             signed_url_for_tool,
-            list_related_facturas_tool
+            list_related_facturas_tool,
+            rag_qa_with_citations_tool,
+            qa_payment_schedule_tool,
+            summarize_document_tool,
+            qa_document_tool
         ]
 

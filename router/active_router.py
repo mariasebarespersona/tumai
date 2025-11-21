@@ -100,6 +100,28 @@ class ActiveRouter:
             return ("numbers.send_email", 0.90, "NumbersAgent")
         
         # ========== DOCS OPERATIONS ==========
+        # Document content questions (RAG/QA) - HIGHEST PRIORITY for DocsAgent
+        # Questions about document content should go to DocsAgent (it has RAG tools now)
+        doc_keywords = ["contrato", "factura", "escritura", "certificado", "documento", "arquitecto", "abogado", "obra"]
+        question_words = ["qué", "que", "cuándo", "cuando", "cuánto", "cuanto", "cómo", "como", "dónde", "donde", "quién", "quien"]
+        content_verbs = ["dice", "pone", "contiene", "menciona", "explica", "especifica", "establece"]
+        payment_terms = ["pagar", "pago", "pagos", "fecha", "vencimiento", "plazo", "día", "dia", "mes", "vence"]
+        
+        has_doc_keyword = any(kw in s for kw in doc_keywords)
+        has_question = any(qw in s for qw in question_words)
+        has_content_verb = any(verb in s for verb in content_verbs)
+        has_payment_term = any(term in s for term in payment_terms)
+        
+        # If it's a question about document content (not about listing or sending)
+        if has_doc_keyword and (has_question or has_content_verb or has_payment_term):
+            # Exclude list/send operations
+            is_list_request = any(w in s for w in ["lista", "listar", "mostrar", "muestrame", "ver", "dame", "cuales", "tengo", "hay"])
+            is_send_request = any(w in s for w in ["manda", "envía", "enviar", "mandame", "enviame"])
+            
+            # If it's NOT just a list/send, it's a content question → DocsAgent with RAG
+            if not (is_list_request and not (has_question or has_content_verb or has_payment_term)) and not is_send_request:
+                return ("docs.qa", 0.90, "DocsAgent")
+        
         # List documents (PRIORITY: must catch all variations)
         # Direct list requests: "lista documentos", "muestrame documentos", "ver documentos"
         if "documentos" in s or "documento" in s:
