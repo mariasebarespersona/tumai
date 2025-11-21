@@ -887,6 +887,20 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             except Exception as e:
                 print(f"[ORCHESTRATOR] Could not read numbers_template from state: {e}")
             
+            # CRITICAL: Check if there's awaiting_confirmation in LangGraph state
+            # If so, we need to handle confirmation directly via MainAgent (not re-route)
+            # However, we also need to know which agent was waiting
+            awaiting_confirmation_state = None
+            try:
+                from agentic import agent as langgraph_agent
+                config = {"configurable": {"thread_id": session_id}}
+                current_state = langgraph_agent.get_state(config)
+                if current_state and current_state.values.get("awaiting_confirmation"):
+                    awaiting_confirmation_state = current_state.values
+                    print(f"[ORCHESTRATOR] ⚠️ awaiting_confirmation detected - will use MainAgent to process confirmation")
+            except Exception as e:
+                print(f"[ORCHESTRATOR] Could not check LangGraph state for confirmation: {e}")
+            
             # Run async function
             routing_result = asyncio.get_event_loop().run_until_complete(
                 orchestrator.route_and_execute(
@@ -894,7 +908,8 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                     session_id=session_id,
                     property_id=property_id or STATE.get("property_id"),
                     context=context,
-                    direct_execution=direct_execution
+                    direct_execution=direct_execution,
+                    use_main_agent=awaiting_confirmation_state is not None  # Force MainAgent if awaiting confirmation
                 )
             )
             

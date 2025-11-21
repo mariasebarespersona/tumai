@@ -53,7 +53,8 @@ class OrchestrationRouter:
         property_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         use_main_agent: bool = False,
-        direct_execution: bool = False  # NEW: Enable Phase 2b direct execution
+        direct_execution: bool = False,  # NEW: Enable Phase 2b direct execution
+        force_agent: Optional[str] = None  # NEW: Force a specific agent (e.g., "DocsAgent")
     ) -> Dict[str, Any]:
         """
         Route user input to appropriate agent and handle redirects.
@@ -65,6 +66,7 @@ class OrchestrationRouter:
             context: Additional context
             use_main_agent: If True, skip routing and use MainAgent directly
             direct_execution: If True, agents execute directly (Phase 2b)
+            force_agent: If set, skip routing and use this agent directly (e.g., for confirmation flows)
         
         Returns:
             Dict with response, agent_path, redirects, and metadata
@@ -103,26 +105,33 @@ class OrchestrationRouter:
                     "total_latency_ms": int((time.time() - start_time) * 1000)
                 }
             
-            # Get initial routing decision
-            routing = await self.active_router.decide(current_input, full_context)
-            current_agent_name = routing["target_agent"]
-            agent_path.append(current_agent_name)
-            
-            logger.info(
-                f"[orchestrator] Initial routing: {routing['intent']} "
-                f"(conf={routing['confidence']:.2f}) → {current_agent_name}"
-            )
-            
-            # Log routing decision
-            log_event("routing", "route_decision", "success", 
-                      ms=int((time.time() - start_time) * 1000),
-                      extra={
-                          "session": session_id,
-                          "intent": routing["intent"],
-                          "confidence": routing["confidence"],
-                          "agent": current_agent_name,
-                          "fallback": routing.get("fallback_reason") is not None
-                      })
+            # If force_agent is set, skip routing and use that agent
+            if force_agent:
+                logger.info(f"[orchestrator] Using {force_agent} directly (force_agent, skip routing)")
+                current_agent_name = force_agent
+                agent_path.append(current_agent_name)
+                routing = None  # No routing decision was made
+            else:
+                # Get initial routing decision
+                routing = await self.active_router.decide(current_input, full_context)
+                current_agent_name = routing["target_agent"]
+                agent_path.append(current_agent_name)
+                
+                logger.info(
+                    f"[orchestrator] Initial routing: {routing['intent']} "
+                    f"(conf={routing['confidence']:.2f}) → {current_agent_name}"
+                )
+                
+                # Log routing decision
+                log_event("routing", "route_decision", "success", 
+                          ms=int((time.time() - start_time) * 1000),
+                          extra={
+                              "session": session_id,
+                              "intent": routing["intent"],
+                              "confidence": routing["confidence"],
+                              "agent": current_agent_name,
+                              "fallback": routing.get("fallback_reason") is not None
+                          })
             
             # === PHASE 2b: DIRECT EXECUTION ===
             if direct_execution and current_agent_name in self.agents:
