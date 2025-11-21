@@ -59,7 +59,7 @@ def index_document(property_id: str, document_group: str, document_subgroup: str
         try:
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f\"Embedding failed for document {document_name}: {emb_err}\")
+            logger.warning(f"Embedding failed for document {document_name}: {emb_err}")
         except Exception:
             pass
         vectors = [None] * len(chunks)
