@@ -2043,3 +2043,6 @@ def build_graph():
     # except Exception:
     #     pass
     return app
+
+# Create and export the agent instance globally
+agent = build_graph()

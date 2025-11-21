@@ -17,7 +17,7 @@ logfire.configure(
     environment=os.getenv("ENVIRONMENT", "development"),
 )
 
-from agentic import build_graph
+from agentic import agent  # Import the global agent instance
 from router.scaffold import Router
 from router.orchestrator import orchestrator
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
@@ -45,7 +45,6 @@ from tools.numbers_agent import (
     chart_sensitivity_heatmap as numbers_chart_sensitivity,
 )
 
-agent = build_graph()
 router = Router()
 
 # Session state management (persistent to survive reloads)
