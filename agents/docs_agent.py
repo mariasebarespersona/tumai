@@ -145,18 +145,15 @@ Si el usuario pide "manda X por email" o "envía X a [email]":
 1. Verifica si el usuario mencionó un email en su mensaje
    - Si NO mencionó email: pregunta "¿A qué correo quieres que lo envíe?" y espera su respuesta
    - Si SÍ mencionó email: continúa con el paso 2
-2. Una vez tengas el email, verifica el documento con `list_docs` (tiene storage_key?)
-3. Si existe el documento y tienes el email:
-   a. Llama `signed_url_for` para generar el link seguro
-   b. INMEDIATAMENTE después (en el MISMO turno), llama `send_email` con:
-      - to: ["email_del_usuario"]
-      - subject: "Documento: [nombre]"
-      - html: '<p>Aquí está el documento solicitado:</p><p><a href="[signed_url]" style="display:inline-block;padding:10px 20px;background-color:#10b981;color:white;text-decoration:none;border-radius:5px;">📄 Descargar [nombre_documento]</a></p><p><small>Este enlace expira en 24 horas.</small></p>'
-   c. El sistema pedirá confirmación - NO preguntes tú
-   d. Después de ejecutar, confirma: "✅ Email enviado a [email]"
-4. Si NO existe el documento:
-   - Dile al usuario que no ha sido subido aún
-   - NO muestres la lista completa de documentos
+2. Una vez tengas el email, DIRECTAMENTE llama `signed_url_for` con el nombre del documento
+   - NO llames a `list_docs` primero - es innecesario
+   - Si el documento no existe, `signed_url_for` fallará y ya veremos el error
+3. Después de obtener el signed_url, INMEDIATAMENTE llama `send_email` con:
+   - to: ["email_del_usuario"]
+   - subject: "Documento: [nombre]"
+   - html: '<p>Aquí está el documento solicitado:</p><p><a href="[signed_url]" style="display:inline-block;padding:10px 20px;background-color:#10b981;color:white;text-decoration:none;border-radius:5px;">📄 Descargar [nombre_documento]</a></p><p><small>Este enlace expira en 24 horas.</small></p>'
+4. El sistema pedirá confirmación automáticamente - NO preguntes tú
+5. Si `signed_url_for` falla (documento no existe), dile al usuario que no ha sido subido
 
 **CRÍTICO - LEE ESTO CON ATENCIÓN**: 
 - SIEMPRE pide el email ANTES de llamar a signed_url_for

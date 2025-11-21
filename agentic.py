@@ -1614,12 +1614,13 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                 last_user_text = (user_msgs[-1].content or "").lower() if isinstance(user_msgs[-1].content, str) else ""
                 logger.info(f"[post_tool list_docs] last_user_text: {last_user_text[:100]}")
                 
-                # NO INTERCEPTAR si es un flujo de EMAIL
+                # NO INTERCEPTAR si es un flujo de EMAIL - dejar que el agente lo maneje
                 email_keywords = ["manda", "mandame", "envía", "enviame", "enviar", "mandar", "email", "correo", "mail"]
                 is_email_flow = any(kw in last_user_text for kw in email_keywords)
                 if is_email_flow:
-                    logger.info(f"[post_tool list_docs] ✋ FLUJO EMAIL DETECTADO - NO interceptar, dejar que agente continúe con signed_url + send_email")
-                    should_render_list = False  # NO renderizar lista, dejar que continúe
+                    logger.info(f"[post_tool list_docs] ✋ FLUJO EMAIL DETECTADO - list_docs NO debería haberse llamado")
+                    logger.warning(f"[post_tool list_docs] El DocsAgent debería llamar directamente a signed_url_for, no a list_docs")
+                    should_render_list = False  # NO renderizar lista
                 
                 if should_render_list and "recordatorio" in last_user_text and "cada mes" in last_user_text and "dia que haya que pagar" in last_user_text:
                     logger.info(f"[post_tool list_docs] ✅ FLUJO RECORDATORIO DETECTADO!")
