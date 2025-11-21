@@ -1474,7 +1474,10 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
             break
     
     if not last_tool_msg:
+        logger.info(f"[post_tool] No ToolMessage found, returning None")
         return None
+    
+    logger.info(f"[post_tool] Processing ToolMessage: {last_tool_msg.name}")
     
     import json
     
@@ -1704,9 +1707,11 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
     
     # 2b. signed_url_for: Auto-chain to send_email in email flows
     if last_tool_msg.name == "signed_url_for":
+        logger.info(f"[post_tool] Detected signed_url_for - checking for email flow")
         try:
             # Check if this is part of an email flow
             user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+            logger.info(f"[post_tool] Found {len(user_msgs)} user messages")
             if user_msgs:
                 # Look at the last few user messages for email intent + email address
                 last_user_texts = []
@@ -1722,15 +1727,19 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                     found_emails = re.findall(email_pattern, content, re.IGNORECASE)
                     if found_emails:
                         email_address = found_emails[0]
+                        logger.info(f"[post_tool] Found email address: {email_address}")
                 
                 # Check if any recent message mentions email sending
                 email_keywords = ["manda", "mandame", "envía", "enviame", "enviar", "mandar", "email", "correo", "mail"]
                 is_email_flow = any(any(kw in text for kw in email_keywords) for text in last_user_texts)
+                logger.info(f"[post_tool] is_email_flow={is_email_flow}, email_address={email_address}")
                 
                 if is_email_flow and email_address:
+                    logger.info(f"[post_tool] ✅ Email flow detected with email address - extracting signed_url")
                     # Extract signed_url from tool result
                     result_data = json.loads(last_tool_msg.content) if isinstance(last_tool_msg.content, str) else last_tool_msg.content
                     signed_url = result_data.get("signed_url") if isinstance(result_data, dict) else None
+                    logger.info(f"[post_tool] signed_url extracted: {signed_url[:100] if signed_url else None}")
                     
                     if signed_url:
                         # Determine document name from context
@@ -1765,6 +1774,7 @@ def post_tool(state: AgentState) -> Dict[str, Any]:
                             },
                             "id": "post_tool_send_email_1"
                         }])
+                        logger.info(f"[post_tool] 🚀 Returning forced send_email call")
                         return {"messages": [forced_send_email]}
         except Exception as e:
             logger.warning(f"[post_tool] Error auto-chaining send_email: {e}")
