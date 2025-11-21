@@ -35,6 +35,7 @@ export default function ChatPage() {
   // Document list state
   const [documents, setDocuments] = useState<{uploaded: any[], pending: any[]}>({uploaded: [], pending: []})
   const [documentsLoading, setDocumentsLoading] = useState(false)
+  const [showDocumentList, setShowDocumentList] = useState(false)
 
   // Sync with backend on mount - send a ping to get current property_id
   useEffect(() => {
@@ -92,22 +93,26 @@ export default function ChatPage() {
   // Fetch documents when property changes
   const fetchDocuments = useCallback(async (pid: string) => {
     if (!pid) return
+    console.log(`[Documents] 🔄 Fetching documents for property: ${pid.substring(0, 8)}...`)
     setDocumentsLoading(true)
     try {
       const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:7901'
-      const resp = await fetch(`${BACKEND_URL}/api/documents?property_id=${pid}`)
+      const url = `${BACKEND_URL}/api/documents?property_id=${pid}`
+      console.log(`[Documents] Fetching from: ${url}`)
+      const resp = await fetch(url)
       const data = await resp.json()
+      console.log(`[Documents] Response:`, data)
       if (data.ok) {
         setDocuments({
           uploaded: data.uploaded || [],
           pending: data.pending || []
         })
-        console.log(`[Documents] Fetched ${data.uploaded?.length || 0} uploaded, ${data.pending?.length || 0} pending`)
+        console.log(`[Documents] ✅ Fetched ${data.uploaded?.length || 0} uploaded, ${data.pending?.length || 0} pending`)
       } else {
-        console.error('[Documents] Error:', data.error)
+        console.error('[Documents] ❌ Error:', data.error)
       }
     } catch (e) {
-      console.error('[Documents] Failed to fetch:', e)
+      console.error('[Documents] ❌ Failed to fetch:', e)
     } finally {
       setDocumentsLoading(false)
     }
@@ -116,11 +121,22 @@ export default function ChatPage() {
   // Fetch documents when property_id changes
   useEffect(() => {
     if (propertyId) {
+      console.log(`[Documents] Property changed to: ${propertyId.substring(0, 8)}..., fetching documents`)
       fetchDocuments(propertyId)
     } else {
+      console.log('[Documents] No property_id, clearing documents')
       setDocuments({uploaded: [], pending: []})
+      setShowDocumentList(false)
     }
   }, [propertyId, fetchDocuments])
+
+  // Auto-open document list when documents are loaded
+  useEffect(() => {
+    if (documents.uploaded.length > 0 && !showDocumentList) {
+      console.log(`[Documents] Auto-opening list (${documents.uploaded.length} documents)`)
+      setShowDocumentList(true)
+    }
+  }, [documents.uploaded.length])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -1424,11 +1440,62 @@ export default function ChatPage() {
               {propertyName}
             </span>
             {documents.uploaded.length > 0 && (
-              <span className="text-xs text-[color:var(--text-tertiary)] bg-[color:var(--stone-100)] px-2 py-1 rounded-full">
-                📄 {documents.uploaded.length} documento{documents.uploaded.length !== 1 ? 's' : ''}
-              </span>
+              <button
+                onClick={() => setShowDocumentList(!showDocumentList)}
+                className="text-xs text-[color:var(--text-tertiary)] bg-[color:var(--stone-100)] hover:bg-[color:var(--stone-200)] px-2 py-1 rounded-full transition-colors cursor-pointer"
+              >
+                📄 {documents.uploaded.length} documento{documents.uploaded.length !== 1 ? 's' : ''} {showDocumentList ? '▼' : '▶'}
+              </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Document List - Collapsible */}
+      {propertyName && showDocumentList && (
+        <div className="rama-card p-4 animate-fade-in">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-serif font-bold text-[color:var(--text-primary)]">
+              📄 Documentos Subidos
+            </h3>
+            <button 
+              onClick={() => fetchDocuments(propertyId!)}
+              className="text-xs px-2 py-1 rounded bg-[color:var(--stone-100)] hover:bg-[color:var(--stone-200)] text-[color:var(--text-secondary)] transition-colors"
+              disabled={documentsLoading}
+            >
+              {documentsLoading ? '⏳' : '↻'} Recargar
+            </button>
+          </div>
+          
+          {documentsLoading ? (
+            <div className="text-sm text-[color:var(--text-tertiary)] py-4 text-center">
+              Cargando documentos...
+            </div>
+          ) : documents.uploaded.length > 0 ? (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {documents.uploaded.map((doc: any, idx: number) => (
+                <div 
+                  key={idx}
+                  className="flex items-center gap-3 p-2 rounded-lg bg-[color:var(--stone-50)] border border-[color:var(--border-subtle)] hover:bg-[color:var(--stone-100)] transition-colors"
+                >
+                  <span className="text-lg">📄</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-[color:var(--text-primary)] truncate">
+                      {doc.document_name || 'Sin nombre'}
+                    </div>
+                    <div className="text-xs text-[color:var(--text-tertiary)] truncate">
+                      {doc.document_group}{doc.document_subgroup ? ` / ${doc.document_subgroup}` : ''}
+                    </div>
+                  </div>
+                  <span className="text-xs text-[color:var(--forest-600)]">✓</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-[color:var(--text-tertiary)] py-4 text-center">
+              No hay documentos subidos aún
+            </div>
+          )}
         </div>
       )}
       
