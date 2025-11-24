@@ -1340,10 +1340,10 @@ async def ui_chat(
     else:
         print(f"[DEBUG] No audio file received")
     
-    def make_response(answer: str, extra: dict | None = None):
+    def make_response(answer: str, extra: dict | None = None, show_documents: bool = False):
         current_pid = STATE.get("property_id")
         print(f"[DEBUG make_response] Current property_id in STATE: {current_pid}")
-        resp = {"answer": answer, "property_id": current_pid}
+        resp = {"answer": answer, "property_id": current_pid, "show_documents": show_documents}
         
         # Include property_name if we have property_id
         if current_pid:
@@ -1919,11 +1919,22 @@ async def ui_chat(
                     answer = str(content)
                     break
     
+    # Check if agent called list_docs tool - if so, tell frontend to show visual document framework
+    show_documents_ui = False
+    if out.get("messages"):
+        for msg in out["messages"]:
+            msg_name = getattr(msg, "name", None)
+            if msg_name == "list_docs":
+                show_documents_ui = True
+                print(f"[DEBUG] Detected list_docs tool call - will show document framework UI")
+                break
+    
     # Include transcript if this was a voice input
     print(f"[DEBUG] Final transcript value: {transcript}")
     extra = {"transcript": transcript} if transcript else None
     print(f"[DEBUG] Final response extra: {extra}")
-    return make_response(answer or "(sin respuesta)", extra)
+    print(f"[DEBUG] show_documents_ui: {show_documents_ui}")
+    return make_response(answer or "(sin respuesta)", extra, show_documents=show_documents_ui)
 
     # Handle email requests - check if we're waiting for email first
     # BUT: if user is clearly asking for something else (like selecting a property), cancel pending email

@@ -16,6 +16,7 @@ type ChatMessage = {
   toolCalls?: any[]
   toolResults?: any[]
   userMessage?: string  // Store user message for feedback
+  showDocuments?: boolean  // Flag to show DocumentFramework component
 }
 
 export default function ChatPage() {
@@ -268,7 +269,8 @@ export default function ChatPage() {
         agentName: data?.agent_name || 'MainAgent',
         toolCalls: data?.tool_calls || [],
         toolResults: data?.tool_results || [],
-        userMessage: userMessageContent  // Store user message for feedback
+        userMessage: userMessageContent,  // Store user message for feedback
+        showDocuments: data?.show_documents || false  // Flag to show DocumentFramework
       }])
       
       // Auto-reload documents if agent confirms a document was uploaded
@@ -1627,7 +1629,19 @@ export default function ChatPage() {
                     : 'bg-white border border-[color:var(--border-strong)] text-[color:var(--text-primary)] rounded-tl-sm')
                 }>
                   <div className={m.role === 'user' ? 'text-white/90' : ''}>
-                    {m.role === 'assistant' ? renderMessageContent(m.content) : m.content}
+                    {m.role === 'assistant' ? (
+                      m.showDocuments ? (
+                        // Show visual document framework instead of text
+                        <div className="w-full">
+                          <div className="text-sm text-[color:var(--text-secondary)] mb-4">
+                            {m.content}
+                          </div>
+                          <DocumentFramework uploaded={documents.uploaded} pending={documents.pending} />
+                        </div>
+                      ) : (
+                        renderMessageContent(m.content)
+                      )
+                    ) : m.content}
                   </div>
                   
                   {/* Add feedback buttons for assistant messages */}
