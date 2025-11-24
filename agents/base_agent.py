@@ -7,7 +7,7 @@ All agents inherit from this base class and override:
 """
 
 from typing import Dict, List, Any, Optional
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 import logging
 import time
@@ -158,10 +158,68 @@ class BaseAgent:
             # Bind tools to LLM
             llm_with_tools = self.llm.bind_tools(tools) if tools else self.llm
             
-            # Invoke LLM
-            llm_start = time.time()
-            response = llm_with_tools.invoke(messages)
-            llm_latency_ms = int((time.time() - llm_start) * 1000)
+            # ReAct Loop: Execute tools until LLM says it's done
+            max_iterations = 5
+            iteration = 0
+            llm_latency_ms = 0
+            
+            while iteration < max_iterations:
+                iteration += 1
+                logger.debug(f"[{self.name}] ReAct iteration {iteration}/{max_iterations}")
+                
+                # Invoke LLM
+                llm_start = time.time()
+                response = llm_with_tools.invoke(messages)
+                llm_latency_ms += int((time.time() - llm_start) * 1000)
+                
+                # Check if LLM wants to use tools
+                tool_calls = getattr(response, "tool_calls", [])
+                
+                if not tool_calls:
+                    # No tools to execute, we're done
+                    logger.info(f"[{self.name}] No tool calls, finishing after {iteration} iterations")
+                    break
+                
+                # Execute tools
+                logger.info(f"[{self.name}] Executing {len(tool_calls)} tool(s)")
+                messages.append(AIMessage(content=response.content or "", tool_calls=tool_calls))
+                
+                for tool_call in tool_calls:
+                    tool_name = tool_call.get("name")
+                    tool_args = tool_call.get("args", {})
+                    tool_id = tool_call.get("id", "unknown")
+                    
+                    logger.info(f"[{self.name}] Calling tool: {tool_name} with args: {tool_args}")
+                    
+                    try:
+                        # Find and execute the tool
+                        tool_obj = next((t for t in tools if t.name == tool_name), None)
+                        if not tool_obj:
+                            raise ValueError(f"Tool '{tool_name}' not found")
+                        
+                        # Execute tool
+                        tool_result = tool_obj.invoke(tool_args)
+                        logger.info(f"[{self.name}] Tool {tool_name} result: {str(tool_result)[:200]}")
+                        
+                        # Add tool result to messages
+                        messages.append(ToolMessage(
+                            content=str(tool_result),
+                            tool_call_id=tool_id,
+                            name=tool_name
+                        ))
+                        
+                    except Exception as e:
+                        logger.error(f"[{self.name}] Tool {tool_name} failed: {e}", exc_info=True)
+                        messages.append(ToolMessage(
+                            content=f"Error: {str(e)}",
+                            tool_call_id=tool_id,
+                            name=tool_name
+                        ))
+                
+                # Continue loop to let LLM see tool results
+            
+            if iteration >= max_iterations:
+                logger.warning(f"[{self.name}] Reached max iterations ({max_iterations})")
             
             # Track LLM call metrics
             try:
