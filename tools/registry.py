@@ -23,6 +23,8 @@ from .docs_tools import (
     seed_mock_documents as _seed_mock_documents,
     purge_property_documents as _purge_property_documents,
     purge_all_documents as _purge_all_documents,
+    set_property_strategy as _set_property_strategy, # NEW
+    get_property_strategy as _get_property_strategy, # NEW
 )
 from .numbers_tools import (
     set_number as _set_number, 
@@ -264,6 +266,26 @@ def purge_property_documents_tool(property_id: str) -> Dict:
 def purge_all_documents_tool() -> Dict:
     """Delete all uploaded files for all properties and clear links."""
     return _purge_all_documents()
+
+# --- Strategy Management (NEW) ---
+class SetPropertyStrategyInput(BaseModel):
+    property_id: str
+    strategy: str = Field(..., description="Strategy: 'R2B', 'PROMOCION', 'R2B_VENTA', 'R2B_PM'")
+
+@tool("set_property_strategy")
+def set_property_strategy_tool(property_id: str, strategy: str) -> str:
+    """Set the management strategy for a property (R2B, PROMOCION, R2B_VENTA, R2B_PM).
+    This unlocks the corresponding document sections.
+    """
+    return _set_property_strategy(property_id, strategy)
+
+class GetPropertyStrategyInput(BaseModel):
+    property_id: str
+
+@tool("get_property_strategy")
+def get_property_strategy_tool(property_id: str) -> str:
+    """Get the current management strategy for a property."""
+    return _get_property_strategy(property_id)
 
 
 class SetNumberInput(BaseModel):
@@ -937,6 +959,8 @@ TOOLS = [
     seed_facturas_for_tool,        # NEW - Seed invoice placeholders
     purge_property_documents_tool, # NEW
     purge_all_documents_tool,      # NEW
+    set_property_strategy_tool,    # NEW
+    get_property_strategy_tool,    # NEW
     create_reminder_tool,          # NEW - Recordatorios
     extract_payment_date_tool,     # NEW - Extrae fechas de documentos
     list_reminders_tool,           # NEW - Lista recordatorios
