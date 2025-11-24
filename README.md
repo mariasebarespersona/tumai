@@ -43,50 +43,64 @@ RAMA AI is an intelligent assistant that helps real estate teams manage property
 
 ## 🏗️ Architecture
 
-![RAMA AI Architecture](docs/architecture_diagram.png)
+```mermaid
+graph LR
+    %% Styles
+    classDef frontend fill:#dbfafe,stroke:#0ea5e9,stroke-width:2px,color:#000;
+    classDef backend fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#000;
+    classDef ailayer fill:#dcfce7,stroke:#22c55e,stroke-width:2px,color:#000;
+    classDef data fill:#fee2e2,stroke:#ef4444,stroke-width:2px,color:#000;
+    classDef external fill:#f3f4f6,stroke:#6b7280,stroke-width:2px,color:#000;
+
+    subgraph Frontend [Frontend]
+        direction TB
+        UI[UI<br/>Next.js + React<br/>Tailwind CSS]:::frontend
+    end
+
+    subgraph Backend [Backend]
+        direction TB
+        API[API<br/>FastAPI<br/>Python 3.11]:::backend
+        Router[Intent Router<br/>Active Router]:::backend
+        Spec[Spec<br/>Supabase<br/>Storage]:::backend
+        
+        API --- Router
+        Router --- Spec
+    end
+
+    subgraph AILayer [AI Layer]
+        direction TB
+        MainAgent[MainAgent<br/>LangGraph]:::ailayer
+        Specialized[Specialized<br/>Agents<br/>ReAct Loops]:::ailayer
+        
+        MainAgent --- Specialized
+    end
+
+    subgraph Data [Data]
+        direction TB
+        DB[DB<br/>Supabase<br/>PostgreSQL]:::data
+    end
+
+    subgraph External [External]
+        direction TB
+        OpenAI[OpenAI<br/>GPT-4o]:::external
+        Log[Log<br/>Logfire<br/>Observability]:::external
+    end
+
+    %% Connections matching your diagram
+    UI -->|REST API| API
+    API --> MainAgent
+    Router --> Specialized
+    Spec --> DB
+
+    %% Styling for subgraphs
+    style Frontend fill:#eff6ff,stroke:#3b82f6,stroke-dasharray: 5 5
+    style Backend fill:#fffbeb,stroke:#f59e0b,stroke-dasharray: 5 5
+    style AILayer fill:#f0fdf4,stroke:#22c55e,stroke-dasharray: 5 5
+    style Data fill:#fef2f2,stroke:#ef4444,stroke-dasharray: 5 5
+    style External fill:#f9fafb,stroke:#9ca3af,stroke-dasharray: 5 5
+```
 
 ### System Overview
-
-RAMA AI uses a **multi-agent architecture** with specialized agents that collaborate to solve complex property management tasks:
-
-```
-┌─────────────┐
-│   User UI   │ Next.js + React + TailwindCSS
-└──────┬──────┘
-       │ REST API
-┌──────▼──────────────────────────────┐
-│  FastAPI Backend (Python 3.11)      │
-│  ┌────────────────────────────────┐ │
-│  │   Intent Router                │ │ ← Classifies user intent
-│  │   (Active Router)              │ │
-│  └───────────┬────────────────────┘ │
-│              │                       │
-│  ┌───────────▼────────────────────┐ │
-│  │  MainAgent (LangGraph)         │ │ ← Orchestrates workflow
-│  └───────────┬────────────────────┘ │
-│              │                       │
-│  ┌───────────▼────────────────────┐ │
-│  │  Specialized Agents            │ │
-│  │  ┌──────────────────────────┐  │ │
-│  │  │ DocsAgent (ReAct Loop)   │  │ │ ← Document management
-│  │  │ PropertyAgent            │  │ │ ← Property CRUD
-│  │  │ NumbersAgent             │  │ │ ← Financial analysis
-│  │  └──────────────────────────┘  │ │
-│  └────────────────────────────────┘ │
-└──────┬──────────────┬───────────────┘
-       │              │
-   ┌───▼──┐      ┌────▼────┐
-   │ DB   │      │ Storage │ Supabase (PostgreSQL + S3-like)
-   └──────┘      └─────────┘
-       │
-   ┌───▼────┐
-   │ OpenAI │ GPT-4o / GPT-4o-mini
-   └────────┘
-       │
-   ┌───▼────┐
-   │ Logfire│ Pydantic Logfire (Observability)
-   └────────┘
-```
 
 ### Key Components
 
