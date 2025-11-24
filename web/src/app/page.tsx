@@ -1036,7 +1036,7 @@ export default function ChatPage() {
   const ExcelPanel = useMemo(() => {
     if (!excelTemplate) return null
     return (
-      <div className="flex flex-col h-full rounded-xl border border-[color:var(--border-subtle)] bg-white shadow-sm overflow-hidden">
+      <div className="flex flex-col h-full rounded-xl border border-[color:var(--border-strong)] bg-white shadow-sm overflow-hidden">
         {/* Header with gradient and better styling */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--border-subtle)] bg-[color:var(--stone-50)]">
           <div className="flex items-center gap-3">
@@ -1517,7 +1517,7 @@ export default function ChatPage() {
         
         {/* Chat area - Right side when Excel is open (smaller), full width otherwise */}
         <div className={`${hasExcel ? 'flex-[3] flex-shrink-0 h-full' : 'flex-1'} flex flex-col min-h-0`}>
-          <div ref={scrollRef} className={`flex-1 overflow-y-auto p-4 max-h-[600px] ${hasExcel ? 'rounded-xl border border-[color:var(--border-subtle)] bg-white' : ''} scrollbar-thin`}>
+          <div ref={scrollRef} className={`flex-1 overflow-y-auto p-4 max-h-[600px] ${hasExcel ? 'rounded-xl border border-[color:var(--border-strong)] bg-white' : ''} scrollbar-thin`}>
             {!hasExcel && ExcelPanel}
             {hasExcel && (
               <>
@@ -1636,7 +1636,7 @@ export default function ChatPage() {
                   'max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-4 shadow-sm ' +
                   (m.role === 'user'
                     ? 'bg-[color:var(--forest-900)] text-white rounded-tr-sm'
-                    : 'bg-white border border-[color:var(--border-subtle)] text-[color:var(--text-primary)] rounded-tl-sm')
+                    : 'bg-white border border-[color:var(--border-strong)] text-[color:var(--text-primary)] rounded-tl-sm')
                 }>
                   <div className={m.role === 'user' ? 'text-white/90' : ''}>
                     {m.role === 'assistant' ? renderMessageContent(m.content) : m.content}
@@ -1690,7 +1690,7 @@ export default function ChatPage() {
           
           {/* Composer - Inside chat area when Excel is open */}
           {hasExcel && (
-            <div className="sticky bottom-0 mt-3 flex items-center gap-2 rounded-xl border border-[color:var(--border-subtle)] bg-white p-2 shadow-sm">
+            <div className="sticky bottom-0 mt-3 flex items-center gap-2 rounded-xl border border-[color:var(--border-strong)] bg-white p-2 shadow-sm">
               <button
                 onMouseDown={startRecording}
                 onMouseUp={stopRecording}
@@ -1740,7 +1740,7 @@ export default function ChatPage() {
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
-          className={`rounded-xl border border-dashed border-[color:var(--border-strong)] p-4 transition-colors ${files.length > 0 ? 'bg-[color:var(--forest-50)] border-[color:var(--forest-300)]' : 'bg-[color:var(--stone-50)] hover:bg-[color:var(--stone-100)]'}`}
+          className={`rounded-xl border border-dashed border-[color:var(--wheat-500)] p-4 transition-colors ${files.length > 0 ? 'bg-[color:var(--wheat-100)] border-[color:var(--wheat-600)]' : 'bg-[color:var(--stone-50)] hover:bg-[color:var(--wheat-100)]'}`}
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 text-[color:var(--text-secondary)]">
@@ -1762,7 +1762,7 @@ export default function ChatPage() {
 
       {/* Composer - Outside chat area when Excel is NOT open */}
       {!hasExcel && (
-        <div className="flex items-end gap-3 rounded-xl border border-[color:var(--border-subtle)] bg-white p-3 shadow-sm focus-within:ring-2 focus-within:ring-[color:var(--forest-100)] focus-within:border-[color:var(--forest-500)] transition-all">
+        <div className="flex items-end gap-3 rounded-xl border border-[color:var(--border-strong)] bg-white p-3 shadow-sm focus-within:ring-2 focus-within:ring-[color:var(--forest-100)] focus-within:border-[color:var(--forest-500)] transition-all">
           <button
             onMouseDown={startRecording}
             onMouseUp={stopRecording}

@@ -14,8 +14,17 @@
   --stone-100: #f5f5f4;
   --stone-200: #e7e5e4;
   --stone-300: #d6d3d1;
+  --stone-400: #a8a29e;
+  --stone-500: #78716c;
   --stone-800: #292524;
   --stone-900: #1c1917;
+
+  /* Wheat / Harvest Palette */
+  --wheat-100: #f3eadd;
+  --wheat-300: #e0cfb1;
+  --wheat-400: #cbb086; /* Base border */
+  --wheat-500: #b59666; /* Stronger/Hover */
+  --wheat-600: #967849; /* Text/Contrast */
 
   --forest-50:  #f2fcf5;
   --forest-100: #e1f7e6;
@@ -38,8 +47,8 @@
   --text-brand: var(--forest-900);    /* Brand highlights */
 
   /* Borders & Lines */
-  --border-subtle: var(--stone-200);
-  --border-strong: var(--stone-300);
+  --border-subtle: var(--stone-300);
+  --border-strong: var(--stone-400);
   --border-focus: var(--forest-800);
 
   /* Components */
@@ -69,10 +78,11 @@
 @layer components {
   /* Modern Card - Clean, subtle border, soft shadow */
   .rama-card {
-    @apply bg-white rounded-xl border border-[color:var(--border-subtle)] shadow-sm transition-shadow duration-200;
+    @apply bg-white rounded-xl border border-[color:var(--wheat-400)] shadow-sm transition-all duration-200;
   }
   .rama-card:hover {
-    @apply shadow-md border-[color:var(--border-strong)];
+    @apply shadow-md border-[color:var(--wheat-500)];
+    background-color: rgba(243, 234, 221, 0.3); /* var(--wheat-100) with 0.3 opacity */
   }
 
   /* Primary Button - Solid, Matte, Elegant */
