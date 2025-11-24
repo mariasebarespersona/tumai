@@ -2737,6 +2737,9 @@ async def ui_chat(
 @app.get("/api/documents")
 async def get_documents_api(property_id: str):
     """Get all documents for a property. Returns both uploaded and pending documents."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         from tools.docs_tools import list_docs
         logger.info(f"[API] GET /api/documents for property_id: {property_id}")
