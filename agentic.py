@@ -219,10 +219,10 @@ HERRAMIENTAS (nombres exactos)
   1. Inicializa el esquema de documentos (`ensure_documents_schema_v2`) con TODAS las celdas R2B (Compra, Diseño/Obra, etc.)
   2. Las tablas de números ya están listas (no requieren inicialización de esquema, solo selección de plantilla)
 - Esto garantiza que TODAS las propiedades nuevas tengan:
-  - ✅ Plantilla de documentos lista para usar (todas las celdas R2B creadas)
+  - ✅ Plantilla de documentos lista para usar (estructura V3: COMPRA → R2B/Promoción)
   - ✅ Framework de números listo (el usuario seleccionará la plantilla después)
 - NO es necesario llamar manualmente a funciones de inicialización después de crear una propiedad.
- - Si por permisos la inicialización de documentos falla, NO pidas nada al usuario: intenta `seed_documents_v2(property_id)` y vuelve a listar documentos.
+ - Si por permisos la inicialización de documentos falla, NO pidas nada al usuario: intenta `seed_documents_v3(property_id)` y vuelve a listar documentos.
 
 FLUJO: DOCUMENTOS
 - Todos los documentos son por propiedad. Nunca mezcles documentos entre propiedades: cada llamada a herramientas de documentos debe usar el `property_id` activo y devolver resultados solo de esa propiedad.
