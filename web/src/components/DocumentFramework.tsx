@@ -43,7 +43,7 @@ const DocItem = ({ doc, isUploaded }: { doc: Document, isUploaded: boolean }) =>
   </div>
 )
 
-const SectionCard = ({ title, docs, colorTheme, icon, active = true }: { title: string, docs: Document[], colorTheme: 'green' | 'blue' | 'purple', icon: string, active?: boolean }) => {
+const SectionCard = ({ title, docs, colorTheme, icon, active = true, badge }: { title: string, docs: Document[], colorTheme: 'green' | 'blue' | 'purple', icon: string, active?: boolean, badge?: React.ReactNode }) => {
     const uploadedCount = docs.filter(d => d.storage_key).length
     
     const themeClasses = {
@@ -73,6 +73,7 @@ const SectionCard = ({ title, docs, colorTheme, icon, active = true }: { title: 
                 <div className="flex items-center gap-2 font-bold text-sm">
                     <span className={`w-6 h-6 flex items-center justify-center rounded shadow-sm ${themeClasses.iconBg}`}>{icon}</span>
                     {title}
+                    {badge && <span className="ml-2">{badge}</span>}
                 </div>
                 <StatusBadge uploaded={uploadedCount} total={docs.length} />
             </div>
@@ -136,17 +137,33 @@ export const DocumentFramework = ({ uploaded, pending }: DocumentFrameworkProps)
   return (
     <div className="w-full max-w-5xl mx-auto font-sans p-2 bg-gray-50/50 rounded-xl">
       
-      {/* LEVEL 1: COMPRA (Always Active) */}
+      {/* LEVEL 1: COMPRA (Always Active & Mandatory) */}
       <div className="max-w-2xl mx-auto mb-2">
+        <div className="mb-3 text-center">
+          <span className="inline-block px-4 py-1.5 bg-[color:var(--forest-700)] text-white text-xs font-bold rounded-full uppercase tracking-wider shadow-md">
+            ✅ Fase Obligatoria para TODAS las propiedades
+          </span>
+        </div>
         <SectionCard 
-            title="1. COMPRA (Obligatorio)" 
+            title="1. COMPRA" 
             docs={groups.COMPRA} 
             colorTheme="green" 
-            icon="🏡" 
+            icon="🏡"
+            badge={
+              <span className="px-2 py-0.5 bg-[color:var(--forest-700)] text-white text-[10px] font-bold rounded uppercase">
+                Obligatorio
+              </span>
+            }
         />
       </div>
 
       {/* Decision Fork */}
+      <div className="my-4 text-center">
+        <div className="inline-block px-4 py-2 bg-gradient-to-r from-blue-100 to-purple-100 border-2 border-dashed border-gray-300 rounded-lg">
+          <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">⚡ Decisión: Elige UNA estrategia</p>
+          <p className="text-[10px] text-gray-500 mt-1">R2B (Reformar y vender) o Promoción (Obra nueva)</p>
+        </div>
+      </div>
       <Connector type="fork" />
       
       {/* LEVEL 2: BRANCHES */}
@@ -156,7 +173,7 @@ export const DocumentFramework = ({ uploaded, pending }: DocumentFrameworkProps)
           <div className={`transition-all duration-500 ${!showR2B ? 'opacity-30 blur-[1px]' : ''}`}>
               <div className="text-center mb-2">
                 <span className="inline-block px-3 py-1 bg-blue-100 text-blue-800 text-xs font-bold rounded-full uppercase tracking-wider shadow-sm border border-blue-200">
-                    Opción A: R2B
+                    {showR2B && !promoActive ? '✅ ' : ''}Opción A: R2B
                 </span>
               </div>
               
@@ -202,7 +219,7 @@ export const DocumentFramework = ({ uploaded, pending }: DocumentFrameworkProps)
           <div className={`transition-all duration-500 ${!showPromo ? 'opacity-30 blur-[1px]' : ''}`}>
               <div className="text-center mb-2">
                 <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 text-xs font-bold rounded-full uppercase tracking-wider shadow-sm border border-purple-200">
-                    Opción B: Promoción
+                    {promoActive && !r2bActive ? '✅ ' : ''}Opción B: Promoción
                 </span>
               </div>
 
