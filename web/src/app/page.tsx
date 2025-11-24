@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { mcpExcel } from '@/lib/mcp/client'
 import Spreadsheet from '@/components/Spreadsheet'
 import { FeedbackButtons } from '@/components/FeedbackButtons'
+import { DocumentFramework } from '@/components/DocumentFramework'
 import type { DragEvent } from 'react'
 // Removed EditableExcel import - using iframe instead
 
@@ -1478,29 +1479,16 @@ export default function ChatPage() {
             <div className="text-sm text-[color:var(--text-tertiary)] py-4 text-center">
               Cargando documentos...
             </div>
-          ) : documents.uploaded.length > 0 ? (
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {documents.uploaded.map((doc: any, idx: number) => (
-                <div 
-                  key={idx}
-                  className="flex items-center gap-3 p-2 rounded-lg bg-[color:var(--stone-50)] border border-[color:var(--border-subtle)] hover:bg-[color:var(--stone-100)] transition-colors"
-                >
-                  <span className="text-lg">📄</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-[color:var(--text-primary)] truncate">
-                      {doc.document_name || 'Sin nombre'}
-                    </div>
-                    <div className="text-xs text-[color:var(--text-tertiary)] truncate">
-                      {doc.document_group}{doc.document_subgroup ? ` / ${doc.document_subgroup}` : ''}
-                    </div>
-                  </div>
-                  <span className="text-xs text-[color:var(--forest-600)]">✓</span>
-                </div>
-              ))}
+          ) : documents.uploaded.length > 0 || documents.pending.length > 0 ? (
+            <div className="max-h-[600px] overflow-y-auto scrollbar-thin">
+              <DocumentFramework 
+                uploaded={documents.uploaded} 
+                pending={documents.pending}
+              />
             </div>
           ) : (
             <div className="text-sm text-[color:var(--text-tertiary)] py-4 text-center">
-              No hay documentos subidos aún
+              No hay documentos aún
             </div>
           )}
         </div>
