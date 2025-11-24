@@ -970,6 +970,21 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     
     print(f"[MEMORY DEBUG] Invoking agent with thread_id={session_id}, input={text[:50]}")
     
+    # Cleanup: Truncate old checkpoint messages to prevent memory bloat
+    # Keep only last 30 messages in checkpoint to avoid stale memory issues
+    try:
+        config = {"configurable": {"thread_id": session_id}}
+        current_state = agent.get_state(config)
+        if current_state and current_state.values.get("messages"):
+            messages = current_state.values["messages"]
+            if len(messages) > 30:
+                print(f"[MEMORY CLEANUP] Truncating checkpoint: {len(messages)} → 30 messages")
+                # Update state with truncated messages
+                truncated_state = {**current_state.values, "messages": messages[-30:]}
+                agent.update_state(config, truncated_state)
+    except Exception as e:
+        print(f"[MEMORY CLEANUP] Warning: Could not truncate checkpoint: {e}")
+    
     # Retry logic for transient connection errors
     max_retries = 2
     for attempt in range(max_retries):

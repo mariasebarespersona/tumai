@@ -1268,10 +1268,12 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                     else:
                         msgs.append(SystemMessage(content="⚠️ ATENCIÓN: El usuario está entrando en modo Números pero NO hay plantilla seleccionada. DEBES ofrecer las 4 opciones (R2B, R2B + PM, R2B + PM + Venta certs, Promoción) y esperar a que elija antes de llamar `get_numbers` o `set_number`."))
     
-    # Limitar historial a los últimos 10 mensajes para evitar rate limits
+    # Limitar historial a los últimos 20 mensajes para evitar rate limits y memoria obsoleta
     # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos
-    if len(messages) > 10:
-        filtered = messages[-10:]
+    MAX_MESSAGES = 20  # Aumentado de 10 a 20 para dar más contexto pero evitar memoria obsoleta
+    
+    if len(messages) > MAX_MESSAGES:
+        filtered = messages[-MAX_MESSAGES:]
         
         # Verificar si el primer mensaje es un ToolMessage
         # Si lo es, necesitamos incluir el AIMessage con tool_calls que lo precede
@@ -1279,18 +1281,19 @@ def assistant(state: AgentState) -> Dict[str, Any]:
             # Buscar hacia atrás el AIMessage con tool_calls que generó este ToolMessage
             tool_call_id = getattr(filtered[0], "tool_call_id", None)
             if tool_call_id:
-                # Buscar en los mensajes anteriores
-                for i in range(len(messages) - 16, -1, -1):
+                # Buscar en los mensajes anteriores (buscar hasta 10 mensajes hacia atrás)
+                search_start = max(0, len(messages) - MAX_MESSAGES - 10)
+                for i in range(len(messages) - MAX_MESSAGES - 1, search_start, -1):
                     msg = messages[i]
                     if isinstance(msg, AIMessage):
                         tool_calls = getattr(msg, "tool_calls", [])
                         if any(tc.get("id") == tool_call_id for tc in tool_calls):
                             # Encontramos el AIMessage, incluir desde ahí
-                            start_idx = i
-                            filtered = messages[start_idx:]
+                            filtered = messages[i:]
                             break
         
         msgs += filtered
+        logger.info(f"[assistant] Memory truncated: {len(messages)} → {len(filtered)} messages")
     else:
         msgs += messages
     
