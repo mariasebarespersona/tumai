@@ -854,9 +854,8 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             import nest_asyncio
             
             # Check if direct execution is enabled (Phase 2b)
-            # DISABLED: Direct execution causes empty responses because agents can't execute tools
-            # The MainAgent will handle tool execution instead
-            direct_execution = False  # os.getenv("USE_DIRECT_EXECUTION", "0") == "1"
+            # ENABLED: Specialized agents now have ReAct loop and can execute tools
+            direct_execution = True  # os.getenv("USE_DIRECT_EXECUTION", "1") == "1"
             
             # Allow nested event loops (FastAPI already has one running)
             try:
