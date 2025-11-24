@@ -93,6 +93,26 @@ class OrchestrationRouter:
                 except Exception as e:
                     logger.warning(f"[orchestrator] Could not get property name: {e}")
             
+            # CRITICAL: Load conversation history from LangGraph checkpointer
+            # This enables specialized agents to maintain context across turns
+            if session_id:
+                try:
+                    from agentic import agent as langgraph_agent
+                    from langchain_core.messages import HumanMessage, AIMessage
+                    
+                    config = {"configurable": {"thread_id": session_id}}
+                    state = langgraph_agent.get_state(config)
+                    
+                    if state and state.values.get("messages"):
+                        # Get last 10 messages for context (not too many to avoid bloat)
+                        messages = state.values["messages"][-10:]
+                        # Filter out system messages - only keep human/AI dialogue
+                        history = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))]
+                        full_context["history"] = history
+                        logger.info(f"[orchestrator] Loaded {len(history)} messages from checkpointer for specialized agent context")
+                except Exception as e:
+                    logger.warning(f"[orchestrator] Could not load history from checkpointer: {e}")
+            
             # If use_main_agent is True, skip routing entirely
             if use_main_agent:
                 logger.info(f"[orchestrator] Using MainAgent directly (skip routing)")
@@ -112,15 +132,51 @@ class OrchestrationRouter:
                 agent_path.append(current_agent_name)
                 routing = None  # No routing decision was made
             else:
-                # Get initial routing decision
-                routing = await self.active_router.decide(current_input, full_context)
-                current_agent_name = routing["target_agent"]
-                agent_path.append(current_agent_name)
+                # Check if we should continue with a specialized agent from previous turn
+                # This enables multi-turn conversations with specialized agents
+                continue_with_agent = None
+                if full_context.get("history"):
+                    try:
+                        last_messages = full_context["history"][-2:]  # Last 2 messages (AI question + user answer)
+                        if len(last_messages) >= 2:
+                            last_ai = last_messages[-2]
+                            last_human = last_messages[-1]
+                            
+                            # Check if last AI message was a question from a specialized agent
+                            if isinstance(last_ai, AIMessage) and isinstance(last_human, HumanMessage):
+                                ai_content = str(last_ai.content).lower()
+                                human_content = str(last_human.content).lower()
+                                
+                                # Pattern: AI asked for email, user provided email
+                                if "correo" in ai_content or "email" in ai_content:
+                                    if "@" in human_content and len(human_content.split()) <= 3:
+                                        # User is likely responding with an email
+                                        # Check what the previous intent was
+                                        if len(full_context["history"]) >= 3:
+                                            prev_human = full_context["history"][-3]
+                                            if isinstance(prev_human, HumanMessage):
+                                                prev_content = str(prev_human.content).lower()
+                                                # If previous message was about documents, continue with DocsAgent
+                                                if any(kw in prev_content for kw in ["documento", "email", "correo", "manda", "envia", "envía"]):
+                                                    continue_with_agent = "DocsAgent"
+                                                    logger.info(f"[orchestrator] 🔄 Continuing multi-turn conversation with DocsAgent")
+                    except Exception as e:
+                        logger.warning(f"[orchestrator] Error checking conversation continuity: {e}")
                 
-                logger.info(
-                    f"[orchestrator] Initial routing: {routing['intent']} "
-                    f"(conf={routing['confidence']:.2f}) → {current_agent_name}"
-                )
+                if continue_with_agent:
+                    current_agent_name = continue_with_agent
+                    agent_path.append(current_agent_name)
+                    routing = None
+                else:
+                    # Get initial routing decision
+                    routing = await self.active_router.decide(current_input, full_context)
+                    current_agent_name = routing["target_agent"]
+                    agent_path.append(current_agent_name)
+                    
+                    logger.info(
+                        f"[orchestrator] Initial routing: {routing['intent']} "
+                        f"(conf={routing['confidence']:.2f}) → {current_agent_name}"
+                    )
                 
                 # Log routing decision
                 log_event("routing", "route_decision", "success", 
