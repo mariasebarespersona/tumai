@@ -150,7 +150,49 @@ class BaseAgent:
             
             # Add context if provided
             if context and context.get("history"):
-                messages.extend(context["history"])
+                # CRITICAL: Detect if we're in the middle of a multi-turn flow
+                # This prevents agents from showing unnecessary information to user
+                history = context["history"]
+                
+                # Check if agent asked for email and user just provided it
+                if len(history) >= 2:
+                    last_ai = history[-2] if len(history) >= 2 else None
+                    last_human = history[-1] if len(history) >= 1 else None
+                    
+                    from langchain_core.messages import AIMessage, HumanMessage
+                    if isinstance(last_ai, AIMessage) and isinstance(last_human, HumanMessage):
+                        ai_content = str(last_ai.content).lower()
+                        human_content = str(last_human.content).lower()
+                        
+                        # Pattern: AI asked for email, user provided email
+                        if ("correo" in ai_content or "email" in ai_content) and ("@" in human_content):
+                            # Find what document was requested in previous messages
+                            original_request = None
+                            for msg in reversed(history[:-2]):  # Exclude last 2 (question + answer)
+                                if isinstance(msg, HumanMessage):
+                                    content = str(msg.content).lower()
+                                    if any(kw in content for kw in ["manda", "envia", "envía", "email", "correo"]):
+                                        original_request = msg.content
+                                        break
+                            
+                            if original_request:
+                                messages.append(SystemMessage(content=f"""🎯 CONTINUACIÓN DE FLUJO DETECTADA:
+- Petición original: "{original_request}"
+- Ya preguntaste por el email
+- Usuario acaba de proporcionar: {last_human.content}
+
+INSTRUCCIONES CRÍTICAS:
+1. Llama a list_docs INTERNAMENTE (sin mostrar al usuario)
+2. Busca el documento que coincida con la petición original
+3. Llama a signed_url_for con los metadatos exactos
+4. Llama a send_email con el email proporcionado
+5. RESPONDE SOLO: "✅ He enviado [documento] a [email]"
+
+❌ NO MUESTRES la lista de documentos al usuario
+❌ NO preguntes nada más
+✅ EJECUTA el flujo completo y confirma el envío"""))
+                
+                messages.extend(history)
             
             # Add user message
             messages.append(HumanMessage(content=user_input))
