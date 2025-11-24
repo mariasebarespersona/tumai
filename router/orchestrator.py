@@ -193,6 +193,11 @@ class OrchestrationRouter:
             if direct_execution and current_agent_name in self.agents:
                 logger.info(f"[orchestrator] 🚀 Starting direct execution with {current_agent_name}")
                 
+                # Add intent to context for modular prompts
+                if routing and routing.get("intent"):
+                    full_context["intent"] = routing["intent"]
+                    logger.info(f"[orchestrator] Intent for modular prompts: {routing['intent']}")
+                
                 # Bidirectional routing loop
                 while redirect_count < self.max_redirects:
                     agent = self.agents[current_agent_name]

@@ -126,19 +126,29 @@ class BaseAgent:
                 }
             
             # Build messages
-            # Try to pass property_name and numbers_template to system prompt if available in context
+            # Try to pass intent, property_name and numbers_template to system prompt if available in context
+            intent = context.get("intent") if context else None
             property_name = context.get("property_name") if context else None
             numbers_template = context.get("numbers_template") if context else None
+            
             try:
-                # Try to call with property_name and numbers_template parameters (NumbersAgent supports this)
-                system_prompt = self.get_system_prompt(property_name=property_name, numbers_template=numbers_template)
+                # Try to call with all parameters (modular agents)
+                system_prompt = self.get_system_prompt(intent=intent, property_name=property_name, numbers_template=numbers_template)
             except TypeError:
                 try:
-                    # Try with just property_name
-                    system_prompt = self.get_system_prompt(property_name=property_name)
+                    # Try with just intent (new modular agents)
+                    system_prompt = self.get_system_prompt(intent=intent)
                 except TypeError:
-                    # Fallback for agents that don't accept any parameters
-                    system_prompt = self.get_system_prompt()
+                    try:
+                        # Try to call with property_name and numbers_template parameters (NumbersAgent supports this)
+                        system_prompt = self.get_system_prompt(property_name=property_name, numbers_template=numbers_template)
+                    except TypeError:
+                        try:
+                            # Try with just property_name
+                            system_prompt = self.get_system_prompt(property_name=property_name)
+                        except TypeError:
+                            # Fallback for agents that don't accept any parameters
+                            system_prompt = self.get_system_prompt()
             
             messages = [
                 SystemMessage(content=system_prompt)
