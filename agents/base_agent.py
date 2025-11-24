@@ -144,6 +144,10 @@ class BaseAgent:
                 SystemMessage(content=system_prompt)
             ]
             
+            # CRITICAL: Add property_id to context so LLM knows the actual UUID
+            if property_id:
+                messages.append(SystemMessage(content=f"IMPORTANTE: El property_id actual es: {property_id}\nCuando llames a herramientas que requieren property_id, usa EXACTAMENTE este valor, NO uses placeholders como 'current_property_id'."))
+            
             # Add context if provided
             if context and context.get("history"):
                 messages.extend(context["history"])
@@ -153,7 +157,7 @@ class BaseAgent:
             
             # Get tools
             tools = self.get_tools()
-            logger.debug(f"[{self.name}] Using {len(tools)} tools")
+            logger.info(f"[{self.name}] 🔧 Binding {len(tools)} tools: {[t.name for t in tools]}")
             
             # Bind tools to LLM
             llm_with_tools = self.llm.bind_tools(tools) if tools else self.llm
