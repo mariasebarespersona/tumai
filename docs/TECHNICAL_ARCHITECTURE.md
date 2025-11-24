@@ -78,6 +78,8 @@ Charts: Recharts 3.4.1
 TypeScript: 5.4.5
 ```
 
+**Note:** The frontend includes an "Excel Panel" component - this is a web-based editable table (Excel-like UI), NOT a real Excel add-in. Legacy Excel add-in code exists in `packages/excel-addin/` but is not used in production.
+
 ### Infrastructure
 
 ```yaml
@@ -97,8 +99,7 @@ CI/CD: GitHub Actions
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        UI[Next.js Frontend]
-        Excel[Excel Add-in]
+        UI[Next.js Frontend<br/>(includes Excel-like table UI)]
     end
     
     subgraph "API Layer"
@@ -140,7 +141,6 @@ graph TB
     end
     
     UI --> FastAPI
-    Excel --> FastAPI
     FastAPI --> Orch
     Orch --> AR
     AR --> PA
@@ -1115,7 +1115,6 @@ https://logfire.pydantic.dev/rama-ai/dashboard
 1. **NextAuth.js** for frontend auth (Google, email/password)
 2. **Supabase Auth** for backend JWT verification
 3. **RLS policies** per user_id (multi-tenancy)
-4. **API keys** for MCP server and Excel add-in
 
 ### Data Security
 

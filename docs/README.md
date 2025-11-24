@@ -118,12 +118,6 @@ Common user workflows and expected agent behavior.
 
 ---
 
-#### 11. **[EXCEL_ADDIN_SETUP.md](./EXCEL_ADDIN_SETUP.md)**
-**Excel add-in setup**
-
-Instructions for installing and using the Excel add-in.
-
----
 
 ### **🔧 Features & Integrations**
 

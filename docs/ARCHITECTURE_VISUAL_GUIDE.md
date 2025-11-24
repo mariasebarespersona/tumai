@@ -458,6 +458,8 @@ graph TB
 
 ### Key Components
 
+**Note:** "Excel Panel" is a web-based table UI (Excel-like), NOT a real Excel add-in.
+
 ```
 ┌─────────────────────────────────────┐
 │  Chat Container (rama-card)         │
@@ -475,7 +477,7 @@ graph TB
 └─────────────────────────────────────┘
 
 ┌─────────────────────────────────────┐
-│  Excel Panel (Numbers Table)        │
+│  Numbers Table (Excel-like Web UI)  │
 │  ┌───┬────┬────┬────┬────┬────┬─┐  │
 │  │ Row│ A  │ B  │ C  │ D  │ E  │⋮│  │
 │  ├───┼────┼────┼────┼────┼────┼─┤  │
@@ -483,6 +485,7 @@ graph TB
 │  │ 2 │    │ [editable cells] │ │  │
 │  │ 3 │    │    │    │    │    │ │  │
 │  └───┴────┴────┴────┴────┴────┴─┘  │
+│  (Web component, not real Excel)    │
 └─────────────────────────────────────┘
 
 ┌─────────────────────────────────────┐
