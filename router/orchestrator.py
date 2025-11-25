@@ -105,12 +105,23 @@ class OrchestrationRouter:
                     
                     if state and state.values.get("messages"):
                         # CRITICAL: Detect "send this/that content by email" requests
+                        # OR email continuation (user just provided email address)
                         # Extract the most recent AI response BEFORE truncating history
                         user_input_lower = user_input.lower()
                         is_contextual_email = any(ref in user_input_lower for ref in ['este', 'ese', 'esto', 'eso', 'esta', 'esa'])
                         is_email_request = any(kw in user_input_lower for kw in ['manda', 'envía', 'enviar', 'mandame', 'enviame', 'email', 'correo'])
                         
-                        if is_contextual_email and is_email_request:
+                        # NEW: Also detect if user is providing ONLY an email (continuation)
+                        import re
+                        email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
+                        is_email_continuation = False
+                        if re.search(email_pattern, user_input):
+                            words_in_message = user_input.split()
+                            if len(words_in_message) <= 3:
+                                is_email_continuation = True
+                                logger.info(f"[orchestrator] 🎯 Detected email continuation - will extract previous response")
+                        
+                        if (is_contextual_email and is_email_request) or is_email_continuation:
                             # STRATEGY: Find the most recent SUBSTANTIVE AI response
                             # Skip: confirmations, questions, document lists, tool results
                             all_messages = state.values["messages"]
