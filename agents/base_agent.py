@@ -374,30 +374,39 @@ INSTRUCCIONES CRÍTICAS:
             
             # CRITICAL: If set_current_property was called, extract property_id from tool results
             # This ensures property switches are propagated to the UI
-            for msg in messages:
-                if isinstance(msg, ToolMessage) and msg.name == "set_current_property":
-                    try:
-                        import json
-                        # Handle both string JSON and dict
-                        if isinstance(msg.content, str):
-                            try:
-                                tool_result = json.loads(msg.content)
-                            except json.JSONDecodeError:
-                                # If JSON parsing fails, skip this message
-                                logger.debug(f"[{self.name}] Could not parse tool result as JSON, skipping")
+            logger.info(f"[{self.name}] 🔍 Searching for set_current_property in {len(messages)} messages")
+            for i, msg in enumerate(messages):
+                if isinstance(msg, ToolMessage):
+                    logger.info(f"[{self.name}] 🔍 Found ToolMessage #{i}: name={msg.name}, content_type={type(msg.content).__name__}")
+                    if msg.name == "set_current_property":
+                        logger.info(f"[{self.name}] 🎯 Found set_current_property! Content: {str(msg.content)[:200]}")
+                        try:
+                            import json
+                            # Handle both string JSON and dict
+                            if isinstance(msg.content, str):
+                                try:
+                                    tool_result = json.loads(msg.content)
+                                    logger.info(f"[{self.name}] ✅ Parsed JSON: {tool_result}")
+                                except json.JSONDecodeError as json_err:
+                                    # If JSON parsing fails, skip this message
+                                    logger.warning(f"[{self.name}] ❌ Could not parse tool result as JSON: {json_err}")
+                                    continue
+                            elif isinstance(msg.content, dict):
+                                tool_result = msg.content
+                                logger.info(f"[{self.name}] ✅ Using dict directly: {tool_result}")
+                            else:
+                                # Unknown type, skip
+                                logger.warning(f"[{self.name}] ❌ Unknown content type: {type(msg.content)}")
                                 continue
-                        elif isinstance(msg.content, dict):
-                            tool_result = msg.content
-                        else:
-                            # Unknown type, skip
-                            continue
-                        
-                        if tool_result and isinstance(tool_result, dict) and tool_result.get("property_id"):
-                            result["property_id"] = tool_result["property_id"]
-                            logger.info(f"[{self.name}] 📍 Extracted property_id from set_current_property: {tool_result['property_id']}")
-                            break
-                    except Exception as e:
-                        logger.warning(f"[{self.name}] Failed to extract property_id from tool result: {e}")
+                            
+                            if tool_result and isinstance(tool_result, dict) and tool_result.get("property_id"):
+                                result["property_id"] = tool_result["property_id"]
+                                logger.info(f"[{self.name}] 📍 Extracted property_id from set_current_property: {tool_result['property_id']}")
+                                break
+                            else:
+                                logger.warning(f"[{self.name}] ⚠️ tool_result doesn't have property_id: {tool_result}")
+                        except Exception as e:
+                            logger.warning(f"[{self.name}] Failed to extract property_id from tool result: {e}", exc_info=True)
             
             logger.info(f"[{self.name}] ✅ Response generated in {result['latency_ms']}ms")
             return result
