@@ -177,7 +177,20 @@ def propose_slot(filename: str, text_hint: str = "", property_id: str = "") -> D
             doc_name = KEYWORD_TO_DOCNAME.get(kw, kw.title())
             return {"document_group": group, "document_subgroup": subgroup, "document_name": doc_name}
     
-    return {"document_group": "COMPRA", "document_subgroup": "", "document_name": "Acuerdo compraventa (verbal)"}
+    # CRITICAL: If no match found, return an error instead of inventing a group
+    # The agent MUST use one of the predefined groups in DOC_GROUPS
+    logger.warning(f"⚠️ Could not find matching document group for: {filename} (hint: {text_hint})")
+    logger.warning(f"   Available groups: {list(DOC_GROUPS.keys())}")
+    
+    # Instead of inventing, ask the agent to clarify with the user
+    return {
+        "error": "Could not determine document category",
+        "message": f"No pude identificar a qué categoría pertenece '{filename}'. ¿Puedes decirme más sobre el documento? Por ejemplo: ¿es un contrato, una factura, un plano, o parte de la compra?",
+        "available_groups": list(DOC_GROUPS.keys()),
+        "document_group": None,  # Force agent to handle error
+        "document_subgroup": None,
+        "document_name": None
+    }
 
 def upload_and_link(property_id: str, file_bytes: bytes, filename: str,
                     document_group: str, document_subgroup: str, document_name: str,

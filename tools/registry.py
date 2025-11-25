@@ -149,28 +149,55 @@ class ListDocsInput(BaseModel):
     property_id: str
 
 @tool("list_docs")
-def list_docs_tool(property_id: str) -> List[Dict]:
+def list_docs_tool(property_id: str) -> Dict:
     """List all document rows for this property in REAL-TIME from the database.
     
     CRITICAL: ALWAYS call this tool when user asks to list/show/see documents. DO NOT rely on memory or previous calls.
     
-    Returns: Each row has: document_group, document_subgroup, document_name, storage_key, metadata.
-    - If storage_key has value → document is UPLOADED ✅
-    - If storage_key is empty/null → document is PENDING ⏳"""
+    Returns: Dict with explicit categorization to prevent misinterpretation:
+    {
+        "uploaded": [...],  # Documents with storage_key (ACTUALLY UPLOADED)
+        "pending": [...],   # Documents without storage_key (NOT YET UPLOADED)
+        "total_uploaded": N,
+        "total_pending": M,
+        "summary": "Human-readable summary"
+    }
+    
+    Each document has: document_group, document_subgroup, document_name, storage_key, metadata."""
     import logging
     logger = logging.getLogger(__name__)
     
     docs = _list_docs(property_id)
     
-    # Log summary for debugging
-    total_docs = len(docs)
+    # Explicitly separate uploaded vs pending
     uploaded_docs = [d for d in docs if d.get("storage_key")]
     pending_docs = [d for d in docs if not d.get("storage_key")]
     
+    total_uploaded = len(uploaded_docs)
+    total_pending = len(pending_docs)
+    
     logger.info(f"🔍 [list_docs_tool] Property {property_id[:8]}...")
-    logger.info(f"   - Total docs: {total_docs}")
-    logger.info(f"   - Uploaded (with storage_key): {len(uploaded_docs)}")
-    logger.info(f"   - Pending (no storage_key): {len(pending_docs)}")
+    logger.info(f"   - Total docs: {len(docs)}")
+    logger.info(f"   - Uploaded (with storage_key): {total_uploaded}")
+    logger.info(f"   - Pending (no storage_key): {total_pending}")
+    
+    # Create explicit summary to prevent agent confusion
+    if total_uploaded == 0:
+        summary = f"No hay documentos subidos. Hay {total_pending} documentos pendientes."
+    elif total_uploaded == 1:
+        summary = f"Hay 1 documento subido y {total_pending} pendientes."
+    else:
+        summary = f"Hay {total_uploaded} documentos subidos y {total_pending} pendientes."
+    
+    # Return structured data that's IMPOSSIBLE to misinterpret
+    return {
+        "uploaded": uploaded_docs,
+        "pending": pending_docs,
+        "total_uploaded": total_uploaded,
+        "total_pending": total_pending,
+        "summary": summary,
+        "all_docs": docs  # Backwards compatibility
+    }
     
     # Log all uploaded documents for verification
     if uploaded_docs:
