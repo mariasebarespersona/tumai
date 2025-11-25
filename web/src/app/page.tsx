@@ -263,10 +263,21 @@ export default function ChatPage() {
       const data = await resp.json()
       const answer = String(data?.answer ?? '')
       
+      // Debug: Log what backend sent
+      console.log('[DEBUG] Backend response:', {
+        show_documents: data?.show_documents,
+        answer_preview: answer.substring(0, 100)
+      })
+      
       // If backend says to show documents, fetch them now
       if (data?.show_documents && propertyId) {
-        console.log('[Documents] Backend requested document framework UI, fetching documents...')
+        console.log('[Documents] ✅ Backend requested document framework UI, fetching documents...')
         await fetchDocuments(propertyId)
+      } else {
+        console.log('[Documents] ❌ NOT showing framework UI:', {
+          show_documents: data?.show_documents,
+          has_property: !!propertyId
+        })
       }
       
       setMessages(prev => [...prev, { 
@@ -279,6 +290,8 @@ export default function ChatPage() {
         userMessage: userMessageContent,  // Store user message for feedback
         showDocuments: data?.show_documents || false  // Flag to show DocumentFramework
       }])
+      
+      console.log('[DEBUG] Message added with showDocuments:', data?.show_documents || false)
       
       // Auto-reload documents if agent confirms a document was uploaded
       if (propertyId && files.length > 0) {
