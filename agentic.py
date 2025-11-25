@@ -1268,9 +1268,10 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                     else:
                         msgs.append(SystemMessage(content="⚠️ ATENCIÓN: El usuario está entrando en modo Números pero NO hay plantilla seleccionada. DEBES ofrecer las 4 opciones (R2B, R2B + PM, R2B + PM + Venta certs, Promoción) y esperar a que elija antes de llamar `get_numbers` o `set_number`."))
     
-    # Limitar historial a los últimos 20 mensajes para evitar rate limits y memoria obsoleta
+    # Limitar historial a los últimos 6 mensajes para evitar rate limits y memoria obsoleta
     # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos
-    MAX_MESSAGES = 20  # Aumentado de 10 a 20 para dar más contexto pero evitar memoria obsoleta
+    # NOTA: El SYSTEM_PROMPT es muy largo (~20k tokens), por eso el límite debe ser MUY bajo
+    MAX_MESSAGES = 6  # Reducido drásticamente para evitar 429 Rate Limit (GPT-4o 30k TPM)
     
     if len(messages) > MAX_MESSAGES:
         filtered = messages[-MAX_MESSAGES:]
