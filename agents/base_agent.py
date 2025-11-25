@@ -378,8 +378,21 @@ INSTRUCCIONES CRÍTICAS:
                 if isinstance(msg, ToolMessage) and msg.name == "set_current_property":
                     try:
                         import json
-                        tool_result = json.loads(msg.content) if isinstance(msg.content, str) else msg.content
-                        if tool_result and tool_result.get("property_id"):
+                        # Handle both string JSON and dict
+                        if isinstance(msg.content, str):
+                            try:
+                                tool_result = json.loads(msg.content)
+                            except json.JSONDecodeError:
+                                # If JSON parsing fails, skip this message
+                                logger.debug(f"[{self.name}] Could not parse tool result as JSON, skipping")
+                                continue
+                        elif isinstance(msg.content, dict):
+                            tool_result = msg.content
+                        else:
+                            # Unknown type, skip
+                            continue
+                        
+                        if tool_result and isinstance(tool_result, dict) and tool_result.get("property_id"):
                             result["property_id"] = tool_result["property_id"]
                             logger.info(f"[{self.name}] 📍 Extracted property_id from set_current_property: {tool_result['property_id']}")
                             break
