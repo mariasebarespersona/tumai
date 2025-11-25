@@ -136,6 +136,18 @@ class ActiveRouter:
         if "documentos" in s and any(w in s for w in ["faltan", "falta", "pendientes", "por subir"]):
             return ("docs.list_pending", 0.88, "DocsAgent")
         
+        # ========== EMAIL CONTINUATION (HIGH PRIORITY) ==========
+        # CRITICAL: Detect when user ONLY provides an email address (continuation of email flow)
+        # This happens after agent asks "¿A qué correo?" and user replies with just the email
+        import re
+        email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
+        if re.search(email_pattern, s):
+            # Check if message is MOSTLY just the email (with minimal extra words)
+            words_in_message = s.split()
+            if len(words_in_message) <= 3:  # e.g., "tumai2025@hotmail.com" or "mi email es test@mail.com"
+                logger.info(f"[active_router] 🎯 Detected email continuation: {s}")
+                return ("docs.send_email", 0.95, "DocsAgent")
+        
         # Upload document (sube contrato, subir factura)
         if any(word in s for word in ["sube", "subir", "upload", "cargar"]):
             # Not numbers (handled above)
