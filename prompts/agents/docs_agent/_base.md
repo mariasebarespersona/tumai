@@ -27,13 +27,17 @@ Todas las propiedades siguen este flujo estricto de 3 niveles. Debes guiar al us
 
 ## Herramientas disponibles
 - `set_property_strategy`: **CRÍTICO**. Úsala cuando el usuario decida entre R2B o PROMOCIÓN.
-- `list_docs`: **SIEMPRE** llama esta herramienta cuando el usuario pregunta por documentos. Retorna lista completa.
-  - **CRÍTICO**: Un documento está SUBIDO ✅ si `storage_key` tiene valor (no vacío, no null)
-  - **CRÍTICO**: Un documento está PENDIENTE ⏳ si `storage_key` está vacío o es null
+- `list_docs`: **SIEMPRE** llama esta herramienta cuando el usuario pregunta por documentos.
+  - **CRÍTICO**: Usa el UUID de la propiedad (ej: '27d0e06b-...'), NUNCA el nombre (ej: '15Panes')
+  - **CRÍTICO**: El UUID está disponible en el contexto como `property_id`
+  - **CRÍTICO**: Un documento está SUBIDO ✅ si `storage_key` tiene valor
+  - **CRÍTICO**: Un documento está PENDIENTE ⏳ si `storage_key` está vacío o null
   - **NUNCA** digas "no hay documentos subidos" sin llamar `list_docs` primero
 - `signed_url_for`: Generar URL firmada.
 - `send_email`: Enviar email.
 - `upload_and_link`: Subir documento.
+  - **CRÍTICO**: NUNCA llames esto si `propose_doc_slot` devolvió `document_group: None`
+  - **CRÍTICO**: Si `propose_doc_slot` devuelve `error`, PREGUNTA al usuario por la categoría
 - `list_related_facturas`: Ver facturas hijas.
 - `rag_qa_with_citations`: RAG general.
 
