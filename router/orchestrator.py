@@ -111,21 +111,45 @@ class OrchestrationRouter:
                         is_email_request = any(kw in user_input_lower for kw in ['manda', 'envía', 'enviar', 'mandame', 'enviame', 'email', 'correo'])
                         
                         if is_contextual_email and is_email_request:
-                            # Find the MOST RECENT AIMessage with content
+                            # STRATEGY: Find the most recent SUBSTANTIVE AI response
+                            # Skip: confirmations, questions, document lists, tool results
                             all_messages = state.values["messages"]
                             last_ai_response = None
                             
                             for msg in reversed(all_messages):
-                                if isinstance(msg, AIMessage) and msg.content and len(str(msg.content).strip()) > 20:
-                                    # Skip messages that are just confirmations or tool results
+                                if isinstance(msg, AIMessage) and msg.content and len(str(msg.content).strip()) > 50:
                                     content_str = str(msg.content).lower()
-                                    if not any(skip in content_str for skip in ['✅', 'enviado', 'he enviado', 'pregunta', '¿', 'correo', 'email']):
+                                    
+                                    # SKIP: Confirmations, questions, greetings
+                                    if any(skip in content_str for skip in ['✅', 'he enviado', 'pregunta', '¿a qué correo', 'trabajando en:', 'estamos en:']):
+                                        continue
+                                    
+                                    # SKIP: Document lists (multiple bullet points)
+                                    if content_str.count('•') > 3 or content_str.count('-') > 5:
+                                        logger.debug(f"[orchestrator] Skipping message with bullet points (likely document list)")
+                                        continue
+                                    
+                                    # SKIP: Short confirmations or simple responses
+                                    if len(content_str) < 100 and any(word in content_str for word in ['ok', 'vale', 'entendido', 'perfecto']):
+                                        continue
+                                    
+                                    # PREFER: Substantive content (explanations, summaries, RAG responses)
+                                    # Check if it's a RAG response or substantive content
+                                    has_substantive_content = any(indicator in content_str for indicator in [
+                                        'documento', 'contrato', 'establece', 'según', 'contenido', 
+                                        'información', 'datos', 'detalles', 'indica', 'menciona'
+                                    ])
+                                    
+                                    if has_substantive_content or len(content_str) > 200:
                                         last_ai_response = str(msg.content)
+                                        logger.info(f"[orchestrator] 🎯 Found substantive response: {content_str[:80]}...")
                                         break
                             
                             if last_ai_response:
                                 full_context["previous_response"] = last_ai_response
                                 logger.info(f"[orchestrator] 🎯 Detected contextual email request - extracted previous response ({len(last_ai_response)} chars)")
+                            else:
+                                logger.warning(f"[orchestrator] ⚠️ Could not find substantive previous response for contextual email")
                         
                         # Get last 10 messages for context (not too many to avoid bloat)
                         messages = state.values["messages"][-10:]
