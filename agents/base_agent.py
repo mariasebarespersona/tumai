@@ -372,6 +372,20 @@ INSTRUCCIONES CRÍTICAS:
                 "success": True
             }
             
+            # CRITICAL: If set_current_property was called, extract property_id from tool results
+            # This ensures property switches are propagated to the UI
+            for msg in messages:
+                if isinstance(msg, ToolMessage) and msg.name == "set_current_property":
+                    try:
+                        import json
+                        tool_result = json.loads(msg.content) if isinstance(msg.content, str) else msg.content
+                        if tool_result and tool_result.get("property_id"):
+                            result["property_id"] = tool_result["property_id"]
+                            logger.info(f"[{self.name}] 📍 Extracted property_id from set_current_property: {tool_result['property_id']}")
+                            break
+                    except Exception as e:
+                        logger.warning(f"[{self.name}] Failed to extract property_id from tool result: {e}")
+            
             logger.info(f"[{self.name}] ✅ Response generated in {result['latency_ms']}ms")
             return result
         
