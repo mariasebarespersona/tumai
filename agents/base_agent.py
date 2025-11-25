@@ -213,9 +213,20 @@ INSTRUCCIONES CRÍTICAS:
             # CRITICAL: Inject previous_response AFTER history but BEFORE user message
             # This ensures it's the last context the agent sees before processing the request
             if previous_response_to_inject:
-                messages.append(SystemMessage(content=f"""🎯🎯🎯 ATENCIÓN MÁXIMA - TAREA INMEDIATA 🎯🎯🎯
+                # Check if user already provided an email in the current request
+                user_email = None
+                if "@" in user_input:
+                    # User provided email in this message
+                    import re
+                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', user_input)
+                    if email_match:
+                        user_email = email_match.group(0)
+                
+                if user_email:
+                    # User provided email - send immediately
+                    messages.append(SystemMessage(content=f"""🎯 TAREA INMEDIATA - ENVIAR CONTENIDO POR EMAIL
 
-El usuario está pidiendo que ENVÍES por email el siguiente contenido QUE TÚ GENERASTE ANTES:
+El usuario quiere que envíes este contenido que TÚ generaste antes:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CONTENIDO A ENVIAR:
@@ -225,19 +236,43 @@ CONTENIDO A ENVIAR:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-⚠️ INSTRUCCIONES OBLIGATORIAS - NO PREGUNTES NADA MÁS:
+⚠️ INSTRUCCIONES:
 
-1. Ya tienes el email del usuario: tumai2025@hotmail.com
-2. El contenido a enviar está ARRIBA (entre las líneas ━━━)
-3. Convierte ese contenido a HTML simple
-4. Llama INMEDIATAMENTE: send_email(to=['tumai2025@hotmail.com'], subject='Resumen solicitado', html='<html><body><p>[contenido_de_arriba]</p></body></html>')
-5. NO llames list_docs, signed_url_for, o cualquier otra herramienta
-6. NO preguntes por el email - YA LO TIENES
-7. NO busques documentos - el contenido YA ESTÁ ARRIBA
+1. Email del destinatario: {user_email}
+2. Contenido a enviar: El texto de arriba (entre ━━━)
+3. Convierte el contenido a HTML limpio
+4. Llama: send_email(to=['{user_email}'], subject='Resumen solicitado', html='<html><body><p>[contenido_de_arriba]</p></body></html>')
+5. NO llames list_docs o signed_url_for
+6. Responde en el chat: "✅ He enviado el resumen a {user_email}"
 
-✅ ACCIÓN REQUERIDA: Llamar send_email AHORA con el contenido de arriba
-❌ PROHIBIDO: Preguntar por email, buscar docs, o pedir más información"""))
-                logger.info(f"[{self.name}] ✅ Injected previous_response as FINAL context before user message")
+✅ ENVIAR el contenido de arriba a {user_email}
+❌ NO preguntes nada más - tienes todo lo necesario"""))
+                else:
+                    # User didn't provide email - ask for it in the CHAT
+                    messages.append(SystemMessage(content=f"""🎯 PASO 1 - SOLICITAR EMAIL DEL DESTINATARIO
+
+El usuario quiere que envíes este contenido que TÚ generaste antes:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTENIDO A ENVIAR (guardar para después):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{previous_response_to_inject}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ INSTRUCCIONES PASO 1:
+
+1. El contenido a enviar está GUARDADO arriba
+2. PERO FALTA el email del destinatario
+3. Pregunta en el CHAT: "¿A qué correo quieres que te lo envíe?"
+4. NO envíes el email todavía - primero necesitas la respuesta del usuario
+5. Cuando el usuario responda con su email, ENTONCES enviarás el contenido de arriba
+
+✅ RESPONDE EN EL CHAT: "¿A qué correo quieres que te lo envíe?"
+❌ NO envíes nada todavía - espera la respuesta del usuario"""))
+                
+                logger.info(f"[{self.name}] ✅ Injected previous_response as FINAL context (email={'provided' if user_email else 'missing'})")
             
             # Add user message
             messages.append(HumanMessage(content=user_input))
