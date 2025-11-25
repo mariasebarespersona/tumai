@@ -1953,18 +1953,23 @@ async def ui_chat(
                     answer = str(content)
                     break
     
-    # Check if agent called list_docs tool - if so, tell frontend to show visual document framework
+    # Check if agent called list_docs tool IN THIS TURN - if so, tell frontend to show visual document framework
+    # CRITICAL: Only check the LAST 10 messages (current turn), not the entire history
     show_documents_ui = False
     if out.get("messages"):
-        print(f"[DEBUG] Checking {len(out['messages'])} messages for list_docs tool call...")
-        for i, msg in enumerate(out["messages"]):
+        # Only check recent messages from THIS turn (last 10 is generous for a single turn)
+        recent_messages = out["messages"][-10:] if len(out["messages"]) > 10 else out["messages"]
+        print(f"[DEBUG] Checking last {len(recent_messages)} messages (of {len(out['messages'])} total) for list_docs tool call in THIS turn...")
+        for i, msg in enumerate(recent_messages):
             msg_name = getattr(msg, "name", None)
             msg_type = type(msg).__name__
-            print(f"[DEBUG] Message {i}: type={msg_type}, name={msg_name}")
+            print(f"[DEBUG] Recent message {i}: type={msg_type}, name={msg_name}")
             if msg_name == "list_docs":
                 show_documents_ui = True
-                print(f"[DEBUG] ✅ Detected list_docs tool call at index {i} - WILL SHOW DOCUMENT FRAMEWORK UI")
+                print(f"[DEBUG] ✅ Detected list_docs tool call in THIS turn at index {i} - WILL SHOW DOCUMENT FRAMEWORK UI")
                 break
+        if not show_documents_ui:
+            print(f"[DEBUG] ❌ NO list_docs tool call detected in current turn")
     
     # Include transcript if this was a voice input
     print(f"[DEBUG] Final transcript value: {transcript}")
