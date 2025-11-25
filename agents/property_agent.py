@@ -92,7 +92,7 @@ Tú: "⚠️ ¿Estás seguro que quieres eliminar la propiedad 'X'? Esta acción
         text_lower = user_input.lower().strip()
         
         # Check if user wants to switch to a property
-        if any(phrase in text_lower for phrase in ["trabajar con", "cambiar a", "switch to", "usar"]):
+        if any(phrase in text_lower for phrase in ["trabajar con", "cambiar a", "switch to", "usar", "metete", "meterse", "entra", "entrar"]):
             # Try to find the property by name
             logger.info(f"[PropertyAgent] 🎯 Detected property switch request: '{user_input}'")
             
