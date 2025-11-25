@@ -1343,6 +1343,7 @@ async def ui_chat(
     def make_response(answer: str, extra: dict | None = None, show_documents: bool = False):
         current_pid = STATE.get("property_id")
         print(f"[DEBUG make_response] Current property_id in STATE: {current_pid}")
+        print(f"[DEBUG make_response] 🎯 show_documents flag: {show_documents}")
         resp = {"answer": answer, "property_id": current_pid, "show_documents": show_documents}
         
         # Include property_name if we have property_id
@@ -1922,18 +1923,21 @@ async def ui_chat(
     # Check if agent called list_docs tool - if so, tell frontend to show visual document framework
     show_documents_ui = False
     if out.get("messages"):
-        for msg in out["messages"]:
+        print(f"[DEBUG] Checking {len(out['messages'])} messages for list_docs tool call...")
+        for i, msg in enumerate(out["messages"]):
             msg_name = getattr(msg, "name", None)
+            msg_type = type(msg).__name__
+            print(f"[DEBUG] Message {i}: type={msg_type}, name={msg_name}")
             if msg_name == "list_docs":
                 show_documents_ui = True
-                print(f"[DEBUG] Detected list_docs tool call - will show document framework UI")
+                print(f"[DEBUG] ✅ Detected list_docs tool call at index {i} - WILL SHOW DOCUMENT FRAMEWORK UI")
                 break
     
     # Include transcript if this was a voice input
     print(f"[DEBUG] Final transcript value: {transcript}")
     extra = {"transcript": transcript} if transcript else None
     print(f"[DEBUG] Final response extra: {extra}")
-    print(f"[DEBUG] show_documents_ui: {show_documents_ui}")
+    print(f"[DEBUG] 🎯 FINAL show_documents_ui: {show_documents_ui}")
     return make_response(answer or "(sin respuesta)", extra, show_documents=show_documents_ui)
 
     # Handle email requests - check if we're waiting for email first
