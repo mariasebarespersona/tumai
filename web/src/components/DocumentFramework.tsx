@@ -107,6 +107,7 @@ const Connector = ({ type }: { type: 'fork' | 'straight' }) => {
 }
 
 export const DocumentFramework = ({ uploaded, pending }: DocumentFrameworkProps) => {
+  console.log('[DEBUG] DocumentFramework rendering with:', { uploaded: uploaded.length, pending: pending.length })
   const allDocs = [...uploaded, ...pending]
 
   // --- Grouping Logic ---

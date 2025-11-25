@@ -1649,19 +1649,23 @@ export default function ChatPage() {
                     : 'bg-white border border-[color:var(--border-strong)] text-[color:var(--text-primary)] rounded-tl-sm')
                 }>
                   <div className={m.role === 'user' ? 'text-white/90' : ''}>
-                    {m.role === 'assistant' ? (
-                      m.showDocuments ? (
-                        // Show visual document framework instead of text
-                        <div className="w-full">
-                          <div className="text-sm text-[color:var(--text-secondary)] mb-4">
-                            {m.content}
+                    {(() => {
+                      if (m.role === 'assistant' && m.showDocuments) {
+                        console.log('[DEBUG] Rendering DocumentFramework in chat for message', m.id)
+                        return (
+                          <div className="w-full border-2 border-red-500 p-2 rounded animate-pulse">
+                            <div className="text-sm text-[color:var(--text-secondary)] mb-4 font-bold text-red-600">
+                              [DEBUG MODE] Rendering DocumentFramework Component:
+                            </div>
+                            <div className="text-sm text-[color:var(--text-secondary)] mb-4">
+                              {m.content.split('\n')[0]} {/* Only show first line ("Para la propiedad...") */}
+                            </div>
+                            <DocumentFramework uploaded={documents.uploaded} pending={documents.pending} />
                           </div>
-                          <DocumentFramework uploaded={documents.uploaded} pending={documents.pending} />
-                        </div>
-                      ) : (
-                        renderMessageContent(m.content)
-                      )
-                    ) : m.content}
+                        )
+                      }
+                      return m.role === 'assistant' ? renderMessageContent(m.content) : m.content
+                    })()}
                   </div>
                   
                   {/* Add feedback buttons for assistant messages */}
