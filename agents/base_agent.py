@@ -158,12 +158,6 @@ class BaseAgent:
             if property_id:
                 messages.append(SystemMessage(content=f"IMPORTANTE: El property_id actual es: {property_id}\nCuando llames a herramientas que requieren property_id, usa EXACTAMENTE este valor, NO uses placeholders como 'current_property_id'."))
             
-            # Store previous_response to inject AFTER history (for better context placement)
-            previous_response_to_inject = None
-            if context and context.get("previous_response"):
-                previous_response_to_inject = context["previous_response"]
-                logger.info(f"[{self.name}] 🎯 Will inject previous_response after history ({len(previous_response_to_inject)} chars)")
-            
             # Add context if provided
             if context and context.get("history"):
                 # CRITICAL: Detect if we're in the middle of a multi-turn flow
@@ -209,70 +203,6 @@ INSTRUCCIONES CRÍTICAS:
 ✅ EJECUTA el flujo completo y confirma el envío"""))
                 
                 messages.extend(history)
-            
-            # CRITICAL: Inject previous_response AFTER history but BEFORE user message
-            # This ensures it's the last context the agent sees before processing the request
-            if previous_response_to_inject:
-                # Check if user already provided an email in the current request
-                user_email = None
-                if "@" in user_input:
-                    # User provided email in this message
-                    import re
-                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', user_input)
-                    if email_match:
-                        user_email = email_match.group(0)
-                
-                if user_email:
-                    # User provided email - send immediately
-                    messages.append(SystemMessage(content=f"""🎯 TAREA INMEDIATA - ENVIAR CONTENIDO POR EMAIL
-
-El usuario quiere que envíes este contenido que TÚ generaste antes:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTENIDO A ENVIAR:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{previous_response_to_inject}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️ INSTRUCCIONES:
-
-1. Email del destinatario: {user_email}
-2. Contenido a enviar: El texto de arriba (entre ━━━)
-3. Convierte el contenido a HTML limpio
-4. Llama: send_email(to=['{user_email}'], subject='Resumen solicitado', html='<html><body><p>[contenido_de_arriba]</p></body></html>')
-5. NO llames list_docs o signed_url_for
-6. Responde en el chat: "✅ He enviado el resumen a {user_email}"
-
-✅ ENVIAR el contenido de arriba a {user_email}
-❌ NO preguntes nada más - tienes todo lo necesario"""))
-                else:
-                    # User didn't provide email - ask for it in the CHAT
-                    messages.append(SystemMessage(content=f"""🎯 PASO 1 - SOLICITAR EMAIL DEL DESTINATARIO
-
-El usuario quiere que envíes este contenido que TÚ generaste antes:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CONTENIDO A ENVIAR (guardar para después):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{previous_response_to_inject}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚠️ INSTRUCCIONES PASO 1:
-
-1. El contenido a enviar está GUARDADO arriba
-2. PERO FALTA el email del destinatario
-3. Pregunta en el CHAT: "¿A qué correo quieres que te lo envíe?"
-4. NO envíes el email todavía - primero necesitas la respuesta del usuario
-5. Cuando el usuario responda con su email, ENTONCES enviarás el contenido de arriba
-
-✅ RESPONDE EN EL CHAT: "¿A qué correo quieres que te lo envíe?"
-❌ NO envíes nada todavía - espera la respuesta del usuario"""))
-                
-                logger.info(f"[{self.name}] ✅ Injected previous_response as FINAL context (email={'provided' if user_email else 'missing'})")
             
             # Add user message
             messages.append(HumanMessage(content=user_input))

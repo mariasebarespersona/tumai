@@ -104,71 +104,14 @@ class OrchestrationRouter:
                     state = langgraph_agent.get_state(config)
                     
                     if state and state.values.get("messages"):
-                        # CRITICAL: Detect "send this/that content by email" requests
-                        # OR email continuation (user just provided email address)
-                        # Extract the most recent AI response BEFORE truncating history
-                        user_input_lower = user_input.lower()
-                        is_contextual_email = any(ref in user_input_lower for ref in ['este', 'ese', 'esto', 'eso', 'esta', 'esa'])
-                        is_email_request = any(kw in user_input_lower for kw in ['manda', 'envía', 'enviar', 'mandame', 'enviame', 'email', 'correo'])
+                        # STRATEGY: Let the LLM reason naturally from conversation history
+                        # Instead of extracting specific messages, provide MORE context
+                        # so the agent can understand the full flow
                         
-                        # NEW: Also detect if user is providing ONLY an email (continuation)
-                        import re
-                        email_pattern = r'[\w\.-]+@[\w\.-]+\.\w+'
-                        is_email_continuation = False
-                        if re.search(email_pattern, user_input):
-                            words_in_message = user_input.split()
-                            if len(words_in_message) <= 3:
-                                is_email_continuation = True
-                                logger.info(f"[orchestrator] 🎯 Detected email continuation - will extract previous response")
+                        # Increase history size for better context understanding
+                        # 25 messages = ~12-13 conversation turns (enough to see RAG responses)
+                        messages = state.values["messages"][-25:]
                         
-                        if (is_contextual_email and is_email_request) or is_email_continuation:
-                            # STRATEGY: Find the most recent SUBSTANTIVE AI response
-                            # Skip: confirmations, questions, document lists, tool results
-                            all_messages = state.values["messages"]
-                            last_ai_response = None
-                            
-                            for msg in reversed(all_messages):
-                                if isinstance(msg, AIMessage) and msg.content and len(str(msg.content).strip()) > 50:
-                                    content_str = str(msg.content).lower()
-                                    
-                                    # SKIP: Questions asking for information
-                                    if any(question in content_str for question in ['¿a qué correo', '¿qué email', 'proporciona el correo', 'proporciona el email', 'proporciona la dirección', 'necesito que me proporciones']):
-                                        logger.debug(f"[orchestrator] Skipping question: {content_str[:80]}")
-                                        continue
-                                    
-                                    # SKIP: Confirmations, greetings
-                                    if any(skip in content_str for skip in ['✅', 'he enviado', 'trabajando en:', 'estamos en:']):
-                                        continue
-                                    
-                                    # SKIP: Document lists (multiple bullet points)
-                                    if content_str.count('•') > 3 or content_str.count('-') > 5:
-                                        logger.debug(f"[orchestrator] Skipping document list")
-                                        continue
-                                    
-                                    # SKIP: Short confirmations or simple responses
-                                    if len(content_str) < 100 and any(word in content_str for word in ['ok', 'vale', 'entendido', 'perfecto']):
-                                        continue
-                                    
-                                    # PREFER: Substantive content (explanations, summaries, RAG responses)
-                                    # Check if it's a RAG response or substantive content
-                                    has_substantive_content = any(indicator in content_str for indicator in [
-                                        'documento', 'contrato', 'establece', 'según', 'contenido', 
-                                        'información', 'datos', 'detalles', 'indica', 'menciona', 'señal', 'arras'
-                                    ])
-                                    
-                                    if has_substantive_content or len(content_str) > 200:
-                                        last_ai_response = str(msg.content)
-                                        logger.info(f"[orchestrator] 🎯 Found substantive response: {content_str[:80]}...")
-                                        break
-                            
-                            if last_ai_response:
-                                full_context["previous_response"] = last_ai_response
-                                logger.info(f"[orchestrator] 🎯 Detected contextual email request - extracted previous response ({len(last_ai_response)} chars)")
-                            else:
-                                logger.warning(f"[orchestrator] ⚠️ Could not find substantive previous response for contextual email")
-                        
-                        # Get last 10 messages for context (not too many to avoid bloat)
-                        messages = state.values["messages"][-10:]
                         # Filter out system messages - only keep human/AI dialogue
                         history = [m for m in messages if isinstance(m, (HumanMessage, AIMessage))]
                         full_context["history"] = history

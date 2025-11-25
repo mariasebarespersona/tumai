@@ -122,20 +122,6 @@ class ActiveRouter:
             if not (is_list_request and not (has_question or has_content_verb or has_payment_term)) and not is_send_request:
                 return ("docs.qa", 0.90, "DocsAgent")
         
-        # List documents (PRIORITY: must catch all variations)
-        # Direct list requests: "lista documentos", "muestrame documentos", "ver documentos"
-        if "documentos" in s or "documento" in s:
-            # List/show commands
-            if any(w in s for w in ["lista", "listar", "mostrar", "muestrame", "ver", "dame", "enseña", "enséñame"]):
-                return ("docs.list", 0.95, "DocsAgent")
-            # Query about documents: "qué documentos", "cuáles documentos", "tengo documentos"
-            if any(w in s for w in ["qué", "que", "cuales", "cuáles", "tengo", "hay", "subido", "subidos"]):
-                return ("docs.list", 0.92, "DocsAgent")
-        
-        # List missing/pending documents
-        if "documentos" in s and any(w in s for w in ["faltan", "falta", "pendientes", "por subir"]):
-            return ("docs.list_pending", 0.88, "DocsAgent")
-        
         # ========== EMAIL CONTINUATION (HIGH PRIORITY) ==========
         # CRITICAL: Detect when user ONLY provides an email address (continuation of email flow)
         # This happens after agent asks "¿A qué correo?" and user replies with just the email
@@ -148,14 +134,9 @@ class ActiveRouter:
                 logger.info(f"[active_router] 🎯 Detected email continuation: {s}")
                 return ("docs.send_email", 0.95, "DocsAgent")
         
-        # Upload document (sube contrato, subir factura)
-        if any(word in s for word in ["sube", "subir", "upload", "cargar"]):
-            # Not numbers (handled above)
-            if not any(x in s for x in ["r2b", "números", "numeros", "plantilla"]):
-                return ("docs.upload", 0.92, "DocsAgent")
-        
-        # Send by email (manda X por email, envía X)
-        # PRIORITY: Detect any email sending request (document, response, summary, etc.)
+        # ========== SEND BY EMAIL (HIGH PRIORITY - BEFORE docs.list) ==========
+        # CRITICAL: Check for "manda X por email" BEFORE checking "documento" → "docs.list"
+        # This prevents "Mandame el documento X por email" from being classified as docs.list
         if any(word in s for word in ["manda", "envía", "enviar", "mandame", "enviame"]):
             # Check if it's explicitly about email/correo
             has_email_dest = any(dest in s for dest in ["email", "correo", "mail", "e-mail"])
@@ -172,7 +153,27 @@ class ActiveRouter:
             if (has_doc_keyword or has_context_ref or has_content_keyword) or has_email_dest:
                 # But NOT if it's about números/R2B (already handled above)
                 if not any(x in s for x in ["números", "numeros", "r2b", "tabla", "plantilla"]):
-                    return ("docs.send_email", 0.90, "DocsAgent")
+                    return ("docs.send_email", 0.96, "DocsAgent")  # Higher confidence than docs.list (0.92)
+        
+        # Upload document (sube contrato, subir factura)
+        if any(word in s for word in ["sube", "subir", "upload", "cargar"]):
+            # Not numbers (handled above)
+            if not any(x in s for x in ["r2b", "números", "numeros", "plantilla"]):
+                return ("docs.upload", 0.92, "DocsAgent")
+        
+        # List documents (PRIORITY: must catch all variations)
+        # Direct list requests: "lista documentos", "muestrame documentos", "ver documentos"
+        if "documentos" in s or "documento" in s:
+            # List/show commands
+            if any(w in s for w in ["lista", "listar", "mostrar", "muestrame", "ver", "dame", "enseña", "enséñame"]):
+                return ("docs.list", 0.95, "DocsAgent")
+            # Query about documents: "qué documentos", "cuáles documentos", "tengo documentos"
+            if any(w in s for w in ["qué", "que", "cuales", "cuáles", "tengo", "hay", "subido", "subidos"]):
+                return ("docs.list", 0.92, "DocsAgent")
+        
+        # List missing/pending documents
+        if "documentos" in s and any(w in s for w in ["faltan", "falta", "pendientes", "por subir"]):
+            return ("docs.list_pending", 0.88, "DocsAgent")
         
         # List facturas
         if "facturas" in s and ("asociadas" in s or "relacionadas" in s):

@@ -959,11 +959,18 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             print(f"[ORCHESTRATOR] Error: {e}, falling back to MainAgent")
             routing_result = None
     
+    # CRITICAL: If routing_result has an intent, prioritize it over intent_guess
+    # This ensures MainAgent gets the correct intent even when falling back from DocsAgent
+    final_intent = intent_guess
+    if routing_result and routing_result.get("intent"):
+        final_intent = routing_result["intent"]
+        print(f"[INTENT] Using routing_result intent: {final_intent}")
+    
     state = {
         "input": text,  # This will be converted to HumanMessage by prepare_input node
         "audio": audio_wav_bytes,
         "property_id": property_id or STATE.get("property_id"),
-        "intent_guess": intent_guess,
+        "intent_guess": final_intent,  # Use routing intent if available
         "intent_confidence": intent_conf,
         "routing_result": routing_result,  # Pass routing info to agent
     }

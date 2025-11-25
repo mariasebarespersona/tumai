@@ -1,6 +1,12 @@
 # Flujo: Listar Documentos
 
-Cuando el usuario pide "lista documentos", "muéstrame documentos", "ver documentos", etc.
+Cuando el usuario pide **EXPLÍCITAMENTE** listar documentos:
+- "lista documentos"
+- "muéstrame documentos"
+- "ver documentos"
+- "qué documentos tengo"
+
+⚠️ **NO uses este flujo si el usuario pide ENVIAR un documento por email** (eso es intent `docs.send_email`)
 
 ## Proceso
 

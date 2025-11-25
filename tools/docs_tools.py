@@ -393,13 +393,48 @@ def list_docs(property_id: str) -> List[Dict]:
 
 def signed_url_for(property_id: str, document_group: str, document_subgroup: str, document_name: str, expires: int = 31536000) -> str:
     sg = document_subgroup or ""
+    
+    # Try exact match first
     key = sb.rpc(
         "get_property_document_storage_key",
         {"p_id": property_id, "g": document_group, "sg": sg, "n": document_name}
     ).execute().data
-    if not key:
-        raise ValueError("No file stored for that document cell")
-    return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
+    
+    if key:
+        return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
+    
+    # If exact match fails, try fuzzy matching on all documents in this group/subgroup
+    logger.info(f"[signed_url_for] Exact match failed for '{document_name}', trying fuzzy match...")
+    all_rows = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data or []
+    
+    # Filter documents in the same group/subgroup that have a file
+    candidates = [
+        r for r in all_rows
+        if r.get("document_group") == document_group
+        and (r.get("document_subgroup") or "") == sg
+        and r.get("file_storage_key")  # Only documents with uploaded files
+    ]
+    
+    # Check if any candidate contains the requested name (fuzzy match)
+    # e.g., "Contrato arquitecto" matches "Contrato arquitecto + facturas arquitecto"
+    normalized_request = document_name.lower().strip()
+    for candidate in candidates:
+        candidate_name = candidate.get("document_name", "").lower().strip()
+        if normalized_request in candidate_name or candidate_name in normalized_request:
+            matched_name = candidate.get("document_name")
+            logger.info(f"[signed_url_for] ✅ Fuzzy match: '{document_name}' → '{matched_name}'")
+            # Now get the signed URL for the matched document
+            key = sb.rpc(
+                "get_property_document_storage_key",
+                {"p_id": property_id, "g": document_group, "sg": sg, "n": matched_name}
+            ).execute().data
+            if key:
+                return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
+    
+    # If no fuzzy match found, raise error
+    candidate_names = [c.get("document_name") for c in candidates]
+    logger.error(f"[signed_url_for] ❌ No match for '{document_name}' in {document_group}/{sg}. Candidates: {candidate_names}")
+    raise ValueError(f"No file stored for '{document_name}'. Available: {', '.join(candidate_names) if candidate_names else 'none'}")
 
 def slot_exists(property_id: str, document_group: str, document_subgroup: str, document_name: str) -> Dict:
     sg = document_subgroup or ""
