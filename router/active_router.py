@@ -142,10 +142,22 @@ class ActiveRouter:
             if not any(x in s for x in ["r2b", "números", "numeros", "plantilla"]):
                 return ("docs.upload", 0.92, "DocsAgent")
         
-        # Send document by email (manda contrato por email, envía factura)
+        # Send by email (manda X por email, envía X)
+        # PRIORITY: Detect any email sending request (document, response, summary, etc.)
         if any(word in s for word in ["manda", "envía", "enviar", "mandame", "enviame"]):
-            # Check for document keywords
-            if any(doc in s for doc in ["contrato", "factura", "escritura", "certificado", "documento"]):
+            # Check if it's explicitly about email/correo
+            has_email_dest = any(dest in s for dest in ["email", "correo", "mail", "e-mail"])
+            
+            # Check for various things to send:
+            # 1. Specific documents (contrato, factura, etc.)
+            # 2. Contextual references (este, ese, esto, eso, la respuesta)
+            # 3. Summaries/content (resumen, contenido)
+            has_doc_keyword = any(doc in s for doc in ["contrato", "factura", "escritura", "certificado", "documento"])
+            has_context_ref = any(ref in s for ref in ["este", "ese", "esto", "eso", "esta", "esa", "la respuesta", "el resumen"])
+            has_content_keyword = any(kw in s for kw in ["resumen", "contenido", "información", "datos"])
+            
+            # If any of the above AND (explicitly mentions email OR omits destination)
+            if (has_doc_keyword or has_context_ref or has_content_keyword) or has_email_dest:
                 # But NOT if it's about números/R2B (already handled above)
                 if not any(x in s for x in ["números", "numeros", "r2b", "tabla", "plantilla"]):
                     return ("docs.send_email", 0.90, "DocsAgent")
