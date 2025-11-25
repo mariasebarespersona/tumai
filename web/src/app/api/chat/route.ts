@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       property_name: data?.property_name, // Include property name from backend
       transcript: data?.transcript,
       audio_response: data?.audio_response, // For voice responses
+      show_documents: data?.show_documents, // CRITICAL: Include show_documents flag for DocumentFramework UI
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || String(e) }, { status: 500 });
