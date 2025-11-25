@@ -999,14 +999,12 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                         # Filter valid calls
                         valid_calls = [tc for tc in m.tool_calls if tc['id'] in tool_ids_present]
                         if valid_calls:
-                            # Create a copy to avoid mutating original if it's shared
-                            new_m = m.model_copy()
-                            new_m.tool_calls = valid_calls
+                            # Create new AIMessage with filtered tool_calls (compatible with all LangChain versions)
+                            new_m = AIMessage(content=m.content, tool_calls=valid_calls)
                             final_msgs.append(new_m)
                         elif m.content:
                             # Keep message content but remove tool calls
-                            new_m = m.model_copy()
-                            new_m.tool_calls = []
+                            new_m = AIMessage(content=m.content)
                             final_msgs.append(new_m)
                         # Else: Drop empty message
                     else:
