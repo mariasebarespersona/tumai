@@ -158,30 +158,11 @@ class BaseAgent:
             if property_id:
                 messages.append(SystemMessage(content=f"IMPORTANTE: El property_id actual es: {property_id}\nCuando llames a herramientas que requieren property_id, usa EXACTAMENTE este valor, NO uses placeholders como 'current_property_id'."))
             
-            # CRITICAL: Add explicit previous_response if provided by orchestrator
-            # This ensures the agent has the correct content to send when user says "send this/that"
+            # Store previous_response to inject AFTER history (for better context placement)
+            previous_response_to_inject = None
             if context and context.get("previous_response"):
-                prev_response = context["previous_response"]
-                messages.append(SystemMessage(content=f"""🎯 CONTEXTO EXPLÍCITO - RESPUESTA ANTERIOR:
-
-El usuario acaba de pedir que envíes "ESTE/ESE resumen/contenido" por email.
-
-**TU ÚLTIMA RESPUESTA FUE:**
----
-{prev_response}
----
-
-**INSTRUCCIONES CRÍTICAS:**
-1. El usuario quiere que envíes EXACTAMENTE el contenido de arriba por email
-2. NO busques en el historial antiguo
-3. NO uses enlaces a PDFs de propiedad
-4. Formatea el contenido de arriba como HTML limpio
-5. Usa `send_email(to=[email], subject="Resumen solicitado", html="<html><body><p>[contenido_de_arriba]</p></body></html>")`
-
-❌ NO llames list_docs o signed_url_for (a menos que pida un documento específico)
-❌ NO uses `build_summary_ppt` o `resumen_propiedad.pdf`
-✅ Envía el TEXTO de tu respuesta anterior"""))
-                logger.info(f"[{self.name}] 🎯 Injected previous_response as explicit context ({len(prev_response)} chars)")
+                previous_response_to_inject = context["previous_response"]
+                logger.info(f"[{self.name}] 🎯 Will inject previous_response after history ({len(previous_response_to_inject)} chars)")
             
             # Add context if provided
             if context and context.get("history"):
@@ -228,6 +209,35 @@ INSTRUCCIONES CRÍTICAS:
 ✅ EJECUTA el flujo completo y confirma el envío"""))
                 
                 messages.extend(history)
+            
+            # CRITICAL: Inject previous_response AFTER history but BEFORE user message
+            # This ensures it's the last context the agent sees before processing the request
+            if previous_response_to_inject:
+                messages.append(SystemMessage(content=f"""🎯🎯🎯 ATENCIÓN MÁXIMA - TAREA INMEDIATA 🎯🎯🎯
+
+El usuario está pidiendo que ENVÍES por email el siguiente contenido QUE TÚ GENERASTE ANTES:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CONTENIDO A ENVIAR:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{previous_response_to_inject}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ INSTRUCCIONES OBLIGATORIAS - NO PREGUNTES NADA MÁS:
+
+1. Ya tienes el email del usuario: tumai2025@hotmail.com
+2. El contenido a enviar está ARRIBA (entre las líneas ━━━)
+3. Convierte ese contenido a HTML simple
+4. Llama INMEDIATAMENTE: send_email(to=['tumai2025@hotmail.com'], subject='Resumen solicitado', html='<html><body><p>[contenido_de_arriba]</p></body></html>')
+5. NO llames list_docs, signed_url_for, o cualquier otra herramienta
+6. NO preguntes por el email - YA LO TIENES
+7. NO busques documentos - el contenido YA ESTÁ ARRIBA
+
+✅ ACCIÓN REQUERIDA: Llamar send_email AHORA con el contenido de arriba
+❌ PROHIBIDO: Preguntar por email, buscar docs, o pedir más información"""))
+                logger.info(f"[{self.name}] ✅ Injected previous_response as FINAL context before user message")
             
             # Add user message
             messages.append(HumanMessage(content=user_input))
