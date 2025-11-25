@@ -18,6 +18,7 @@ logfire.configure(
 )
 
 from agentic import agent  # Import the global agent instance
+from langchain_core.messages import AIMessage, ToolMessage, HumanMessage, SystemMessage
 from router.scaffold import Router
 from router.orchestrator import orchestrator
 from tools.property_tools import list_frameworks, list_properties as db_list_properties, add_property as db_add_property
@@ -970,16 +971,50 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     print(f"[MEMORY DEBUG] Invoking agent with thread_id={session_id}, input={text[:50]}")
     
     # Cleanup: Truncate old checkpoint messages to prevent memory bloat
-    # Keep only last 30 messages in checkpoint to avoid stale memory issues
+    # Keep only last 12 messages to avoid Rate Limits (GPT-4o 30k TPM) and ensure clean state
     try:
         config = {"configurable": {"thread_id": session_id}}
         current_state = agent.get_state(config)
         if current_state and current_state.values.get("messages"):
             messages = current_state.values["messages"]
-            if len(messages) > 30:
-                print(f"[MEMORY CLEANUP] Truncating checkpoint: {len(messages)} → 30 messages")
+            LIMIT = 12
+            
+            if len(messages) > LIMIT:
+                # Truncate to keep only recent messages
+                kept_msgs = messages[-LIMIT:]
+                
+                # SANITIZATION: Fix "tool_calls must be followed by tool messages" (400 Error)
+                # We must remove AIMessages with tool_calls if the corresponding ToolMessage is truncated
+                final_msgs = []
+                tool_ids_present = set()
+                
+                # 1. Collect IDs of all ToolMessages in the kept window
+                for m in kept_msgs:
+                    if isinstance(m, ToolMessage):
+                        tool_ids_present.add(m.tool_call_id)
+                        
+                # 2. Filter AIMessages: only keep tool_calls that have a response
+                for m in kept_msgs:
+                    if isinstance(m, AIMessage) and m.tool_calls:
+                        # Filter valid calls
+                        valid_calls = [tc for tc in m.tool_calls if tc['id'] in tool_ids_present]
+                        if valid_calls:
+                            # Create a copy to avoid mutating original if it's shared
+                            new_m = m.model_copy()
+                            new_m.tool_calls = valid_calls
+                            final_msgs.append(new_m)
+                        elif m.content:
+                            # Keep message content but remove tool calls
+                            new_m = m.model_copy()
+                            new_m.tool_calls = []
+                            final_msgs.append(new_m)
+                        # Else: Drop empty message
+                    else:
+                        final_msgs.append(m)
+                
+                print(f"[MEMORY CLEANUP] Truncating checkpoint: {len(messages)} → {len(final_msgs)} messages (Sanitized)")
                 # Update state with truncated messages
-                truncated_state = {**current_state.values, "messages": messages[-30:]}
+                truncated_state = {**current_state.values, "messages": final_msgs}
                 agent.update_state(config, truncated_state)
     except Exception as e:
         print(f"[MEMORY CLEANUP] Warning: Could not truncate checkpoint: {e}")
