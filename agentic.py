@@ -16,7 +16,7 @@ logfire.instrument_openai()
 
 from tools.registry import TOOLS  # <-- decorated tools live here
 from tools.property_tools import list_frameworks as _derive_framework_names
-from prompts.system_loader import load_prompt_for_intent
+from prompts.prompt_loader import build_agent_prompt
 from tools.contracts import validate_tool_call
 
 logger = logging.getLogger(__name__)
@@ -88,25 +88,6 @@ REGLA #2: NO INVENTES NI OFREZCAS COSAS NO PEDIDAS
 3. NO digas "¿quieres que haga X?" si el usuario NO preguntó por X.
 4. Si una herramienta devuelve datos, PRESENTA SOLO lo que el usuario pidió.
 5. NO seas proactivo ofreciendo cosas extra. Sé REACTIVO: responde EXACTAMENTE lo pedido.
-
-**⚡ EXCEPCIÓN: ENVÍO POR EMAIL ⚡**
-Si el usuario dice "manda/envia/mándame/enviame X por email/correo":
-
-**PASO 1: IDENTIFICA QUÉ QUIERE EL USUARIO**
-- "Manda ESTE/ESO/LA RESPUESTA/EL RESUMEN por email" (sin especificar "de la propiedad") → Quiere tu ÚLTIMA RESPUESTA enviada
-  * Revisa los últimos 3 mensajes: Si acabas de responder una pregunta (ej: resumen de documento con RAG), ESO es lo que quiere
-  * NO llames `build_summary_ppt` (a menos que hayan dicho explícitamente "resumen DE LA PROPIEDAD")
-  * Simplemente envía tu respuesta previa en HTML: `send_email(to=[email], subject="Resumen solicitado", html="<html><body><p>[tu_respuesta_anterior]</p></body></html>")`
-- "Manda resumen/ficha DE LA PROPIEDAD por email" → Quiere `build_summary_ppt` (PDF de propiedad)
-- "Manda [nombre documento] por email" → Quiere un documento específico (usa `list_docs` + `signed_url_for` + `send_email`)
-
-**PASO 2: EJECUTA LA ACCIÓN**
-1. **ACCIÓN**: Usa SIEMPRE la herramienta `send_email` con el contenido solicitado
-2. **NO** solo muestres la información en el chat
-3. Primero obtén los datos si es necesario (ej: `get_numbers`, `list_docs`, `signed_url_for`, o tu propia respuesta anterior)
-4. Luego envía por email con `send_email(to=[...], subject="...", html="...")`
-5. Responde SOLO con confirmación breve: "✅ He enviado [X] a [email]"
-6. **CRÍTICO**: NO muestres HTML, NO muestres enlaces, NO muestres código en el chat. El HTML va DENTRO del email.
 
 **EJEMPLOS:**
 ❌ Usuario: "resume el documento" → Tú: "Aquí está el resumen... ¿quieres el PDF?" 
@@ -867,17 +848,6 @@ EJEMPLOS COMPLETOS (FEW-SHOT) - SIGUE ESTOS AL PIE DE LA LETRA:
   → Respuesta: "✅ Ficha resumen generada: [enlace]"
   → ⚠️ PARA AHÍ - NO ofrezcas enviarla por email a menos que te lo pidan
 
-**EJEMPLO CRÍTICO - NO CONFUNDAS "ESTE RESUMEN" CON "FICHA PROPIEDAD":**
-- Usuario: "hazme un resumen del documento arras"
-  → Tú: [Usas RAG] "El documento de arras establece que... [resumen del contenido]"
-- Usuario: "Mandame este resumen por email"
-  → ⚠️ **"ESTE RESUMEN" = tu respuesta anterior (RAG), NO la ficha de propiedad**
-  → Tú: [Si no tienes email] "¿A qué dirección de email quieres que lo envíe?"
-  → Usuario: "juan@test.com"
-  → Tú: `send_email(to=["juan@test.com"], subject="Resumen del documento de arras", html="<html><body><p>El documento de arras establece que... [tu_respuesta_RAG]</p></body></html>")`
-  → Respuesta: "✅ He enviado el resumen del documento de arras a juan@test.com"
-  → ⚠️ **NO llames `build_summary_ppt` - eso es solo para "ficha/resumen DE LA PROPIEDAD"**
-
 **BORRAR:**
 - Usuario: "borra esta propiedad"
   → Tú: "¿Confirmas que quieres borrar [nombre de propiedad]?"
@@ -1110,14 +1080,17 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     
     # system + conversación (FILTRADA para evitar rate limits) + contexto
     msgs: List[Any] = []
-    # Optional modular loader: prepend slim base+task blocks based on intent_guess
+    # MODULAR PROMPT LOADER: Load base + intent-specific prompts for main_agent
     try:
         if os.getenv("ENABLE_PROMPT_LOADER", "1") == "1":
-            slim = load_prompt_for_intent(state.get("intent_guess"))
-            if slim:
-                msgs.append(SystemMessage(content=slim))
+            intent_guess = state.get("intent_guess")
+            # Load modular prompt for main_agent based on detected intent
+            modular_prompt = build_agent_prompt(agent_name="main_agent", intent=intent_guess)
+            if modular_prompt:
+                msgs.append(SystemMessage(content=modular_prompt))
+                logger.info(f"[assistant] ✅ Loaded modular prompt for main_agent (intent: {intent_guess})")
     except Exception as _e:
-        logger.warning(f"[assistant] prompt loader failed: {_e}")
+        logger.warning(f"[assistant] ⚠️ Modular prompt loader failed: {_e}, falling back to SYSTEM_PROMPT")
     # Keep the existing SYSTEM_PROMPT to preserve behavior
     msgs.append(SystemMessage(content=SYSTEM_PROMPT))
     if state.get("property_id"):

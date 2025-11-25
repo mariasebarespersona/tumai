@@ -59,8 +59,8 @@ def build_agent_prompt(agent_name: str, intent: Optional[str] = None) -> str:
     Build complete prompt for an agent based on intent.
     
     Args:
-        agent_name: Name of agent (e.g., "docs_agent", "property_agent")
-        intent: Optional intent for specialized instructions (e.g., "docs.send_email")
+        agent_name: Name of agent (e.g., "docs_agent", "property_agent", "main_agent")
+        intent: Optional intent for specialized instructions (e.g., "docs.send_email", "general.chat")
     
     Returns:
         Complete system prompt
@@ -78,20 +78,82 @@ def build_agent_prompt(agent_name: str, intent: Optional[str] = None) -> str:
     
     # 2. If intent provided, try to load intent-specific prompt
     if intent:
-        # Map intent to file name
-        # Examples: "docs.send_email" -> "send_email.md"
-        #           "docs.list" -> "list.md"
-        intent_file = intent.split(".")[-1] + ".md"  # Get last part after dot
-        intent_path = f"agents/{agent_name}/{intent_file}"
+        # Special mapping for main_agent intents that involve email
+        # This ensures we load the email.md module for any email-related intent
+        if agent_name == "main_agent":
+            intent_modules = _get_main_agent_modules(intent)
+        else:
+            # For specialized agents (docs_agent, etc.), use simple mapping
+            # Examples: "docs.send_email" -> "send_email.md"
+            #           "docs.list" -> "list.md"
+            intent_modules = [intent.split(".")[-1]]  # Get last part after dot
         
-        try:
-            specific = load_prompt(intent_path)
-            parts.append("\n\n---\n## 🎯 TAREA ACTUAL\n\n" + specific)
-            logger.info(f"[prompt_loader] Added intent-specific prompt: {intent}")
-        except FileNotFoundError:
-            logger.warning(f"[prompt_loader] No specific prompt for intent '{intent}', using base only")
+        # Load all relevant modules
+        for module_name in intent_modules:
+            intent_file = module_name if module_name.endswith(".md") else f"{module_name}.md"
+            intent_path = f"agents/{agent_name}/{intent_file}"
+            
+            try:
+                specific = load_prompt(intent_path)
+                parts.append("\n\n---\n## 🎯 TAREA ACTUAL\n\n" + specific)
+                logger.info(f"[prompt_loader] Added module: {module_name} for intent '{intent}'")
+            except FileNotFoundError:
+                logger.debug(f"[prompt_loader] Module '{module_name}' not found, skipping")
+        
+        if not any("🎯 TAREA ACTUAL" in part for part in parts):
+            logger.warning(f"[prompt_loader] No specific prompt modules found for intent '{intent}', using base only")
     
     return "\n\n".join(parts)
+
+
+def _get_main_agent_modules(intent: str) -> list[str]:
+    """
+    Map main_agent intents to prompt modules.
+    
+    Returns list of module names to load (without .md extension).
+    """
+    # Intent mappings for main_agent
+    # Key: intent pattern, Value: list of modules to load
+    intent_map = {
+        # Email-related intents
+        "docs.email": ["email"],
+        "docs.send_email": ["email"],
+        "email": ["email"],
+        
+        # Document intents
+        "docs.list": ["documents"],
+        "docs.upload": ["documents"],
+        
+        # Numbers intents
+        "numbers.set_cell": ["numbers"],
+        "numbers.get": ["numbers"],
+        "numbers.export": ["numbers"],
+        
+        # Property intents
+        "property.create": ["property"],
+        "property.list": ["property"],
+        "property.select": ["property"],
+        
+        # General/fallback
+        "general.chat": [],  # Base only
+    }
+    
+    # Try exact match first
+    if intent in intent_map:
+        return intent_map[intent]
+    
+    # Try partial matches (e.g., if intent is "docs.email.something", match "docs.email")
+    for pattern, modules in intent_map.items():
+        if intent.startswith(pattern):
+            return modules
+    
+    # Fallback: try to extract module name from intent
+    # E.g., "docs.send_email" -> ["send_email"]
+    if "." in intent:
+        return [intent.split(".")[-1]]
+    
+    # No match, return empty (base only)
+    return []
 
 
 def clear_cache():
