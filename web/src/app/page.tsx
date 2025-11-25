@@ -1650,28 +1650,17 @@ export default function ChatPage() {
                 }>
                   <div className={m.role === 'user' ? 'text-white/90' : ''}>
                     {(() => {
-                      console.log('[DEBUG RENDER] Message:', {
-                        id: m.id,
-                        role: m.role,
-                        showDocuments: m.showDocuments,
-                        hasDocuments: !!(documents.uploaded.length || documents.pending.length)
-                      })
-                      
                       if (m.role === 'assistant' && m.showDocuments) {
-                        console.log('[DEBUG] ✅ Rendering DocumentFramework in chat for message', m.id)
+                        console.log('[DocumentFramework] Rendering visual document framework UI')
                         return (
-                          <div className="w-full border-2 border-red-500 p-2 rounded animate-pulse">
-                            <div className="text-sm text-[color:var(--text-secondary)] mb-4 font-bold text-red-600">
-                              [DEBUG MODE] Rendering DocumentFramework Component:
-                            </div>
+                          <div className="w-full">
                             <div className="text-sm text-[color:var(--text-secondary)] mb-4">
-                              {m.content.split('\n')[0]} {/* Only show first line ("Para la propiedad...") */}
+                              {m.content.split('\n')[0]} {/* Show first line ("Para la propiedad...") */}
                             </div>
                             <DocumentFramework uploaded={documents.uploaded} pending={documents.pending} />
                           </div>
                         )
                       }
-                      console.log('[DEBUG] ❌ NOT rendering DocumentFramework (showDocuments:', m.showDocuments, ')')
                       return m.role === 'assistant' ? renderMessageContent(m.content) : m.content
                     })()}
                   </div>
