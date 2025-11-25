@@ -207,6 +207,55 @@ INSTRUCCIONES CRÍTICAS:
             # Add user message
             messages.append(HumanMessage(content=user_input))
             
+            # CRITICAL: Sanitize messages to remove orphaned tool_calls
+            # This prevents OpenAI 400 errors when history has AIMessage with tool_calls
+            # but their corresponding ToolMessages were truncated/removed
+            from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage
+            
+            cleaned_messages = []
+            for i, msg in enumerate(messages):
+                if isinstance(msg, LCAIMessage) and hasattr(msg, "tool_calls") and msg.tool_calls:
+                    # This AIMessage has tool_calls, verify if all have responses
+                    tool_call_ids = {tc.get("id") for tc in msg.tool_calls if tc.get("id")}
+                    
+                    # Search for ToolMessages that respond to these tool_calls
+                    answered_ids = set()
+                    for j in range(i + 1, len(messages)):
+                        if isinstance(messages[j], LCToolMessage):
+                            tc_id = getattr(messages[j], "tool_call_id", None)
+                            if tc_id in tool_call_ids:
+                                answered_ids.add(tc_id)
+                        elif isinstance(messages[j], LCAIMessage):
+                            # Next AIMessage, stop searching
+                            break
+                    
+                    # If some tool_calls are unanswered, remove them or skip this message
+                    if tool_call_ids != answered_ids:
+                        logger.warning(f"[{self.name}] Skipping orphaned AIMessage with unanswered tool_calls: {tool_call_ids - answered_ids}")
+                        continue
+                
+                # If it's a ToolMessage, verify its parent AIMessage is in cleaned_messages
+                if isinstance(msg, LCToolMessage):
+                    tc_id = getattr(msg, "tool_call_id", None)
+                    if tc_id:
+                        # Search for parent AIMessage in cleaned_messages
+                        found_parent = False
+                        for parent_msg in reversed(cleaned_messages):
+                            if isinstance(parent_msg, LCAIMessage) and hasattr(parent_msg, "tool_calls"):
+                                parent_tcs = parent_msg.tool_calls or []
+                                if any(tc.get("id") == tc_id for tc in parent_tcs):
+                                    found_parent = True
+                                    break
+                        
+                        if not found_parent:
+                            logger.warning(f"[{self.name}] Skipping orphaned ToolMessage with id: {tc_id}")
+                            continue
+                
+                cleaned_messages.append(msg)
+            
+            messages = cleaned_messages
+            logger.info(f"[{self.name}] Sanitized messages: {len(messages)} total (removed orphaned tool_calls)")
+            
             # Get tools
             tools = self.get_tools()
             logger.info(f"[{self.name}] 🔧 Binding {len(tools)} tools: {[t.name for t in tools]}")
