@@ -104,6 +104,29 @@ class OrchestrationRouter:
                     state = langgraph_agent.get_state(config)
                     
                     if state and state.values.get("messages"):
+                        # CRITICAL: Detect "send this/that content by email" requests
+                        # Extract the most recent AI response BEFORE truncating history
+                        user_input_lower = user_input.lower()
+                        is_contextual_email = any(ref in user_input_lower for ref in ['este', 'ese', 'esto', 'eso', 'esta', 'esa'])
+                        is_email_request = any(kw in user_input_lower for kw in ['manda', 'envía', 'enviar', 'mandame', 'enviame', 'email', 'correo'])
+                        
+                        if is_contextual_email and is_email_request:
+                            # Find the MOST RECENT AIMessage with content
+                            all_messages = state.values["messages"]
+                            last_ai_response = None
+                            
+                            for msg in reversed(all_messages):
+                                if isinstance(msg, AIMessage) and msg.content and len(str(msg.content).strip()) > 20:
+                                    # Skip messages that are just confirmations or tool results
+                                    content_str = str(msg.content).lower()
+                                    if not any(skip in content_str for skip in ['✅', 'enviado', 'he enviado', 'pregunta', '¿', 'correo', 'email']):
+                                        last_ai_response = str(msg.content)
+                                        break
+                            
+                            if last_ai_response:
+                                full_context["previous_response"] = last_ai_response
+                                logger.info(f"[orchestrator] 🎯 Detected contextual email request - extracted previous response ({len(last_ai_response)} chars)")
+                        
                         # Get last 10 messages for context (not too many to avoid bloat)
                         messages = state.values["messages"][-10:]
                         # Filter out system messages - only keep human/AI dialogue

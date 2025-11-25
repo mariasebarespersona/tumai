@@ -158,6 +158,31 @@ class BaseAgent:
             if property_id:
                 messages.append(SystemMessage(content=f"IMPORTANTE: El property_id actual es: {property_id}\nCuando llames a herramientas que requieren property_id, usa EXACTAMENTE este valor, NO uses placeholders como 'current_property_id'."))
             
+            # CRITICAL: Add explicit previous_response if provided by orchestrator
+            # This ensures the agent has the correct content to send when user says "send this/that"
+            if context and context.get("previous_response"):
+                prev_response = context["previous_response"]
+                messages.append(SystemMessage(content=f"""🎯 CONTEXTO EXPLÍCITO - RESPUESTA ANTERIOR:
+
+El usuario acaba de pedir que envíes "ESTE/ESE resumen/contenido" por email.
+
+**TU ÚLTIMA RESPUESTA FUE:**
+---
+{prev_response}
+---
+
+**INSTRUCCIONES CRÍTICAS:**
+1. El usuario quiere que envíes EXACTAMENTE el contenido de arriba por email
+2. NO busques en el historial antiguo
+3. NO uses enlaces a PDFs de propiedad
+4. Formatea el contenido de arriba como HTML limpio
+5. Usa `send_email(to=[email], subject="Resumen solicitado", html="<html><body><p>[contenido_de_arriba]</p></body></html>")`
+
+❌ NO llames list_docs o signed_url_for (a menos que pida un documento específico)
+❌ NO uses `build_summary_ppt` o `resumen_propiedad.pdf`
+✅ Envía el TEXTO de tu respuesta anterior"""))
+                logger.info(f"[{self.name}] 🎯 Injected previous_response as explicit context ({len(prev_response)} chars)")
+            
             # Add context if provided
             if context and context.get("history"):
                 # CRITICAL: Detect if we're in the middle of a multi-turn flow
