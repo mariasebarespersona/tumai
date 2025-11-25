@@ -1959,17 +1959,25 @@ async def ui_chat(
     if out.get("messages"):
         # Only check recent messages from THIS turn (last 10 is generous for a single turn)
         recent_messages = out["messages"][-10:] if len(out["messages"]) > 10 else out["messages"]
-        print(f"[DEBUG] Checking last {len(recent_messages)} messages (of {len(out['messages'])} total) for list_docs tool call in THIS turn...")
+        print(f"\n{'='*80}")
+        print(f"[DEBUG list_docs detection] Total messages in history: {len(out['messages'])}")
+        print(f"[DEBUG list_docs detection] Checking LAST {len(recent_messages)} messages for list_docs in THIS turn...")
+        print(f"{'='*80}")
         for i, msg in enumerate(recent_messages):
             msg_name = getattr(msg, "name", None)
             msg_type = type(msg).__name__
-            print(f"[DEBUG] Recent message {i}: type={msg_type}, name={msg_name}")
+            msg_content_preview = str(getattr(msg, "content", ""))[:100] if hasattr(msg, "content") else ""
+            print(f"[DEBUG] Recent msg [{i}]: type={msg_type}, name={msg_name}, content_preview={msg_content_preview}")
             if msg_name == "list_docs":
                 show_documents_ui = True
-                print(f"[DEBUG] ✅ Detected list_docs tool call in THIS turn at index {i} - WILL SHOW DOCUMENT FRAMEWORK UI")
+                print(f"\n{'🎉'*40}")
+                print(f"[DEBUG] ✅✅✅ FOUND list_docs at index {i} - WILL SHOW DOCUMENT FRAMEWORK UI")
+                print(f"{'🎉'*40}\n")
                 break
         if not show_documents_ui:
-            print(f"[DEBUG] ❌ NO list_docs tool call detected in current turn")
+            print(f"\n[DEBUG] ❌ NO list_docs tool call detected in current turn (checked {len(recent_messages)} messages)")
+            print(f"[DEBUG] Message types in current turn: {[type(m).__name__ for m in recent_messages]}")
+            print(f"[DEBUG] Message names in current turn: {[getattr(m, 'name', None) for m in recent_messages]}\n")
     
     # Include transcript if this was a voice input
     print(f"[DEBUG] Final transcript value: {transcript}")
