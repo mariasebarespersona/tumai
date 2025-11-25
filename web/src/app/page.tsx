@@ -262,6 +262,13 @@ export default function ChatPage() {
       }
       const data = await resp.json()
       const answer = String(data?.answer ?? '')
+      
+      // If backend says to show documents, fetch them now
+      if (data?.show_documents && propertyId) {
+        console.log('[Documents] Backend requested document framework UI, fetching documents...')
+        await fetchDocuments(propertyId)
+      }
+      
       setMessages(prev => [...prev, { 
         id: crypto.randomUUID(), 
         role: 'assistant', 
