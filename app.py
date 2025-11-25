@@ -1954,30 +1954,36 @@ async def ui_chat(
                     break
     
     # Check if agent called list_docs tool IN THIS TURN - if so, tell frontend to show visual document framework
-    # CRITICAL: Only check the LAST 10 messages (current turn), not the entire history
+    # CRITICAL: Only show UI if the CURRENT USER MESSAGE asked for documents (not old list_docs calls)
     show_documents_ui = False
     if out.get("messages"):
-        # Only check recent messages from THIS turn (last 10 is generous for a single turn)
-        recent_messages = out["messages"][-10:] if len(out["messages"]) > 10 else out["messages"]
-        print(f"\n{'='*80}")
-        print(f"[DEBUG list_docs detection] Total messages in history: {len(out['messages'])}")
-        print(f"[DEBUG list_docs detection] Checking LAST {len(recent_messages)} messages for list_docs in THIS turn...")
-        print(f"{'='*80}")
-        for i, msg in enumerate(recent_messages):
-            msg_name = getattr(msg, "name", None)
-            msg_type = type(msg).__name__
-            msg_content_preview = str(getattr(msg, "content", ""))[:100] if hasattr(msg, "content") else ""
-            print(f"[DEBUG] Recent msg [{i}]: type={msg_type}, name={msg_name}, content_preview={msg_content_preview}")
-            if msg_name == "list_docs":
-                show_documents_ui = True
-                print(f"\n{'🎉'*40}")
-                print(f"[DEBUG] ✅✅✅ FOUND list_docs at index {i} - WILL SHOW DOCUMENT FRAMEWORK UI")
-                print(f"{'🎉'*40}\n")
+        # Find the LAST HumanMessage (current user input)
+        last_human_msg = None
+        last_human_idx = -1
+        for i in range(len(out["messages"]) - 1, -1, -1):
+            if type(out["messages"][i]).__name__ == "HumanMessage":
+                last_human_msg = out["messages"][i]
+                last_human_idx = i
                 break
-        if not show_documents_ui:
-            print(f"\n[DEBUG] ❌ NO list_docs tool call detected in current turn (checked {len(recent_messages)} messages)")
-            print(f"[DEBUG] Message types in current turn: {[type(m).__name__ for m in recent_messages]}")
-            print(f"[DEBUG] Message names in current turn: {[getattr(m, 'name', None) for m in recent_messages]}\n")
+        
+        if last_human_msg:
+            user_text_lower = str(getattr(last_human_msg, "content", "")).lower()
+            # Check if user asked for documents in THIS turn
+            doc_keywords = ["documento", "documentos", "plantilla doc", "completar plantilla", "framework doc"]
+            user_asked_for_docs = any(kw in user_text_lower for kw in doc_keywords)
+            
+            if user_asked_for_docs:
+                # Only NOW check if list_docs was called AFTER the user message
+                for i in range(last_human_idx, len(out["messages"])):
+                    msg = out["messages"][i]
+                    if getattr(msg, "name", None) == "list_docs":
+                        show_documents_ui = True
+                        print(f"[DEBUG] ✅ User asked for documents AND agent called list_docs → SHOW UI")
+                        break
+            else:
+                print(f"[DEBUG] ❌ User did NOT ask for documents (user said: '{user_text_lower[:50]}...') → NO UI")
+        else:
+            print(f"[DEBUG] ⚠️  No HumanMessage found in history")
     
     # Include transcript if this was a voice input
     print(f"[DEBUG] Final transcript value: {transcript}")
