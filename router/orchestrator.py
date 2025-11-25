@@ -120,13 +120,18 @@ class OrchestrationRouter:
                                 if isinstance(msg, AIMessage) and msg.content and len(str(msg.content).strip()) > 50:
                                     content_str = str(msg.content).lower()
                                     
-                                    # SKIP: Confirmations, questions, greetings
-                                    if any(skip in content_str for skip in ['✅', 'he enviado', 'pregunta', '¿a qué correo', 'trabajando en:', 'estamos en:']):
+                                    # SKIP: Questions asking for information
+                                    if any(question in content_str for question in ['¿a qué correo', '¿qué email', 'proporciona el correo', 'proporciona el email', 'proporciona la dirección', 'necesito que me proporciones']):
+                                        logger.debug(f"[orchestrator] Skipping question: {content_str[:80]}")
+                                        continue
+                                    
+                                    # SKIP: Confirmations, greetings
+                                    if any(skip in content_str for skip in ['✅', 'he enviado', 'trabajando en:', 'estamos en:']):
                                         continue
                                     
                                     # SKIP: Document lists (multiple bullet points)
                                     if content_str.count('•') > 3 or content_str.count('-') > 5:
-                                        logger.debug(f"[orchestrator] Skipping message with bullet points (likely document list)")
+                                        logger.debug(f"[orchestrator] Skipping document list")
                                         continue
                                     
                                     # SKIP: Short confirmations or simple responses
@@ -137,7 +142,7 @@ class OrchestrationRouter:
                                     # Check if it's a RAG response or substantive content
                                     has_substantive_content = any(indicator in content_str for indicator in [
                                         'documento', 'contrato', 'establece', 'según', 'contenido', 
-                                        'información', 'datos', 'detalles', 'indica', 'menciona'
+                                        'información', 'datos', 'detalles', 'indica', 'menciona', 'señal', 'arras'
                                     ])
                                     
                                     if has_substantive_content or len(content_str) > 200:
