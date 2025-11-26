@@ -66,6 +66,27 @@ class ActiveRouter:
         if "elimina propiedad" in s or "borra propiedad" in s:
             return ("property.delete", 0.90, "PropertyAgent")
         
+        # ========== DOCUMENT STRATEGY SELECTION (HIGH PRIORITY - BEFORE NUMBERS) ==========
+        # CRITICAL: Detect when user wants to change document strategy (R2B vs Promoción)
+        # This MUST be checked BEFORE numbers operations to avoid confusion
+        # Examples: "voy a elegir R2B", "quiero seguir por R2B", "elijo el camino R2B", "no tengo más docs de compra, R2B"
+        
+        # Keywords that indicate document strategy context (NOT numbers)
+        doc_strategy_keywords = [
+            "elegir", "elijo", "camino", "estrategia", "seguir por", "voy a", "quiero",
+            "documentos", "docs", "compra", "promoción", "promocion", "obra nueva",
+            "no tengo más", "no tengo mas", "por ahora", "dejar", "pasar a"
+        ]
+        
+        if "r2b" in s or "promoción" in s or "promocion" in s:
+            # Check if it's about document strategy, NOT numbers
+            has_doc_context = any(kw in s for kw in doc_strategy_keywords)
+            has_numbers_context = any(kw in s for kw in ["números", "numeros", "plantilla", "celda", "b5", "c5", "excel", "tabla"])
+            
+            if has_doc_context and not has_numbers_context:
+                logger.info(f"[active_router] 🎯 Detected document strategy selection: R2B/Promoción")
+                return ("docs.set_strategy", 0.95, "DocsAgent")
+        
         # ========== NUMBERS OPERATIONS ==========
         # High-priority: cell updates (pon B5 a 1000)
         if any(verb in s for verb in ["pon", "escribe", "actualiza", "coloca", "asigna"]) and CELL_RE.search(s):
@@ -89,14 +110,17 @@ class ActiveRouter:
             return ("numbers.upload", 0.90, "NumbersAgent")
         
         # Select/focus numbers template (números, R2B, plantilla)
-        if ("números" in s or "numeros" in s or "r2b" in s or "plantilla" in s) and not any(x in s for x in ["email", "enviar", "documento"]):
-            # Focus mode if just "números" alone
-            if s.strip() in ["números", "numeros", "r2b", "plantilla"]:
-                return ("numbers.focus", 0.85, "NumbersAgent")
-            return ("numbers.select_template", 0.82, "NumbersAgent")
+        # CRITICAL: Only route to NumbersAgent if there's explicit numbers context
+        if ("números" in s or "numeros" in s or "plantilla" in s):
+            # Exclude document-related contexts
+            if not any(x in s for x in ["email", "enviar", "documento", "documentos", "compra", "elegir", "camino", "estrategia"]):
+                # Focus mode if just "números" alone
+                if s.strip() in ["números", "numeros", "plantilla"]:
+                    return ("numbers.focus", 0.85, "NumbersAgent")
+                return ("numbers.select_template", 0.82, "NumbersAgent")
         
         # Send numbers by email
-        if any(word in s for word in ["manda", "envía", "enviar", "mandame", "enviame"]) and ("números" in s or "numeros" in s or "r2b" in s or "plantilla" in s):
+        if any(word in s for word in ["manda", "envía", "enviar", "mandame", "enviame"]) and ("números" in s or "numeros" in s or "plantilla" in s):
             return ("numbers.send_email", 0.90, "NumbersAgent")
         
         # ========== DOCS OPERATIONS ==========

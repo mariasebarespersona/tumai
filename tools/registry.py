@@ -119,8 +119,20 @@ class ProposeDocInput(BaseModel):
     property_id: str = Field("", description="Optional property_id to help match facturas with placeholders")
 
 @tool("propose_doc_slot")
-def propose_doc_slot_tool(filename: str, hint: str = "", property_id: str = "") -> Dict:
+def propose_doc_slot_tool(filename: str, hint: str = "", property_id: str = "", bytes_b64: str = "") -> Dict:
     """Propose where a document should live in the documents framework.
+    
+    ADVANCED CLASSIFICATION:
+    1. Tries exact keyword matching from filename
+    2. Tries fuzzy matching (similarity >= 0.65)
+    3. If bytes_b64 provided: Reads PDF content with RAG to find keywords
+    4. If all fail: Returns error asking user for clarification
+    
+    Args:
+        filename: Name of the file (e.g., "escrituraNotarial.pdf")
+        hint: Optional user hint about document type
+        property_id: Property UUID (optional, for context)
+        bytes_b64: Base64-encoded file bytes (optional, enables RAG classification)
     
     CRITICAL: If this returns an 'error' key, DO NOT proceed with upload. ASK the user for clarification.
     
@@ -131,8 +143,26 @@ def propose_doc_slot_tool(filename: str, hint: str = "", property_id: str = "") 
     If you receive an error, you MUST:
     1. Tell the user the error message
     2. Ask for clarification about the document category
-    3. DO NOT call upload_and_link with None values"""
-    return _propose_slot(filename, hint, property_id)
+    3. DO NOT call upload_and_link with None values
+    
+    EXAMPLE - Fuzzy match:
+    Input: "escrituraNotarial.pdf"
+    → Fuzzy matches "escritura notarial" (score 0.85)
+    → Returns: {"document_group": "COMPRA", "document_subgroup": "", "document_name": "Escritura notarial de compraventa"}
+    
+    EXAMPLE - RAG match:
+    Input: "documento123.pdf" (with bytes_b64)
+    → Reads PDF content: "...licencia de obra...acometidas..."
+    → Finds keyword "licencia de obra" in content
+    → Returns: {"document_group": "R2B", "document_subgroup": "Diseño", "document_name": "Licencia de obra y acometidas + facturas"}"""
+    import base64
+    file_bytes = None
+    if bytes_b64:
+        try:
+            file_bytes = base64.b64decode(bytes_b64)
+        except Exception:
+            pass
+    return _propose_slot(filename, hint, property_id, file_bytes)
 
 
 class UploadAndLinkInput(BaseModel):

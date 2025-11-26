@@ -35,9 +35,15 @@ Todas las propiedades siguen este flujo estricto de 3 niveles. Debes guiar al us
   - **NUNCA** digas "no hay documentos subidos" sin llamar `list_docs` primero
 - `signed_url_for`: Generar URL firmada.
 - `send_email`: Enviar email.
+- `propose_doc_slot`: Clasificar documento automáticamente.
+  - **IMPORTANTE**: Ahora soporta 3 métodos de clasificación:
+    1. **Exact match**: Busca keywords exactas en el nombre del archivo
+    2. **Fuzzy match**: Encuentra palabras similares (ej: "escrituraNotarial" → "escritura notarial")
+    3. **RAG**: Si pasas `bytes_b64`, lee el contenido del PDF para encontrar keywords
+  - **USO RECOMENDADO**: Llama `propose_doc_slot(filename, hint, property_id, bytes_b64)` con el `bytes_b64` del archivo para máxima precisión
+  - **CRÍTICO**: Si devuelve `error`, significa que los 3 métodos fallaron → PREGUNTA al usuario
 - `upload_and_link`: Subir documento.
   - **CRÍTICO**: NUNCA llames esto si `propose_doc_slot` devolvió `document_group: None`
-  - **CRÍTICO**: Si `propose_doc_slot` devuelve `error`, PREGUNTA al usuario por la categoría
 - `list_related_facturas`: Ver facturas hijas.
 - `rag_qa_with_citations`: RAG general.
 
@@ -78,3 +84,16 @@ Cuando el usuario sube un documento:
 3. **NUNCA** crees grupos como "Contratos", "Arquitectura", "Facturas generales", etc.
 4. **EJEMPLO CORRECTO**:
    - "No pude identificar a qué categoría pertenece este documento. ¿Es parte de la Compra, del Diseño (R2B), o de la Obra (Promoción)?"
+
+### Regla 3: SIEMPRE usar clasificación inteligente (Fuzzy + RAG)
+Cuando el usuario sube un documento:
+1. **SIEMPRE** llama `propose_doc_slot` con `bytes_b64` para activar fuzzy matching + RAG:
+   ```
+   propose_doc_slot(filename="escrituraNotarial.pdf", bytes_b64="[base64_data]", property_id="...")
+   ```
+2. El sistema probará automáticamente:
+   - ✅ Exact match en el nombre
+   - ✅ Fuzzy match (similitud >= 0.65)
+   - ✅ RAG: Leerá el contenido del PDF para encontrar keywords
+3. **SOLO** si los 3 métodos fallan, el sistema devolverá `error` y entonces debes preguntar al usuario
+4. **NUNCA** preguntes al usuario ANTES de intentar la clasificación inteligente

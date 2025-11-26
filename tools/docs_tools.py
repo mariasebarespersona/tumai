@@ -3,6 +3,124 @@ import io, mimetypes, os, re, datetime as dt
 from typing import Dict, List, Optional, Tuple
 from .supabase_client import sb, BUCKET
 from .utils import docs_schema, utcnow_iso
+from difflib import SequenceMatcher
+
+# -------- Fuzzy Matching Helper --------
+def _fuzzy_match_keywords(text: str, min_similarity: float = 0.7) -> Optional[Tuple[str, str, str]]:
+    """
+    Advanced fuzzy matching to find the best matching document group.
+    
+    Returns: (keyword, group, subgroup) or None if no match above threshold
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    text_lower = text.lower()
+    best_match = None
+    best_score = 0.0
+    
+    # Build a flat list of all (keyword, group, subgroup) tuples
+    all_keywords = []
+    for key, kws in DOC_GROUPS.items():
+        parts = key.split(":")
+        group = parts[0]
+        subgroup = parts[1] if len(parts) > 1 else ""
+        for kw in kws:
+            all_keywords.append((kw, group, subgroup))
+    
+    # Try exact substring match first (highest priority)
+    for kw, group, subgroup in all_keywords:
+        if kw in text_lower:
+            logger.info(f"🎯 [fuzzy_match] EXACT match: '{kw}' in '{text}' → {group}:{subgroup}")
+            return (kw, group, subgroup)
+    
+    # Try fuzzy matching with SequenceMatcher
+    for kw, group, subgroup in all_keywords:
+        # Compare filename with keyword
+        similarity = SequenceMatcher(None, text_lower, kw).ratio()
+        
+        # Also compare each word in filename with keyword
+        words = text_lower.split()
+        for word in words:
+            word_similarity = SequenceMatcher(None, word, kw).ratio()
+            similarity = max(similarity, word_similarity)
+        
+        if similarity > best_score:
+            best_score = similarity
+            best_match = (kw, group, subgroup)
+    
+    if best_score >= min_similarity:
+        logger.info(f"🔍 [fuzzy_match] FUZZY match: '{text}' → '{best_match[0]}' (score: {best_score:.2f}) → {best_match[1]}:{best_match[2]}")
+        return best_match
+    
+    logger.warning(f"⚠️ [fuzzy_match] No match found for '{text}' (best score: {best_score:.2f}, threshold: {min_similarity})")
+    return None
+
+
+# -------- RAG-based Document Classification --------
+def _rag_classify_document(file_bytes: bytes, filename: str) -> Optional[Tuple[str, str, str]]:
+    """
+    Use RAG to read the document content and classify it based on keywords.
+    
+    Returns: (keyword, group, subgroup) or None if RAG fails or no match
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Only try RAG for PDFs
+        if not filename.lower().endswith('.pdf'):
+            logger.debug(f"[rag_classify] Skipping non-PDF file: {filename}")
+            return None
+        
+        # Extract text from PDF
+        try:
+            from pypdf import PdfReader
+            pdf_reader = PdfReader(io.BytesIO(file_bytes))
+            text = ""
+            # Read first 3 pages only (for performance)
+            for page in pdf_reader.pages[:3]:
+                text += page.extract_text() or ""
+            text = text.lower()[:2000]  # Limit to 2000 chars
+            
+            if len(text) < 20:
+                logger.debug(f"[rag_classify] Not enough text extracted from {filename}")
+                return None
+            
+            logger.info(f"📖 [rag_classify] Extracted {len(text)} chars from {filename}")
+            
+            # Search for keywords in extracted text
+            all_keywords = []
+            for key, kws in DOC_GROUPS.items():
+                parts = key.split(":")
+                group = parts[0]
+                subgroup = parts[1] if len(parts) > 1 else ""
+                for kw in kws:
+                    all_keywords.append((kw, group, subgroup))
+            
+            # Sort by keyword length (longer = more specific)
+            all_keywords.sort(key=lambda x: -len(x[0]))
+            
+            # Find best match
+            for kw, group, subgroup in all_keywords:
+                if kw in text:
+                    logger.info(f"✅ [rag_classify] Found '{kw}' in document content → {group}:{subgroup}")
+                    return (kw, group, subgroup)
+            
+            logger.warning(f"⚠️ [rag_classify] No keywords found in document content")
+            return None
+            
+        except ImportError:
+            logger.warning("[rag_classify] pypdf not installed, skipping RAG classification")
+            return None
+        except Exception as e:
+            logger.error(f"❌ [rag_classify] Failed to extract text: {e}")
+            return None
+    
+    except Exception as e:
+        logger.error(f"❌ [rag_classify] Unexpected error: {e}")
+        return None
+
 
 # -------- classification proposal (simple heuristic + LLM-friendly output) -----
 # NEW TAXONOMY ALIGNED WITH V4 (Visual Flowchart)
@@ -115,7 +233,7 @@ def _normalize(text: str) -> str:
     t = (text or "").lower()
     return re.sub(r"[^a-z0-9áéíóúüñ]+", " ", t)
 
-def propose_slot(filename: str, text_hint: str = "", property_id: str = "") -> Dict:
+def propose_slot(filename: str, text_hint: str = "", property_id: str = "", file_bytes: Optional[bytes] = None) -> Dict:
     import logging
     logger = logging.getLogger(__name__)
     
@@ -162,6 +280,7 @@ def propose_slot(filename: str, text_hint: str = "", property_id: str = "") -> D
         except Exception:
             pass
     
+    # STEP 1: Try exact keyword matching (original logic)
     all_keywords = []
     for key, kws in DOC_GROUPS.items():
         for kw in kws:
@@ -175,18 +294,40 @@ def propose_slot(filename: str, text_hint: str = "", property_id: str = "") -> D
     for kw, group, subgroup in all_keywords:
         if kw in combined:
             doc_name = KEYWORD_TO_DOCNAME.get(kw, kw.title())
+            logger.info(f"✅ [propose_slot] EXACT match: '{kw}' → {group}:{subgroup}")
             return {"document_group": group, "document_subgroup": subgroup, "document_name": doc_name}
     
-    # CRITICAL: If no match found, return an error instead of inventing a group
-    # The agent MUST use one of the predefined groups in DOC_GROUPS
-    logger.warning(f"⚠️ Could not find matching document group for: {filename} (hint: {text_hint})")
+    # STEP 2: Try fuzzy matching on filename
+    logger.info(f"🔍 [propose_slot] No exact match, trying fuzzy matching for: {filename}")
+    fuzzy_result = _fuzzy_match_keywords(combined, min_similarity=0.65)
+    if fuzzy_result:
+        kw, group, subgroup = fuzzy_result
+        doc_name = KEYWORD_TO_DOCNAME.get(kw, kw.title())
+        logger.info(f"✅ [propose_slot] FUZZY match: '{filename}' → {group}:{subgroup} (via keyword '{kw}')")
+        return {"document_group": group, "document_subgroup": subgroup, "document_name": doc_name}
+    
+    # STEP 3: Try RAG to read document content (if file bytes available)
+    if file_bytes:
+        logger.info(f"📖 [propose_slot] Trying RAG classification for: {filename}")
+        rag_result = _rag_classify_document(file_bytes, filename)
+        if rag_result:
+            kw, group, subgroup = rag_result
+            doc_name = KEYWORD_TO_DOCNAME.get(kw, kw.title())
+            logger.info(f"✅ [propose_slot] RAG match: '{filename}' → {group}:{subgroup} (found keyword '{kw}' in content)")
+            return {"document_group": group, "document_subgroup": subgroup, "document_name": doc_name}
+        logger.warning(f"⚠️ [propose_slot] RAG classification failed for: {filename}")
+    else:
+        logger.debug(f"⚠️ [propose_slot] No file_bytes provided, skipping RAG classification")
+    
+    logger.warning(f"⚠️ [propose_slot] All classification methods failed for: {filename}")
     logger.warning(f"   Available groups: {list(DOC_GROUPS.keys())}")
     
-    # Instead of inventing, ask the agent to clarify with the user
+    # STEP 4: Last resort - ask the agent to clarify with the user
     return {
         "error": "Could not determine document category",
-        "message": f"No pude identificar a qué categoría pertenece '{filename}'. ¿Puedes decirme más sobre el documento? Por ejemplo: ¿es un contrato, una factura, un plano, o parte de la compra?",
+        "message": f"No pude identificar a qué categoría pertenece '{filename}'. Las categorías disponibles son: COMPRA (obligatorio), R2B (Diseño, Venta, Venta+PM), o Promoción (Obra, Venta). ¿Puedes decirme a cuál pertenece?",
         "available_groups": list(DOC_GROUPS.keys()),
+        "suggestion": "Intenta usar palabras clave como: contrato, factura, plano, escritura, licencia, etc.",
         "document_group": None,  # Force agent to handle error
         "document_subgroup": None,
         "document_name": None
