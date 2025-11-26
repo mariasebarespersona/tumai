@@ -10,12 +10,27 @@ from fastapi.middleware.cors import CORSMiddleware
 # Logfire: Observability for API + LLM
 import logfire
 
-# Configure Logfire
-logfire.configure(
-    token=os.getenv("LOGFIRE_TOKEN"),  # Get from https://logfire.pydantic.dev
-    service_name="rama-ai-backend",
-    environment=os.getenv("ENVIRONMENT", "development"),
-)
+# Configure Logfire.
+# In environments like Railway where LOGFIRE_TOKEN is not set,
+# we must NOT fail the whole app – just disable remote logging.
+try:
+    token = os.getenv("LOGFIRE_TOKEN")
+    if token:
+        logfire.configure(
+            token=token,  # Get from https://logfire.pydantic.dev
+            service_name="rama-ai-backend",
+            environment=os.getenv("ENVIRONMENT", "development"),
+        )
+    else:
+        # Local/dev mode without remote Logfire backend
+        logfire.configure(
+            send_to_logfire=False,
+            service_name="rama-ai-backend",
+            environment=os.getenv("ENVIRONMENT", "development"),
+        )
+except Exception as _logfire_err:
+    # Never block app startup because of observability config
+    print(f"[LOGFIRE] Disabled due to configuration error: {_logfire_err}")
 
 from agentic import agent  # Import the global agent instance
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage, SystemMessage
