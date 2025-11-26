@@ -2006,19 +2006,29 @@ def build_graph():
     database_url = os.getenv("DATABASE_URL")
     
     if not database_url:
-        print("⚠️  WARNING: DATABASE_URL not found! Using SQLite fallback...")
-        from langgraph.checkpoint.sqlite import SqliteSaver
-        from sqlite3 import connect
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
+        print("⚠️  WARNING: DATABASE_URL not found! Using local checkpoint fallback...")
+        # Prefer SQLite for local/dev if available, otherwise fall back to in‑memory.
         try:
-            os.makedirs(data_dir, exist_ok=True)
-        except Exception:
-            pass
-        db_path = os.path.join(data_dir, "checkpoints.db")
-        conn = connect(db_path, check_same_thread=False)
-        checkpointer = SqliteSaver(conn)
-        checkpointer.setup()
-        print(f"✅ SQLite checkpointer active: {db_path}")
+            from langgraph.checkpoint.sqlite import SqliteSaver  # type: ignore
+            from sqlite3 import connect
+
+            data_dir = os.path.join(os.path.dirname(__file__), "data")
+            try:
+                os.makedirs(data_dir, exist_ok=True)
+            except Exception:
+                pass
+            db_path = os.path.join(data_dir, "checkpoints.db")
+            conn = connect(db_path, check_same_thread=False)
+            checkpointer = SqliteSaver(conn)
+            checkpointer.setup()
+            print(f"✅ SQLite checkpointer active: {db_path}")
+        except Exception as e:
+            # In minimal environments (e.g. staging) sqlite backend package may not be installed.
+            # Do NOT crash the app – use in‑memory saver instead (no persistence, but safe).
+            print(f"⚠️  SQLite checkpointer unavailable ({e}); using in‑memory saver.")
+            from langgraph.checkpoint.memory import MemorySaver  # type: ignore
+
+            checkpointer = MemorySaver()
     else:
         print(f"🔄 Connecting to PostgreSQL (Supabase)...")
         print(f"   Host: {database_url.split('@')[1].split('/')[0] if '@' in database_url else 'configured'}")
