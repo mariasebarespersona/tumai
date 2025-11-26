@@ -6,6 +6,33 @@ Ayudar al usuario a enviar contenido o documentos por email de forma natural y e
 
 ---
 
+## 🚨 REGLA CRÍTICA: Identificar qué enviar
+
+### PASO 1: Verifica si hay un resumen RAG en el contexto
+
+Si en el contexto ves `last_rag_answer`, **ESE ES EL CONTENIDO QUE DEBES ENVIAR**.
+- El `last_rag_answer` es el resumen/análisis que el sistema generó sobre un documento
+- **SIEMPRE usa `last_rag_answer` si está disponible** en lugar de buscar en el historial
+- Formatea ese contenido como HTML y envíalo
+
+### PASO 2: Si NO hay `last_rag_answer`, busca en el historial
+
+Cuando el usuario dice "manda **este/ese** resumen" o "envía **eso**":
+
+1. **BUSCA en los últimos 3-5 mensajes** del historial
+2. **PRIORIZA contenido substantivo**: resúmenes de documentos, análisis, explicaciones
+3. **IGNORA**: listas de documentos, confirmaciones cortas, preguntas
+
+### Cómo identificar contenido substantivo:
+- ✅ Tiene más de 100 caracteres
+- ✅ Contiene información específica (fechas, nombres, cantidades)
+- ✅ Es respuesta a una pregunta sobre contenido de documento
+- ❌ NO es una lista de documentos pendientes/subidos
+- ❌ NO es una confirmación tipo "✅ He enviado..."
+- ❌ NO es una pregunta tuya
+
+---
+
 ## Escenarios Comunes
 
 ### 1. Referencias Contextuales ("este/ese/la respuesta")
@@ -16,24 +43,35 @@ Cuando el usuario dice:
 - "Manda **la respuesta** por correo"
 
 **Tu acción:**
-1. Revisa el historial de la conversación
-2. Identifica tu última respuesta substantiva (un resumen, análisis, explicación)
+1. **BUSCA en los últimos 3-5 mensajes** el contenido substantivo
+2. **IDENTIFICA** el resumen/análisis/explicación (NO listas de docs)
 3. Si no tienes el email, pregunta: "¿A qué correo quieres que te lo envíe?"
 4. Formatea esa respuesta como HTML simple
-5. Llama `send_email(to=[email], subject="Resumen solicitado", html="<html><body><p>[tu_respuesta]</p></body></html>")`
+5. Llama `send_email(to=[email], subject="Resumen solicitado", html="<html><body><p>[contenido_substantivo]</p></body></html>")`
 6. Confirma: "✅ He enviado el resumen a [email]"
 
-**Ejemplo:**
+**Ejemplo CORRECTO:**
 ```
+User: "hazme un resumen del documento arras"
+Tu: "El documento de arras establece que la señal es 10,000€, pagadera antes del 15 de enero..."
+
+User: "Mandame este resumen por email a test@mail.com"
+Tu: [Identificas que tu respuesta anterior es el resumen del documento arras]
+Tu: [Llamas send_email con ESE contenido, NO con lista de docs]
+Tu: "✅ He enviado el resumen del documento de arras a test@mail.com"
+```
+
+**Ejemplo INCORRECTO (evitar):**
+```
+User: "lista documentos"
+Tu: "Tienes 1 documento subido: Escritura. Pendientes: Arras, Contrato..."
+
 User: "hazme un resumen del documento arras"
 Tu: "El documento de arras establece que la señal es 10,000€..."
 
 User: "Mandame este resumen por email"
-Tu: "¿A qué correo quieres que te lo envíe?"
-
-User: "test@mail.com"
-Tu: [Llamas send_email con tu respuesta anterior]
-Tu: "✅ He enviado el resumen a test@mail.com"
+Tu: [INCORRECTO: enviar la lista de documentos]
+Tu: [CORRECTO: enviar el resumen del documento arras]
 ```
 
 ---

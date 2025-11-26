@@ -875,6 +875,12 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
             # NOTE: Messages history is handled by LangGraph checkpointer, not needed in context
             context = {}
             
+            # CRITICAL: Pass last RAG answer to DocsAgent for contextual email sending
+            if STATE.get("last_rag_answer"):
+                context["last_rag_answer"] = STATE["last_rag_answer"]
+                context["last_rag_query"] = STATE.get("last_rag_query", "")
+                print(f"[ORCHESTRATOR] 📧 Passing last_rag_answer to context (len={len(context['last_rag_answer'])})")
+            
             # Try to get numbers_template from LangGraph state
             try:
                 from agentic import agent as langgraph_agent
@@ -927,6 +933,31 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                 # Get property_id from orchestrator result if available (e.g., after property switch)
                 final_property_id = routing_result.get("property_id") or property_id or STATE.get("property_id")
                 
+                # ============================================================
+                # CRITICAL: Save to LangGraph checkpointer for conversation continuity
+                # This ensures the next turn can see this response in the history
+                # Without this, confirmations like "si" after "¿Estás seguro?" won't work
+                # ============================================================
+                try:
+                    from langchain_core.messages import HumanMessage, AIMessage
+                    config = {"configurable": {"thread_id": session_id}}
+                    
+                    # Get current state
+                    current_state = agent.get_state(config)
+                    current_messages = current_state.values.get("messages", []) if current_state else []
+                    
+                    # Add user message and agent response to checkpointer
+                    new_messages = current_messages + [
+                        HumanMessage(content=text),
+                        AIMessage(content=agent_response)
+                    ]
+                    
+                    # Update the checkpointer state
+                    agent.update_state(config, {"messages": new_messages})
+                    print(f"[CHECKPOINTER] ✅ Saved specialized agent response to LangGraph (total: {len(new_messages)} messages)")
+                except Exception as e:
+                    print(f"[CHECKPOINTER] ⚠️ Could not save to LangGraph checkpointer: {e}")
+                
                 # Return agent response directly (skip MainAgent)
                 result = {
                     "messages": [
@@ -948,7 +979,32 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                 add_to_conversation(session_id, text, agent_response)
                 save_sessions()
                 
-                return result
+                # CRITICAL: Build response directly (make_response is defined later in the function)
+                # This ensures 'answer', 'property_id', 'show_documents' are all included
+                current_pid = final_property_id or STATE.get("property_id")
+                resp = {"answer": agent_response, "property_id": current_pid, "show_documents": False}
+                
+                # Include property_name if we have property_id
+                if current_pid:
+                    try:
+                        from tools.property_tools import get_property
+                        prop_info = get_property(current_pid)
+                        if prop_info:
+                            resp["property_name"] = prop_info["name"]
+                    except Exception as prop_err:
+                        print(f"[ORCHESTRATOR] ⚠️ Could not get property name: {prop_err}")
+                
+                # IMPORTANT: Return dict directly - ui_chat will handle JSONResponse conversion
+                print(f"[ORCHESTRATOR] 🚀 Returning response directly (bypassing MainAgent)")
+                # Return as dict with 'answer' key so ui_chat can process it correctly
+                return {
+                    "answer": resp["answer"],
+                    "property_id": resp.get("property_id"),
+                    "property_name": resp.get("property_name"),
+                    "show_documents": resp.get("show_documents", False),
+                    "messages": result.get("messages", []),
+                    "orchestrator_completed": True  # Flag to indicate orchestrator handled this
+                }
             
             # Update intent/confidence from orchestrator
             if routing_result.get("intent"):
@@ -957,7 +1013,12 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                 
         except Exception as e:
             print(f"[ORCHESTRATOR] Error: {e}, falling back to MainAgent")
+            import traceback
+            traceback.print_exc()
             routing_result = None
+    
+    # CRITICAL: If orchestrator already returned a response, we should NOT reach here
+    # But if we do (due to some edge case), the routing_result will tell us
     
     # CRITICAL: If routing_result has an intent, prioritize it over intent_guess
     # This ensures MainAgent gets the correct intent even when falling back from DocsAgent
@@ -1888,6 +1949,13 @@ async def ui_chat(
                 if result.get("citations"):
                     cit_strs = [f"{c['document_group']}/{c.get('document_subgroup','')}/{c['document_name']} (trozo {c['chunk_index']})" for c in result['citations']]
                     answer_text += f"\n\nFuentes:\n" + "\n".join(f"- {s}" for s in cit_strs)
+                
+                # CRITICAL: Save RAG answer to STATE so DocsAgent can access it for email
+                STATE["last_rag_answer"] = answer_text
+                STATE["last_rag_query"] = user_text
+                save_sessions()
+                print(f"[RAG] 💾 Saved RAG answer to STATE (len={len(answer_text)})")
+                
                 return make_response(answer_text)
             else:
                 print(f"[RAG] ⚠️  No relevant answer found in documents, falling through to agent")
@@ -1911,6 +1979,15 @@ async def ui_chat(
             print(f"[DEBUG] Property sync: STATE {STATE.get('property_id')} → {out['property_id']}")
         STATE["property_id"] = out["property_id"]
         save_sessions()
+    
+    # FAST PATH: If orchestrator already completed the task, use its response directly
+    if out.get("orchestrator_completed"):
+        print(f"[UI_CHAT] 🚀 Using orchestrator's direct response")
+        return make_response(
+            out.get("answer", ""),
+            extra={"property_name": out.get("property_name")},
+            show_documents=out.get("show_documents", False)
+        )
     
     answer = out.get("answer") or out.get("content") or ""
     if not answer and out.get("messages"):

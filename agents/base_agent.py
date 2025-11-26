@@ -202,7 +202,80 @@ INSTRUCCIONES CRÍTICAS:
 ❌ NO preguntes nada más
 ✅ EJECUTA el flujo completo y confirma el envío"""))
                 
-                messages.extend(history)
+                # CRITICAL: Smart truncation with context summary to prevent rate limit errors (429)
+                # Keep last 12 messages + add a context summary for older messages
+                MAX_HISTORY = 12
+                
+                if len(history) > MAX_HISTORY:
+                    # Build context summary from older messages
+                    older_messages = history[:-MAX_HISTORY]
+                    recent_messages = history[-MAX_HISTORY:]
+                    
+                    # Extract key context from older messages
+                    context_summary_parts = []
+                    
+                    # Get intent from context
+                    intent = context.get("intent") or context.get("original_intent")
+                    if intent:
+                        context_summary_parts.append(f"- Intent actual: {intent}")
+                    
+                    # Get failed agent if this is a fallback
+                    failed_agent = context.get("failed_agent")
+                    if failed_agent:
+                        context_summary_parts.append(f"- ⚠️ El agente {failed_agent} falló, CONTINÚA con el mismo intent")
+                    
+                    # Summarize what was discussed in older messages
+                    topics_discussed = set()
+                    for msg in older_messages:
+                        content = str(getattr(msg, 'content', '')).lower()
+                        if 'documento' in content or 'docs' in content:
+                            topics_discussed.add("documentos")
+                        if 'número' in content or 'numeros' in content or 'plantilla' in content:
+                            topics_discussed.add("números/plantilla")
+                        if 'propiedad' in content:
+                            topics_discussed.add("propiedades")
+                        if 'email' in content or 'correo' in content:
+                            topics_discussed.add("emails")
+                        if 'r2b' in content:
+                            # Check context to determine if R2B is about docs or numbers
+                            if 'documento' in content or 'compra' in content or 'estrategia' in content:
+                                topics_discussed.add("estrategia documental R2B")
+                            elif 'plantilla' in content or 'número' in content:
+                                topics_discussed.add("plantilla números R2B")
+                    
+                    if topics_discussed:
+                        context_summary_parts.append(f"- Temas previos: {', '.join(topics_discussed)}")
+                    
+                    # CRITICAL: Include last_rag_answer if available (for email sending)
+                    if context.get("last_rag_answer"):
+                        # Truncate if too long, but keep enough for context
+                        rag_answer = context["last_rag_answer"]
+                        if len(rag_answer) > 500:
+                            rag_answer = rag_answer[:500] + "..."
+                        context_summary_parts.append(f"\n🔍 ÚLTIMO RESUMEN RAG (para enviar por email si el usuario lo pide):\n{rag_answer}")
+                        logger.info(f"[{self.name}] 📧 Added last_rag_answer to context (len={len(context['last_rag_answer'])})")
+                    
+                    # Add context summary as a system message
+                    if context_summary_parts:
+                        context_summary = "📋 RESUMEN DE CONTEXTO (mensajes anteriores truncados):\n" + "\n".join(context_summary_parts)
+                        messages.append(SystemMessage(content=context_summary))
+                        logger.info(f"[{self.name}] Added context summary: {context_summary_parts}")
+                    
+                    limited_history = recent_messages
+                    logger.info(f"[{self.name}] Smart truncation: {len(history)} → {len(limited_history)} messages (+ context summary)")
+                else:
+                    limited_history = history
+                    logger.info(f"[{self.name}] Loading {len(limited_history)} messages from history")
+                    
+                    # Even without truncation, add last_rag_answer if available
+                    if context.get("last_rag_answer"):
+                        rag_answer = context["last_rag_answer"]
+                        if len(rag_answer) > 500:
+                            rag_answer = rag_answer[:500] + "..."
+                        messages.append(SystemMessage(content=f"🔍 ÚLTIMO RESUMEN RAG (para enviar por email si el usuario lo pide):\n{rag_answer}"))
+                        logger.info(f"[{self.name}] 📧 Added last_rag_answer to context (no truncation, len={len(context['last_rag_answer'])})")
+                
+                messages.extend(limited_history)
             
             # Add user message
             messages.append(HumanMessage(content=user_input))

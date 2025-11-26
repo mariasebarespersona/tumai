@@ -1137,130 +1137,28 @@ def assistant(state: AgentState) -> Dict[str, Any]:
         # Initialize variables that might be used later
         mentioned_numbers = False
         selected_tpl = None
-        wants_to_delete = False  # Initialize here so it's in scope
-        
-        # If it's an email request, DO NOT trigger template selection - let the agent handle it via send_numbers_table_email
-        if not is_email_request:
-            # If the user explicitly names a template (e.g. "R2B"), force set_numbers_template so the frontend opens the Excel.
-            # If the user only says "números" / "quiero completar la plantilla de Números", ASK them to choose among the 4 options
-            template_map = {
-                "r2b": "R2B",
-                "r2b+pm": "R2B + PM",
-                "r2b + pm": "R2B + PM",
-                "r2b+pm+venta certs": "R2B + PM + Venta certs",
-                "r2b + pm + venta certs": "R2B + PM + Venta certs",
-                "promocion": "Promoción",
-                "promoción": "Promoción",
-            }
-
-            # Detect explicit Numbers context. Avoid triggering when the user says "plantilla documentos".
-            numbers_tokens = ["número", "numeros", "números"]
-            mentioned_numbers = (
-                any(tok in last_user_text for tok in numbers_tokens)
-                or (("plantilla" in last_user_text) and any(tok in last_user_text for tok in ["numeros", "números", "de números", "de numeros"]))
-            )
-            # If the user explicitly mentions documents, do not treat as numbers
-            if any(tok in last_user_text for tok in ["documento", "documentos", "plantilla de documentos", "plantilla documentos"]):
-                mentioned_numbers = False
-            
-            # CRITICAL: If user wants to DELETE/REMOVE the template, do NOT trigger template selection
-            delete_verbs = ["borra", "elimina", "delete", "quita", "borrar", "eliminar", "quitar", "borro", "elimino"]
-            wants_to_delete = any(verb in last_user_text for verb in delete_verbs) and ("plantilla" in last_user_text or "tabla" in last_user_text or "números" in last_user_text or "numeros" in last_user_text)
-            
-            # ALSO check if previous message was asking for delete confirmation
-            # and current message is a confirmation ("si", "sí", "yes", "confirmo")
-            if len(messages) >= 2:
-                prev_msg = messages[-2]
-                if isinstance(prev_msg, AIMessage) and prev_msg.content:
-                    prev_text = prev_msg.content.lower()
-                    # Check for delete confirmation keywords
-                    delete_confirm_keywords = [
-                        "eliminación", "irreversible", "borrar", "eliminar", 
-                        "estás seguro", "estas seguro", "confirmar", "proceder",
-                        "deseas borrar", "deseas eliminar"
-                    ]
-                    is_delete_confirmation = any(kw in prev_text for kw in delete_confirm_keywords)
-                    # And check if user is confirming
-                    is_confirming = any(conf in last_user_text for conf in ["si", "sí", "yes", "confirmo", "ok", "procede"])
-                    
-                    if is_delete_confirmation and is_confirming:
-                        wants_to_delete = True
-                        logger.info(f"[assistant] 🗑️ Detected delete confirmation ('{last_user_text}' after confirmation question), disabling template selection logic")
-            
-            if wants_to_delete:
-                logger.info(f"[assistant] 🗑️ Detected delete request, FORCING delete_numbers_template call")
-                # FORCE delete immediately - don't let LLM generate confirmation text
-                forced_delete = AIMessage(content="", tool_calls=[{
-                    "name": "delete_numbers_template",
-                    "args": {"property_id": state.get("property_id"), "template_key": "R2B"},
-                    "id": "force_delete_numbers_template"
-                }])
-                return {"messages": [forced_delete], "last_llm_timestamp": time.time()}
-            
-            # Only check template_map if NOT deleting
-            if not wants_to_delete:
-                for key, val in template_map.items():
-                    if key in last_user_text:
-                        selected_tpl = val
-                        break
-
-            # If template is explicitly selected (e.g. "R2B"), force it even if "números" wasn't mentioned
-            if selected_tpl and state.get("property_id") and not wants_to_delete:
-                forced_set_tpl = AIMessage(content="", tool_calls=[{
-                    "name": "set_numbers_template",
-                    "args": {"property_id": state.get("property_id"), "template_key": selected_tpl},
-                    "id": "force_set_numbers_template"
-                }])
-                return {"messages": [forced_set_tpl], "last_llm_timestamp": time.time()}
-
-        # Only ask for template if NOT deleting
-        if mentioned_numbers and not selected_tpl and not wants_to_delete:
-            ask_msg = AIMessage(content=(
-                "¿Qué plantilla de Números quieres usar? Elige una de las siguientes opciones y respóndeme con el nombre o el número:\n\n"
-                "1) R2B\n2) R2B + PM\n3) R2B + PM + Venta certs\n4) Promoción"
-            ))
-            return {"messages": [ask_msg], "last_llm_timestamp": time.time()}
+        # ============================================================
+        # REMOVED: Legacy forced tool calls for numbers templates
+        # 
+        # The old code here would force set_numbers_template or delete_numbers_template
+        # based on keyword detection. This caused conflicts with specialized agents
+        # (e.g., when user said "si" to confirm property deletion, MainAgent would
+        # incorrectly force delete_numbers_template).
+        #
+        # Now, specialized agents (NumbersAgent, PropertyAgent, DocsAgent) handle
+        # their own logic via their prompts and LLM reasoning. The MainAgent only
+        # handles general queries that don't match any specialized agent.
+        # ============================================================
     
-    # CRÍTICO: Verificar si ACABAMOS de llamar set_numbers_template
-    # Si el último ToolMessage es set_numbers_template, NO añadir contexto de plantilla
-    # porque post_tool ya generó el mensaje de confirmación y el LLM debe detenerse
-    last_tool_msg = None
-    for msg in reversed(messages):
-        if isinstance(msg, ToolMessage):
-            last_tool_msg = msg
-            break
-    
-    just_set_template = (last_tool_msg and last_tool_msg.name == "set_numbers_template")
-    
-    # Sin guardias adicionales. Confiamos en el SYSTEM_PROMPT y en post_tool/should_continue.
-    # PERO: Si acabamos de llamar set_numbers_template, NO añadir ningún SystemMessage sobre números
-    if not just_set_template:
-        # Primero verificar si el usuario quiere "empezar" o "completar" la plantilla (resetear)
-        user_wants_to_start_afresh = False
-        if messages and isinstance(messages[-1], HumanMessage):
-            last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
-            # Si el usuario dice "quiero completar", "quiero empezar", "quiero rellenar" → resetear y ofrecer plantillas
-            if any(phrase in last_user_text for phrase in ["quiero completar la plantilla de números", "quiero empezar la plantilla de números", "quiero rellenar la plantilla de números", "empezar con números"]) or (("plantilla" in last_user_text) and any(tok in last_user_text for tok in ["numeros", "números"])):
-                user_wants_to_start_afresh = True
-        
-        if state.get("numbers_template") and not user_wants_to_start_afresh:
-            # Ya hay template y el usuario NO quiere resetear → continuar normalmente
-            # SOLO añadir este contexto si NO acabamos de seleccionar el template
-            msgs.append(SystemMessage(content=f"Contexto: Plantilla de Números seleccionada: {state['numbers_template']}. El Excel ya está visible. Espera instrucciones del usuario para modificar valores con `set_number` o `clear_number`."))
-        else:
-            # NO hay template O el usuario quiere empezar de nuevo → DEBE ofrecer las 4 opciones primero
-            if messages and isinstance(messages[-1], HumanMessage):
-                last_user_text = (messages[-1].content or "").lower() if isinstance(messages[-1].content, str) else ""
-                is_numbers_context = (
-                    any(tok in last_user_text for tok in ["número", "numeros", "números"])
-                    or (("plantilla" in last_user_text) and any(tok in last_user_text for tok in ["numeros", "números", "de números", "de numeros"]))
-                )
-                if is_numbers_context:
-                    if user_wants_to_start_afresh:
-                        # CRÍTICO: Resetear el template en el estado para que el agente no vea un template previo
-                        msgs.append(SystemMessage(content="🚨🚨🚨 ATENCIÓN CRÍTICA: El usuario dijo 'quiero completar/empezar la plantilla de Números'. Esto significa que quiere EMPEZAR DESDE CERO. 🚨🚨🚨 DEBES: 1) IGNORAR COMPLETAMENTE cualquier `numbers_template` que pueda existir en el estado. 2) OFRECER las 4 opciones de plantillas (R2B, R2B + PM, R2B + PM + Venta certs, Promoción). 3) ESPERAR a que el usuario elija UNA. 4) NO LLAMAR `get_numbers` ni `set_number` hasta que el usuario haya elegido. TRATA ESTO COMO SI FUERA LA PRIMERA VEZ QUE EL USUARIO ENTRÓ EN NÚMEROS."))
-                    else:
-                        msgs.append(SystemMessage(content="⚠️ ATENCIÓN: El usuario está entrando en modo Números pero NO hay plantilla seleccionada. DEBES ofrecer las 4 opciones (R2B, R2B + PM, R2B + PM + Venta certs, Promoción) y esperar a que elija antes de llamar `get_numbers` o `set_number`."))
+    # ============================================================
+    # SIMPLIFIED: Numbers context is now handled by NumbersAgent
+    # 
+    # The MainAgent only adds minimal context about the current state.
+    # All template selection, cell updates, and numbers logic is handled
+    # by the specialized NumbersAgent via the orchestrator.
+    # ============================================================
+    if state.get("numbers_template"):
+        msgs.append(SystemMessage(content=f"Contexto: Plantilla de Números activa: {state['numbers_template']}. Para operaciones de números, el NumbersAgent se encarga."))
     
     # Limitar historial a los últimos 6 mensajes para evitar rate limits y memoria obsoleta
     # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos

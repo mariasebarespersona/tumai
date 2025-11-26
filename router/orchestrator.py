@@ -138,41 +138,139 @@ class OrchestrationRouter:
                 agent_path.append(current_agent_name)
                 routing = None  # No routing decision was made
             else:
-                # Check if we should continue with a specialized agent from previous turn
+                # ============================================================
+                # CRITICAL: CONVERSATION CONTINUITY DETECTION
                 # This enables multi-turn conversations with specialized agents
+                # The router MUST detect when user is responding to agent questions
+                # ============================================================
                 continue_with_agent = None
+                continue_intent = None
+                
                 if full_context.get("history"):
                     try:
-                        last_messages = full_context["history"][-2:]  # Last 2 messages (AI question + user answer)
-                        if len(last_messages) >= 2:
-                            last_ai = last_messages[-2]
-                            last_human = last_messages[-1]
+                        # Get last AI message (the question) and current user input
+                        last_ai = None
+                        for msg in reversed(full_context["history"]):
+                            if isinstance(msg, AIMessage):
+                                last_ai = msg
+                                break
+                        
+                        if last_ai:
+                            ai_content = str(last_ai.content).lower()
+                            user_input_lower = user_input.lower().strip()
                             
-                            # Check if last AI message was a question from a specialized agent
-                            if isinstance(last_ai, AIMessage) and isinstance(last_human, HumanMessage):
-                                ai_content = str(last_ai.content).lower()
-                                human_content = str(last_human.content).lower()
+                            # ============================================================
+                            # CONFIRMATION RESPONSES (si, sí, no, confirmo, etc.)
+                            # ============================================================
+                            confirmation_yes = ["si", "sí", "yes", "confirmo", "adelante", "ok", "vale", "claro", "por supuesto", "hazlo", "dale"]
+                            confirmation_no = ["no", "cancelar", "cancela", "olvídalo", "olvidalo", "mejor no"]
+                            
+                            is_confirmation = user_input_lower in confirmation_yes or user_input_lower in confirmation_no
+                            is_yes = user_input_lower in confirmation_yes
+                            
+                            if is_confirmation:
+                                # PATTERN: Property deletion confirmation
+                                if ("¿estás seguro" in ai_content or "estas seguro" in ai_content) and "eliminar" in ai_content:
+                                    continue_with_agent = "PropertyAgent"
+                                    continue_intent = "property.delete_confirm" if is_yes else "property.delete_cancel"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with PropertyAgent (delete confirmation: {user_input_lower})")
                                 
-                                # Pattern: AI asked for email, user provided email
-                                if "correo" in ai_content or "email" in ai_content:
-                                    if "@" in human_content and len(human_content.split()) <= 3:
-                                        # User is likely responding with an email
-                                        # Check what the previous intent was
-                                        if len(full_context["history"]) >= 3:
-                                            prev_human = full_context["history"][-3]
-                                            if isinstance(prev_human, HumanMessage):
-                                                prev_content = str(prev_human.content).lower()
-                                                # If previous message was about documents, continue with DocsAgent
-                                                if any(kw in prev_content for kw in ["documento", "email", "correo", "manda", "envia", "envía"]):
-                                                    continue_with_agent = "DocsAgent"
-                                                    logger.info(f"[orchestrator] 🔄 Continuing multi-turn conversation with DocsAgent")
+                                # PATTERN: Property creation confirmation
+                                elif ("crear" in ai_content or "añadir" in ai_content) and "propiedad" in ai_content:
+                                    continue_with_agent = "PropertyAgent"
+                                    continue_intent = "property.create_confirm" if is_yes else "property.create_cancel"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with PropertyAgent (create confirmation: {user_input_lower})")
+                                
+                                # PATTERN: Document upload confirmation
+                                elif ("confirmas" in ai_content or "subir" in ai_content) and ("documento" in ai_content or "archivo" in ai_content):
+                                    continue_with_agent = "DocsAgent"
+                                    continue_intent = "docs.upload_confirm" if is_yes else "docs.upload_cancel"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with DocsAgent (upload confirmation: {user_input_lower})")
+                                
+                                # PATTERN: Email send confirmation
+                                elif ("enviar" in ai_content or "mandar" in ai_content) and ("email" in ai_content or "correo" in ai_content):
+                                    continue_with_agent = "DocsAgent"
+                                    continue_intent = "docs.email_confirm" if is_yes else "docs.email_cancel"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with DocsAgent (email confirmation: {user_input_lower})")
+                                
+                                # PATTERN: Numbers template confirmation
+                                elif "plantilla" in ai_content and ("números" in ai_content or "numeros" in ai_content):
+                                    continue_with_agent = "NumbersAgent"
+                                    continue_intent = "numbers.template_confirm" if is_yes else "numbers.template_cancel"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with NumbersAgent (template confirmation: {user_input_lower})")
+                                
+                                # PATTERN: Generic confirmation - check for any question mark
+                                elif "?" in ai_content and not continue_with_agent:
+                                    # Try to detect agent from context
+                                    if any(kw in ai_content for kw in ["propiedad", "inmueble", "casa", "piso"]):
+                                        continue_with_agent = "PropertyAgent"
+                                        continue_intent = "property.confirm"
+                                    elif any(kw in ai_content for kw in ["documento", "archivo", "pdf", "contrato"]):
+                                        continue_with_agent = "DocsAgent"
+                                        continue_intent = "docs.confirm"
+                                    elif any(kw in ai_content for kw in ["número", "plantilla", "excel", "celda"]):
+                                        continue_with_agent = "NumbersAgent"
+                                        continue_intent = "numbers.confirm"
+                                    
+                                    if continue_with_agent:
+                                        logger.info(f"[orchestrator] 🔄 Generic confirmation detected, continuing with {continue_with_agent}")
+                            
+                            # ============================================================
+                            # NON-CONFIRMATION RESPONSES (data input, selections, etc.)
+                            # ============================================================
+                            if not continue_with_agent:
+                                # PATTERN: PropertyAgent asked for name/address
+                                property_ask_phrases = [
+                                    "nombre y la dirección", "nombre y dirección",
+                                    "proporciona el nombre", "proporciona nombre",
+                                    "nombre de la propiedad", "dirección de la propiedad",
+                                    "cómo se llama", "como se llama"
+                                ]
+                                if any(phrase in ai_content for phrase in property_ask_phrases):
+                                    continue_with_agent = "PropertyAgent"
+                                    continue_intent = "property.create_continue"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with PropertyAgent (name/address response)")
+                                
+                                # PATTERN: AI asked for email, user provided email
+                                elif ("correo" in ai_content or "email" in ai_content) and ("@" in user_input_lower):
+                                    continue_with_agent = "DocsAgent"
+                                    continue_intent = "docs.email_continue"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with DocsAgent (email provided)")
+                                
+                                # PATTERN: NumbersAgent asked for template selection
+                                numbers_ask_phrases = ["qué plantilla", "que plantilla", "elige una", "1) r2b", "1) **r2b**"]
+                                if any(phrase in ai_content for phrase in numbers_ask_phrases):
+                                    template_responses = ["r2b", "promoción", "promocion", "1", "2", "3", "4", "r2b+pm", "r2b + pm"]
+                                    if any(resp in user_input_lower for resp in template_responses):
+                                        continue_with_agent = "NumbersAgent"
+                                        continue_intent = "numbers.select_template"
+                                        logger.info(f"[orchestrator] 🔄 Continuing with NumbersAgent (template selection)")
+                                
+                                # PATTERN: DocsAgent asked for document strategy (R2B vs Promoción)
+                                strategy_ask_phrases = ["r2b o promoción", "r2b o promocion", "qué estrategia", "que estrategia", "qué camino", "que camino"]
+                                if any(phrase in ai_content for phrase in strategy_ask_phrases):
+                                    if any(resp in user_input_lower for resp in ["r2b", "promoción", "promocion", "1", "2"]):
+                                        continue_with_agent = "DocsAgent"
+                                        continue_intent = "docs.set_strategy"
+                                        logger.info(f"[orchestrator] 🔄 Continuing with DocsAgent (strategy selection)")
+                    
                     except Exception as e:
                         logger.warning(f"[orchestrator] Error checking conversation continuity: {e}")
                 
                 if continue_with_agent:
                     current_agent_name = continue_with_agent
                     agent_path.append(current_agent_name)
-                    routing = None
+                    # Create a synthetic routing result for continuity
+                    routing = {
+                        "intent": continue_intent or "continuation",
+                        "confidence": 0.98,
+                        "target_agent": continue_with_agent,
+                        "method": "conversation_continuity"
+                    }
+                    # Pass the intent to context so agents know what to do
+                    full_context["intent"] = continue_intent
+                    full_context["is_continuation"] = True
+                    logger.info(f"[orchestrator] ✅ Conversation continuity: {continue_with_agent} with intent {continue_intent}")
                 else:
                     # Get initial routing decision
                     routing = await self.active_router.decide(current_input, full_context)
@@ -304,6 +402,12 @@ class OrchestrationRouter:
                                       "agent": current_agent_name,
                                       "error": error
                                   })
+                        
+                        # CRITICAL: Pass original intent to MainAgent so it doesn't lose context
+                        # This prevents MainAgent from misinterpreting the user's request
+                        full_context["original_intent"] = routing.get("intent")
+                        full_context["failed_agent"] = current_agent_name
+                        logger.info(f"[orchestrator] 📋 Passing original intent to MainAgent: {routing.get('intent')}")
                         
                         agent_path.append("MainAgent")
                         break

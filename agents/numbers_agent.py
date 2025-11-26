@@ -141,11 +141,15 @@ Tú: "✅ He borrado el valor de la celda B7."
 """
     
     def run(self, user_input: str, property_id: str = None, context: dict = None):
-        """Override run to intercept template selection responses."""
+        """Override run to intercept template selection and show options."""
         import logging
         logger = logging.getLogger(__name__)
         
         text_lower = user_input.lower().strip()
+        ctx = context or {}
+        
+        # Get current template from context (if any)
+        current_template = ctx.get("numbers_template")
         
         # Template mapping
         template_map = {
@@ -176,22 +180,25 @@ Tú: "✅ He borrado el valor de la celda B7."
             template_key = template_map[text_lower]
             logger.info(f"[NumbersAgent] 🎯 Detected template selection: '{user_input}' -> {template_key}")
             
-            # Force tool call
+            # Force tool call using .invoke() (correct way to call LangChain tools)
             try:
-                result = set_numbers_template_tool(property_id=property_id, template_key=template_key)
+                result = set_numbers_template_tool.invoke({"property_id": property_id, "template_key": template_key})
                 logger.info(f"[NumbersAgent] ✅ Template set result: {result}")
                 
                 return {
                     "action": "complete",
                     "agent": self.name,
-                    "response": f"✅ Plantilla {template_key} seleccionada. Ahora puedes empezar a completar los valores.",
+                    # IMPORTANT: This format triggers the frontend to open the Excel panel
+                    # Pattern: /✅ Usaremos la plantilla de Números:\s*([^\.\n]+)/i
+                    "response": f"✅ Usaremos la plantilla de Números: {template_key}. Ahora puedes empezar a completar los valores.",
                     "tool_calls": [{
                         "name": "set_numbers_template",
                         "args": {"property_id": property_id, "template_key": template_key},
                         "result": result
                     }],
                     "latency_ms": 0,
-                    "success": True
+                    "success": True,
+                    "numbers_template": template_key  # Also pass template key for frontend
                 }
             except Exception as e:
                 logger.error(f"[NumbersAgent] ❌ Error setting template: {e}")
@@ -204,12 +211,51 @@ Tú: "✅ He borrado el valor de la celda B7."
                     "success": False
                 }
         
-        # Check if user wants to select template (without specifying which one)
-        if any(phrase in text_lower for phrase in ["completar plantilla", "plantilla numeros", "plantilla números", "trabajar con números"]):
-            # Check if they specified a template
-            has_template = any(t in text_lower for t in template_map.keys())
-            if not has_template:
-                self._waiting_for_template = True
+        # Detect when user wants to SELECT/WORK WITH numbers template
+        select_template_phrases = [
+            "números", "numeros", "completar plantilla", "plantilla numeros", "plantilla números",
+            "trabajar con números", "trabajar con numeros", "completar los números", "completar numeros",
+            "quiero completar", "vamos a completar", "empezar con números", "empezar numeros"
+        ]
+        
+        # Check if user explicitly wants to CHANGE template
+        change_template_phrases = [
+            "cambiar plantilla", "otra plantilla", "cambiar de plantilla",
+            "elegir plantilla", "seleccionar plantilla", "nueva plantilla",
+            "elegir otra", "cambiar a otra"
+        ]
+        wants_to_change = any(phrase in text_lower for phrase in change_template_phrases)
+        
+        # Check if user wants to select/work with template (generic request)
+        is_template_selection_request = any(phrase in text_lower for phrase in select_template_phrases) or wants_to_change
+        
+        # But NOT if they're doing a specific action (cell update, export, etc.)
+        is_specific_action = any(action in text_lower for action in [
+            "pon", "escribe", "actualiza", "mete",  # Cell updates (removed "cambia" - conflicts with "cambiar plantilla")
+            "borra", "elimina", "limpia", "vacía",  # Clear/delete
+            "exporta", "descarga", "envía", "manda",  # Export/email
+            "b5", "c5", "b6", "c6", "b7", "c7", "b8"  # Cell references
+        ])
+        
+        if is_template_selection_request and not is_specific_action:
+            # ALWAYS show template options when user asks to work with numbers
+            # This allows them to select a template (or change the current one)
+            logger.info(f"[NumbersAgent] 🎯 User wants to work with numbers, showing template options")
+            
+            # Show current template if exists
+            current_info = ""
+            if current_template:
+                current_info = f"\n\n📌 *Plantilla actual: {current_template}*"
+            
+            return {
+                "action": "complete",
+                "agent": self.name,
+                "response": f"¿Qué plantilla de Números quieres usar? Elige una:\n\n1) **R2B** - Reforma y venta\n2) **R2B + PM** - Reforma con Property Management\n3) **R2B + PM + Venta certs** - Completa con certificados\n4) **Promoción** - Obra nueva{current_info}",
+                "tool_calls": [],
+                "latency_ms": 0,
+                "success": True,
+                "waiting_for_template": True
+            }
         
         # Default: use parent's run method
         return super().run(user_input, property_id, context)
