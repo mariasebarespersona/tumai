@@ -23,8 +23,9 @@ from .docs_tools import (
     seed_mock_documents as _seed_mock_documents,
     purge_property_documents as _purge_property_documents,
     purge_all_documents as _purge_all_documents,
-    set_property_strategy as _set_property_strategy, # NEW
-    get_property_strategy as _get_property_strategy, # NEW
+    set_property_strategy as _set_property_strategy,
+    get_property_strategy as _get_property_strategy,
+    delete_document as _delete_document,  # NEW - Delete single document
 )
 from .numbers_tools import (
     set_number as _set_number, 
@@ -357,6 +358,50 @@ class GetPropertyStrategyInput(BaseModel):
 def get_property_strategy_tool(property_id: str) -> str:
     """Get the current management strategy for a property."""
     return _get_property_strategy(property_id)
+
+
+# --- Delete Document (NEW) ---
+class DeleteDocumentInput(BaseModel):
+    property_id: str = Field(..., description="UUID of the property (REQUIRED)")
+    document_name: str = Field(..., description="Name of the document to delete (can be partial for fuzzy matching)")
+    document_group: str = Field("", description="Optional - filter by group (COMPRA, R2B, Promoción)")
+    document_subgroup: str = Field("", description="Optional - filter by subgroup (Diseño, Venta, etc.)")
+    confirmed: bool = Field(False, description="If True, execute deletion. If False, return document details for confirmation.")
+
+@tool("delete_document")
+def delete_document_tool(property_id: str, document_name: str, document_group: str = "", document_subgroup: str = "", confirmed: bool = False) -> Dict:
+    """Delete a document from a SPECIFIC property. TWO-STEP PROCESS WITH CONFIRMATION.
+    
+    🚨 WORKFLOW (MUST FOLLOW):
+    
+    **STEP 1 - Search (confirmed=False):**
+    Call with document_name and confirmed=False (default).
+    Returns: {"needs_confirmation": True, "document": {...}, "message": "¿Confirmas...?"}
+    → Show the confirmation message to user and WAIT for their response.
+    
+    **STEP 2 - Execute (confirmed=True):**
+    After user confirms with "si/sí/confirmo", call AGAIN with:
+    - Same document_name
+    - document_group and document_subgroup from Step 1 response
+    - confirmed=True
+    Returns: {"success": True, "deleted_document": "...", "message": "✅ Eliminado..."}
+    
+    🚨 CRITICAL RULES:
+    - NEVER call with confirmed=True on first attempt
+    - ALWAYS show confirmation message to user first
+    - ALWAYS wait for user to confirm before calling with confirmed=True
+    - Use document_group/document_subgroup from Step 1 to ensure correct document
+    
+    Example flow:
+    1. User: "borra el documento impuestos de venta"
+    2. You: delete_document(property_id="...", document_name="impuestos de venta")
+    3. Tool returns: {"needs_confirmation": True, "document": {"document_group": "R2B", "document_subgroup": "Venta", ...}, "message": "¿Confirmas...?"}
+    4. You: "¿Confirmas que quieres eliminar 'Impuestos de venta' del grupo R2B → Venta?"
+    5. User: "si"
+    6. You: delete_document(property_id="...", document_name="Impuestos de venta", document_group="R2B", document_subgroup="Venta", confirmed=True)
+    7. Tool returns: {"success": True, "message": "✅ Eliminado..."}
+    """
+    return _delete_document(property_id, document_name, document_group, document_subgroup, confirmed)
 
 
 class SetNumberInput(BaseModel):
@@ -1032,6 +1077,7 @@ TOOLS = [
     purge_all_documents_tool,      # NEW
     set_property_strategy_tool,    # NEW
     get_property_strategy_tool,    # NEW
+    delete_document_tool,          # NEW - Delete single document from property
     create_reminder_tool,          # NEW - Recordatorios
     extract_payment_date_tool,     # NEW - Extrae fechas de documentos
     list_reminders_tool,           # NEW - Lista recordatorios

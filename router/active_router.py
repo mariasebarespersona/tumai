@@ -58,6 +58,7 @@ INTENT_DESCRIPTIONS = {
     "docs.qa": "Usuario hace una PREGUNTA sobre el CONTENIDO de un documento (qué dice, cuándo, cuánto, etc.)",
     "docs.send_email": "Usuario quiere ENVIAR un documento o resumen por EMAIL",
     "docs.upload": "Usuario quiere SUBIR un documento (contrato, factura, escritura, etc.)",
+    "docs.delete": "Usuario quiere BORRAR/ELIMINAR un documento de la propiedad actual",
     "docs.list": "Usuario quiere VER LISTA de documentos (subidos o pendientes)",
     "docs.list_pending": "Usuario quiere ver qué documentos FALTAN por subir",
     "docs.list_facturas": "Usuario quiere ver FACTURAS asociadas a un contrato",
@@ -538,6 +539,29 @@ class ActiveRouter:
             numbers_exclusions = ["r2b", "números", "numeros", "plantilla", "excel"]
             if not any(x in s for x in numbers_exclusions):
                 return ("docs.upload", 0.92, "DocsAgent")
+        
+        # DELETE document - NEW: Must be before list operations
+        # "borra el documento X", "elimina el documento X", "quita el documento X"
+        delete_doc_verbs = [
+            "borra", "borrar", "elimina", "eliminar", "quita", "quitar",
+            "remueve", "remover", "delete", "remove", "suprime", "suprimir"
+        ]
+        if any(verb in s for verb in delete_doc_verbs):
+            # Check if it's about a document (not property or numbers)
+            has_doc_keyword = any(doc in s for doc in doc_keywords)
+            has_doc_generic = any(kw in s for kw in ["documento", "archivo", "fichero", "file"])
+            
+            # Exclude property deletion
+            property_keywords = ["propiedad", "casa", "piso", "villa", "finca", "inmueble", "property"]
+            is_property_delete = any(pk in s for pk in property_keywords)
+            
+            # Exclude numbers deletion
+            numbers_keywords = ["plantilla", "números", "numeros", "r2b", "excel", "tabla"]
+            is_numbers_delete = any(nk in s for nk in numbers_keywords)
+            
+            if (has_doc_keyword or has_doc_generic) and not is_property_delete and not is_numbers_delete:
+                logger.info(f"[active_router] 🗑️ Detected docs.delete: {s[:50]}")
+                return ("docs.delete", 0.95, "DocsAgent")
         
         # List missing/pending documents - expanded synonyms
         pending_keywords = [

@@ -19,7 +19,8 @@ from tools.registry import (
     qa_document_tool,
     rag_qa_with_citations_tool,
     qa_payment_schedule_tool,
-    summarize_document_tool
+    summarize_document_tool,
+    delete_document_tool  # NEW - Delete single document
 )
 
 
@@ -55,6 +56,7 @@ class DocsAgent(BaseAgent):
             rag_qa_with_citations_tool,
             qa_payment_schedule_tool,
             summarize_document_tool,
-            qa_document_tool
+            qa_document_tool,
+            delete_document_tool  # NEW - Delete single document
         ]
 

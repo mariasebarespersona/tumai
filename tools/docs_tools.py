@@ -647,11 +647,11 @@ def purge_property_documents(property_id: str) -> dict:
                     "g": r.get("document_group"),
                     "sg": r.get("document_subgroup") or "",
                     "n": r.get("document_name"),
-                    "storage_key": "",
+                    "storage_key": None,  # Use None to store NULL in DB
                     "content_type": None,
                     "metadata": {},
-                    "signed_url": "",
-                    "expires_at": utcnow_iso(),
+                    "signed_url": None,
+                    "expires_at": None,
                 }
                 sb.rpc("update_property_document_link", payload).execute()
                 cleared += 1
@@ -721,3 +721,204 @@ def get_property_strategy(property_id: str) -> str:
         return res.data or "PENDING"
     except Exception:
         return "UNKNOWN"
+
+
+def delete_document(property_id: str, document_name: str, document_group: str = "", document_subgroup: str = "", confirmed: bool = False) -> Dict:
+    """
+    Delete a document from a SPECIFIC property.
+    
+    CRITICAL: This only deletes the document from the specified property_id.
+    It does NOT affect documents in other properties.
+    
+    TWO-STEP PROCESS:
+    1. First call WITHOUT confirmed=True: Returns document details for user confirmation
+    2. Second call WITH confirmed=True + exact group/subgroup: Executes deletion
+    
+    Args:
+        property_id: UUID of the property (REQUIRED - ensures we only delete from THIS property)
+        document_name: Name of the document to delete (can be partial for fuzzy matching)
+        document_group: Optional - filter by group (COMPRA, R2B, Promoción). REQUIRED for confirmed=True
+        document_subgroup: Optional - filter by subgroup (Diseño, Venta, etc.)
+        confirmed: If True, execute deletion. If False, return document details for confirmation.
+    
+    Returns:
+        - If confirmed=False: {"needs_confirmation": True, "document": {...}, "message": "..."}
+        - If confirmed=True: {"success": True, "deleted_document": "...", ...}
+        - On error: {"success": False, "error": "..."}
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if not property_id:
+        return {"success": False, "error": "property_id is required to delete a document"}
+    
+    logger.info(f"🗑️ [delete_document] Searching for '{document_name}' in property {property_id}")
+    
+    # Get all documents for this property
+    all_docs = list_docs(property_id)
+    if not all_docs:
+        return {"success": False, "error": f"No documents found for property {property_id}"}
+    
+    # Find matching document(s) - fuzzy match on name
+    # CRITICAL: Prioritize documents with storage_key (actually uploaded files)
+    normalized_search = document_name.lower().strip()
+    matches = []
+    fuzzy_matches = []  # Store (doc, similarity_score) for fuzzy matching
+    
+    for doc in all_docs:
+        doc_name = doc.get("document_name", "").lower().strip()
+        doc_group = doc.get("document_group", "")
+        doc_subgroup = doc.get("document_subgroup", "") or ""
+        has_file = bool(doc.get("storage_key") or doc.get("file_storage_key"))
+        
+        # If group/subgroup filters provided, check them too
+        group_matches = not document_group or doc_group.lower() == document_group.lower()
+        subgroup_matches = not document_subgroup or doc_subgroup.lower() == document_subgroup.lower()
+        
+        if not (group_matches and subgroup_matches):
+            continue
+        
+        # Check for exact or partial substring match first
+        if normalized_search in doc_name or doc_name in normalized_search:
+            matches.append((doc, has_file))
+            continue
+        
+        # Fuzzy matching using SequenceMatcher
+        # "impuesto de venta" vs "impuestos de venta" should match
+        similarity = SequenceMatcher(None, normalized_search, doc_name).ratio()
+        
+        # Also check word-by-word similarity (helps with singular/plural)
+        search_words = set(normalized_search.split())
+        doc_words = set(doc_name.split())
+        common_words = search_words & doc_words
+        word_overlap = len(common_words) / max(len(search_words), 1)
+        
+        # Combined score: similarity + word overlap bonus
+        combined_score = similarity + (word_overlap * 0.3)
+        
+        if combined_score >= 0.75:  # Threshold for fuzzy match
+            fuzzy_matches.append((doc, combined_score, has_file))
+            logger.info(f"🔍 [delete_document] Fuzzy match: '{normalized_search}' ~ '{doc_name}' (score: {combined_score:.2f}, has_file: {has_file})")
+    
+    # If no exact matches, use fuzzy matches
+    if not matches and fuzzy_matches:
+        # Sort by: 1) has_file (True first), 2) score (highest first)
+        fuzzy_matches.sort(key=lambda x: (x[2], x[1]), reverse=True)
+        best_match = fuzzy_matches[0]
+        matches.append((best_match[0], best_match[2]))
+        logger.info(f"✅ [delete_document] Using best fuzzy match: {best_match[0].get('document_name')} (score: {best_match[1]:.2f}, has_file: {best_match[2]})")
+    
+    # CRITICAL: Prioritize documents with files over empty placeholders
+    # Sort matches: documents with storage_key first
+    if matches:
+        matches.sort(key=lambda x: x[1], reverse=True)  # has_file=True first
+        # Extract just the docs
+        matches = [m[0] for m in matches]
+    
+    if not matches:
+        # List available documents to help user
+        available = [d.get("document_name") for d in all_docs if d.get("storage_key")]
+        return {
+            "success": False, 
+            "error": f"No document matching '{document_name}' found in this property",
+            "available_documents": available[:10]  # Show first 10
+        }
+    
+    if len(matches) > 1:
+        # Multiple matches - show all options for user to choose
+        match_info = []
+        for m in matches:
+            has_file = bool(m.get("storage_key") or m.get("file_storage_key"))
+            match_info.append({
+                "document_name": m.get("document_name"),
+                "document_group": m.get("document_group"),
+                "document_subgroup": m.get("document_subgroup") or "",
+                "has_file": has_file,
+                "display": f"{m.get('document_group')}/{m.get('document_subgroup') or ''}{'/' if m.get('document_subgroup') else ''}{m.get('document_name')} {'✅' if has_file else '⏳'}"
+            })
+        return {
+            "success": False,
+            "needs_selection": True,
+            "error": f"Encontré {len(matches)} documentos que coinciden con '{document_name}':",
+            "matches": match_info,
+            "message": "Por favor, especifica cuál quieres eliminar indicando el grupo (ej: 'R2B/Venta/Impuestos de venta')."
+        }
+    
+    # Single match found
+    doc_to_delete = matches[0]
+    doc_id = doc_to_delete.get("id")
+    storage_key = doc_to_delete.get("storage_key") or doc_to_delete.get("file_storage_key")
+    full_name = doc_to_delete.get("document_name")
+    group = doc_to_delete.get("document_group")
+    subgroup = doc_to_delete.get("document_subgroup") or ""
+    has_file = bool(storage_key)
+    
+    # Build display path for confirmation
+    display_path = f"{group}"
+    if subgroup:
+        display_path += f" → {subgroup}"
+    display_path += f" → {full_name}"
+    
+    logger.info(f"🗑️ [delete_document] Found document: {full_name} in {group}/{subgroup} (has_file={has_file}, confirmed={confirmed})")
+    
+    # ============================================================
+    # STEP 1: If not confirmed, return details for user confirmation
+    # ============================================================
+    if not confirmed:
+        return {
+            "success": True,
+            "needs_confirmation": True,
+            "document": {
+                "document_name": full_name,
+                "document_group": group,
+                "document_subgroup": subgroup,
+                "has_file": has_file,
+                "display_path": display_path
+            },
+            "message": f"¿Confirmas que quieres eliminar el documento '{full_name}' del grupo **{display_path}**? {'(Tiene archivo subido ✅)' if has_file else '(Sin archivo ⏳)'}",
+            "instruction": "Para confirmar, llama delete_document con confirmed=True y los mismos parámetros."
+        }
+    
+    # ============================================================
+    # STEP 2: Confirmed - proceed with deletion
+    # ============================================================
+    
+    # Warn if trying to delete a document without a file
+    if not storage_key:
+        logger.warning(f"⚠️ [delete_document] Document '{full_name}' has no file (storage_key=None). Nothing to delete from storage.")
+    
+    # Delete from storage if file exists
+    if storage_key:
+        try:
+            sb.storage.from_(BUCKET).remove([storage_key])
+            logger.info(f"✅ [delete_document] Removed file from storage: {storage_key}")
+        except Exception as e:
+            logger.warning(f"⚠️ [delete_document] Could not remove file from storage: {e}")
+    
+    # Clear the document link (set storage_key to NULL, keep the schema cell)
+    try:
+        payload = {
+            "p_id": property_id,
+            "g": group,
+            "sg": subgroup,
+            "n": full_name,
+            "storage_key": None,
+            "content_type": None,
+            "metadata": {},
+            "signed_url": None,
+            "expires_at": None,
+        }
+        sb.rpc("update_property_document_link", payload).execute()
+        logger.info(f"✅ [delete_document] Cleared document link in database (storage_key=NULL)")
+    except Exception as e:
+        logger.error(f"❌ [delete_document] Failed to clear document link: {e}")
+        return {"success": False, "error": f"Failed to update database: {e}"}
+    
+    return {
+        "success": True,
+        "deleted_document": full_name,
+        "document_group": group,
+        "document_subgroup": subgroup,
+        "property_id": property_id,
+        "message": f"✅ Documento '{full_name}' eliminado correctamente del grupo {display_path}."
+    }

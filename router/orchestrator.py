@@ -187,6 +187,12 @@ class OrchestrationRouter:
                                     continue_intent = "docs.upload_confirm" if is_yes else "docs.upload_cancel"
                                     logger.info(f"[orchestrator] 🔄 Continuing with DocsAgent (upload confirmation: {user_input_lower})")
                                 
+                                # PATTERN: Document DELETE confirmation (NEW)
+                                elif ("elimine" in ai_content or "eliminar" in ai_content or "borre" in ai_content or "borrar" in ai_content) and ("documento" in ai_content):
+                                    continue_with_agent = "DocsAgent"
+                                    continue_intent = "docs.delete_confirm" if is_yes else "docs.delete_cancel"
+                                    logger.info(f"[orchestrator] 🔄 Continuing with DocsAgent (delete confirmation: {user_input_lower})")
+                                
                                 # PATTERN: Email send confirmation
                                 elif ("enviar" in ai_content or "mandar" in ai_content) and ("email" in ai_content or "correo" in ai_content):
                                     continue_with_agent = "DocsAgent"

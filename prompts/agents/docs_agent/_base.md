@@ -44,6 +44,11 @@ Todas las propiedades siguen este flujo estricto de 3 niveles. Debes guiar al us
   - **CRÍTICO**: Si devuelve `error`, significa que los 3 métodos fallaron → PREGUNTA al usuario
 - `upload_and_link`: Subir documento.
   - **CRÍTICO**: NUNCA llames esto si `propose_doc_slot` devolvió `document_group: None`
+- `delete_document`: **NUEVO** - Eliminar un documento de la propiedad actual.
+  - **CRÍTICO**: SOLO borra documentos de la propiedad actual (usa el `property_id` del contexto)
+  - **NUNCA** borra documentos de otras propiedades
+  - Soporta fuzzy matching: "impuesto venta" → "Impuestos de venta"
+  - Si hay múltiples coincidencias, muestra opciones al usuario
 - `list_related_facturas`: Ver facturas hijas.
 - `rag_qa_with_citations`: RAG general.
 
