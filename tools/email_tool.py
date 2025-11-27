@@ -49,24 +49,40 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
         ctx = ssl._create_unverified_context()
     
     try:
-        logger.info(f"[send_email] Connecting to SMTP server...")
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
-            logger.info(f"[send_email] Starting TLS...")
-            s.starttls(context=ctx)
-            logger.info(f"[send_email] Logging in...")
-            s.login(SMTP_USER, SMTP_PASS)
-            logger.info(f"[send_email] Sending message...")
-            s.send_message(msg)
-            logger.info(f"[send_email] ✅ Email sent successfully to {to}")
+        # Try port 465 (SSL) first if configured, otherwise use 587 (STARTTLS)
+        if SMTP_PORT == 465:
+            logger.info(f"[send_email] Connecting to SMTP server with SSL (port 465)...")
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=10) as s:
+                logger.info(f"[send_email] Logging in...")
+                s.login(SMTP_USER, SMTP_PASS)
+                logger.info(f"[send_email] Sending message...")
+                s.send_message(msg)
+                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
+        else:
+            logger.info(f"[send_email] Connecting to SMTP server with STARTTLS (port {SMTP_PORT})...")
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
+                logger.info(f"[send_email] Starting TLS...")
+                s.starttls(context=ctx)
+                logger.info(f"[send_email] Logging in...")
+                s.login(SMTP_USER, SMTP_PASS)
+                logger.info(f"[send_email] Sending message...")
+                s.send_message(msg)
+                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
     except ssl.SSLError as e:
         # SSL certificate verification failed - silently retry with unverified context
-        # Don't log warning here as it confuses the agent
+        logger.info(f"[send_email] SSL error, retrying with unverified context...")
         ctx = ssl._create_unverified_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
-            s.starttls(context=ctx)
-            s.login(SMTP_USER, SMTP_PASS)
-            s.send_message(msg)
-            logger.info(f"[send_email] ✅ Email sent successfully to {to}")
+        if SMTP_PORT == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=10) as s:
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
+                s.starttls(context=ctx)
+                s.login(SMTP_USER, SMTP_PASS)
+                s.send_message(msg)
+                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
     except Exception as e:
         logger.error(f"[send_email] ❌ Error sending email: {e}", exc_info=True)
         raise

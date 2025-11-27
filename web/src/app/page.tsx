@@ -132,13 +132,13 @@ export default function ChatPage() {
     }
   }, [propertyId, fetchDocuments])
 
-  // Auto-open document list when documents are loaded
+  // Auto-open document list when documents are loaded or when property changes
   useEffect(() => {
-    if (documents.uploaded.length > 0 && !showDocumentList) {
+    if (documents.uploaded.length > 0) {
       console.log(`[Documents] Auto-opening list (${documents.uploaded.length} documents)`)
       setShowDocumentList(true)
     }
-  }, [documents.uploaded.length])
+  }, [documents.uploaded.length, propertyId])
 
   useEffect(() => {
     // Auto-scroll to bottom when new messages arrive (only if already near bottom)
