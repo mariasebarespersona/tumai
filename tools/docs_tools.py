@@ -564,13 +564,22 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
     logger.info(f"[signed_url_for] Exact match failed for '{document_name}', trying fuzzy match...")
     all_rows = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data or []
     
-    # Filter documents in the same group/subgroup that have a file
+    # First, filter documents in the same group/subgroup that have a file
     candidates = [
         r for r in all_rows
         if r.get("document_group") == document_group
         and (r.get("document_subgroup") or "") == sg
         and r.get("file_storage_key")  # Only documents with uploaded files
     ]
+    
+    # If no candidates in the exact subgroup, expand search to the entire group
+    if not candidates:
+        logger.info(f"[signed_url_for] No documents in {document_group}/{sg}, expanding search to entire {document_group} group...")
+        candidates = [
+            r for r in all_rows
+            if r.get("document_group") == document_group
+            and r.get("file_storage_key")  # Only documents with uploaded files (ignore subgroup)
+        ]
     
     # Check if any candidate contains the requested name (fuzzy match)
     # e.g., "Contrato arquitecto" matches "Contrato arquitecto + facturas arquitecto"
@@ -579,11 +588,12 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
         candidate_name = candidate.get("document_name", "").lower().strip()
         if normalized_request in candidate_name or candidate_name in normalized_request:
             matched_name = candidate.get("document_name")
-            logger.info(f"[signed_url_for] ✅ Fuzzy match: '{document_name}' → '{matched_name}'")
-            # Now get the signed URL for the matched document
+            matched_subgroup = candidate.get("document_subgroup") or ""
+            logger.info(f"[signed_url_for] ✅ Fuzzy match: '{document_name}' → '{matched_name}' (subgroup: '{matched_subgroup}')")
+            # Now get the signed URL for the matched document using the CORRECT subgroup from the candidate
             key = sb.rpc(
                 "get_property_document_storage_key",
-                {"p_id": property_id, "g": document_group, "sg": sg, "n": matched_name}
+                {"p_id": property_id, "g": document_group, "sg": matched_subgroup, "n": matched_name}
             ).execute().data
             if key:
                 return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
