@@ -66,16 +66,18 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: EMAIL_FROM
-        sync: false
+      # SMTP removed - now using Resend API
+      # - key: SMTP_HOST
+      #   sync: false
+      # - key: SMTP_PORT
+      #   value: "587"
+      # - key: SMTP_USER
+      #   sync: false
+      # - key: SMTP_PASS
+      #   sync: false
+      # EMAIL_FROM is now managed via Railway Variables UI
+      # - key: EMAIL_FROM
+      #   sync: false
 
   - type: web
     name: rama-frontend
