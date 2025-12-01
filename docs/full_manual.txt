@@ -1,0 +1,372 @@
+--- Reading docs/DOC-20250819-WA0096..pdf ---
+
+--- Page 1 ---
+ 
+ 
+Maninos Capital 
+Mobile Homes Rent-to-Own Business 
+Operations Manual 
+Introduction 
+This Operations Manual outlines the standardized processes and procedures for 
+Maninos Capital, ensuring efficient operations, scalability, and compliance with Texas 
+and U.S. federal regulations. The manual covers the entire value chain:  
+1. Purchase of Mobile Homes. 
+2. Customer Onboarding. 
+3. Debt Raising for Acquisitions. 
+4. Rent Collection and Portfolio Management. 
+5. Home Delivery and Customer Loyalty.  
+Each process includes clear procedures, responsible areas, KPIs, and risk mitigation 
+strategies to support institutionalization and scalability. 
+This manual provides a comprehensive framework for Maninos Capital to 
+institutionalize operations and scale its rent-to-own mobile home business in Texas. By 
+standardizing processes, leveraging technology, and ensuring compliance, the 
+company can achieve o perational efficiency, customer satisfaction, and sustainable 
+growth.  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+--- Page 2 ---
+1. Purchase of Mobile Homes 
+Objective:  
+Efficiently acquire used mobile homes in excellent condition that meet predefined 
+quality and investment criteria to ensure profitability and customer satisfaction. 
+Procedures 
+1. Market Research and Sourcing. 
+- Identify target markets in Texas (e.g., Houston, Dallas, San Antonio) with high 
+demand for affordable housing. 
+- Source mobile homes through real estate platforms, auctions, direct sellers, and 
+mobile home parks. 
+- Use data analytics to assess market trends, pricing, and appreciation potential. 
+2. Attribute Checklist for Purchase:. 
+   -Physical Condition: 
+- No structural damage (e.g., roof, foundation, walls). 
+- Functional plumbing, electrical, and HVAC systems. 
+- Cosmetic condition suitable for immediate rental or minor renovations (<$5,000). 
+   - Location: 
+- Proximity to employment hubs, schools, and amenities. 
+- Located in mobile home parks with stable management and low lot rental fees. 
+   - Financial Criteria: 
+- Purchase price ≤ 70% of market value to ensure profitability. 
+- Renovation costs + purchase price ≤ 80% of after-repair value (ARV). 
+- Potential rental income ≥ 1.5% of purchase price per month. 
+   - Legal Compliance: 
+- Clear title with no liens or encumbrances. 
+- Compliance with Texas Department of Housing and Community Affairs (TDHCA) 
+regulations for mobile homes. 
+ 
+3. Inspection and Due Diligence: 
+- Conduct physical inspections by certified inspectors. 
+- Verify title status and ownership history through TDHCA records. 
+- Assess lot lease agreements and park regulations. 
+ 
+--- Page 3 ---
+4. Negotiation and Acquisition: 
+- Negotiate purchase price based on comparable sales and condition. 
+- Finalize contracts with legal review to ensure compliance. 
+ 
+5. Inventory Management: 
+- Log acquired homes in a centralized ERP system (custom CRM). 
+- Categorize homes by location, condition, and projected rental terms (24 , 36 or 48 
+months). 
+ 
+Responsible Area 
+- Procurement Team: Sources and negotiates purchases, conducts due diligence. 
+- Legal Team: Ensures compliance with TDHCA and federal regulations. 
+- Finance Team: Approves budgets and tracks acquisition costs. 
+KPIs 
+- Acquisition Cost Efficiency: Total cost (purchase + renovation) ≤ 80% of ARV . 
+- Acquisition Speed: Average time from sourcing to closing ≤ 30 days. 
+- Inventory Turnover: ≥ 90% of purchased homes rented within 60 days. 
+- Compliance Rate: 100% of purchases compliant with TDHCA regulations. 
+Risk Mitigation 
+- Use standardized checklists to avoid substandard purchases. 
+- Maintain a diversified portfolio across Texas regions to reduce market risk. 
+- Conduct regular audits of title and inspection processes. 
+2. Customer Onboarding 
+Objective: Provide a seamless, online onboarding process for tenants, ensuring a 
+positive customer experience, robust KYC compliance, and risk mitigation for rent -to-
+own agreements. 
+Procedures 
+1. Target Customer Profile: 
+- Demographics: Low -to-middle-income families or individuals (annual income 
+$30,000–$60,000). 
+- Socioeconomic Level : Primarily blue -collar workers, service industry 
+employees, or gig economy workers. 
+--- Page 4 ---
+- Financial Culture : Limited credit history (credit score 500 –650) but stable 
+income. 
+- Employment Status**: Employed or self -employed with verifiable income (≥ 3x 
+monthly rent). 
+- Immigration Status: U.S. citizens, permanent residents, or individuals with valid 
+work permits (e.g., DACA recipients). 
+ 
+2. Onboarding Process: 
+   - Online Application: 
+- Customers apply via a mobile-friendly platform (website/app). 
+- Collect personal information (name, address, SSN/ITIN), income details, and 
+employment history. 
+   - KYC Compliance: 
+- Verify identity using third-party tools (e.g., ID.me, Experian). 
+- Conduct background checks (criminal, eviction history). 
+- Comply with federal regulations (e.g., Patriot Act, Fair Housing Act). 
+   - Financial Assessment: 
+- Require proof of income (pay stubs, tax returns, bank statements). 
+- Assess debt-to-income (DTI) ratio (target ≤ 40%). 
+   - Contract Customization: 
+     - Offer 24-month, 36-month or 48-month rent-to-own contracts based on risk profile: 
+- Low Risk (credit score >600, stable income): 24 months, 20% down payment. 
+- High Risk (credit score <600, variable income): 48 months, 30% down payment. 
+- Monthly rent = 1.5% –2% of home value, with 50% credited toward purchase 
+price. 
+   - Customer Journey Communication: 
+- Provide a digital dashboard for customers to track application status, contract 
+terms, and payment schedules. 
+- Send automated welcome emails/SMS with contract details and FAQs. 
+ 
+3. Customer Experience: 
+--- Page 5 ---
+- Offer multilingual support (English/Spanish) to cater to diverse Texas 
+demographics. 
+- Provide virtual tours of mobile homes and transparent pricing. 
+- Assign a dedicated customer success agent for personalized support. 
+ 
+Responsible Area 
+- Customer Success Team: Manages onboarding, customer communication, and 
+support. 
+- Compliance Team: Oversees KYC and regulatory adherence. 
+- IT Team: Maintains online platform and data security. 
+ 
+KPIs 
+- Onboarding Time: Average time from application to contract signing ≤ 5 days. 
+- Customer Satisfaction: Net Promoter Score (NPS) ≥ 80. 
+- KYC Compliance Rate: 100% of customers verified per regulatory requirements. 
+- Conversion Rate: ≥ 70% of applicants approved for rent-to-own contracts. 
+Risk Mitigation 
+- Use automated KYC tools to reduce fraud risk. 
+- Implement data encryption and GDPR-compliant storage for customer data. 
+- Establish clear escalation protocols for high-risk applicants. 
+ 
+ 
+ 
+ 
+3. Debt Raising for Home Acquisitions 
+Objective:  
+Secure for e ach location (patio),  €100,000 monthly in debt financing at 12% annual 
+interest over 1 2 months to fund mobile home purchases, aligned with commercial 
+placement goals. 
+--- Page 6 ---
+Procedures: 
+1. Financial Planning: 
+- Forecast acquisition needs based on rental placement targets (e.g., 5 
+homes/month at $20,000/home). 
+- Align debt raising with projected cash flows from rent-to-own contracts. 
+2. Investor Outreach: 
+- Target accredited investors, real estate funds, and financial institutions 
+specializing in alternative assets. 
+- Create pitch decks highlighting Maninos Capital’s track record, ROI, and risk 
+mitigation strategies. 
+- Leverage crowdfunding platforms (e.g., Briq, YieldStreet) for smaller investors. 
+3. Debt Structuring: 
+- Offer 1 2-month promissory notes at 12% annual interest, secured by mobile 
+home assets. 
+- Structure payments as interest-only with principal repayment at maturity. 
+- Provide investors with quarterly performance reports on portfolio health. 
+ 
+4. Compliance and Documentation: 
+- Comply with SEC regulations for private placements (e.g., Regulation D). 
+- Draft loan agreements with legal oversight, specifying collateral and repayment 
+terms. 
+- Conduct due diligence on investors to ensure legitimacy. 
+ 
+5. Portfolio Alignment: 
+   - Match debt raises to rental placement rates to avoid over-leveraging. 
+   - Maintain a debt-to-equity ratio ≤ 2:1 minimum for financial stability. 
+ 
+Responsible Area 
+- Finance Team: Structures debt deals and manages investor relations. 
+- Legal Team: Ensures SEC compliance and drafts agreements. 
+--- Page 7 ---
+- Commercial Team: Provides placement forecasts to guide debt needs. 
+KPIs 
+- Funding Success Rate: ≥ 90% of targeted €100,000 raised monthly. 
+- Cost of Capital: Average interest rate ≤ 12% annually. 
+- Investor Retention: ≥ 80% of investors reinvest in subsequent rounds. 
+- Compliance Rate: 100% adherence to SEC regulations. 
+Risk Mitigation 
+- Diversify investor base to reduce reliance on single funding sources. 
+- Maintain a reserve fund (10% of raised capital) for unexpected repayment 
+issues. 
+- Regularly audit financial projections to ensure alignment with market  
+ 
+4. Rent Collection and Portfolio Management 
+Objective: Implement a robust system for monitoring and collecting rents, managing 
+contracts, and mitigating portfolio risks. 
+Procedures 
+1. Contract Development: 
+- Draft rent-to-own contracts specifying: 
+o Monthly rent, down payment, and purchase option terms. 
+o Tenant responsibilities (e.g., insurance, maintenance, lot fees). 
+o Default conditions and repossession protocols. 
+o Ensure compliance with Texas Property Code and federal Fair Housing 
+Act. 
+2. Online Rent Management System: 
+- Use a cloud-based platform (e.g., Buildium, AppFolio) for: 
+- Automated rent collection via ACH, credit card, or digital wallets.(Avoid cash). 
+- Real-time portfolio monitoring (payment status, delinquencies). 
+- Document storage for contracts, tenant records, and property details. 
+- Provide tenants with a mobile app to view payment history and submit 
+maintenance requests. 
+3. Risk Mapping and Mitigation: 
+--- Page 8 ---
+- Categorize tenants by risk level (low, medium, high) based on credit score, DTI, 
+and payment history. 
+- Implement early warning systems for late payments (e.g., SMS reminders after 5 
+days). 
+- Escalate delinquencies to collections after 30 days, with repossession after 60 
+days per Texas law. 
+ 
+4. Portfolio Reporting: 
+- Generate monthly reports on portfolio performance (e.g., occupancy rate, 
+delinquency rate, debt rent rate, cap rate,). 
+- Track KPIs and share with investors and management. 
+ 
+Responsible Area 
+- Operations Team: Manages rent collection and portfolio monitoring. 
+- Legal Team: Drafts contracts and handles default cases. 
+- IT Team: Maintains rent management system. 
+KPIs 
+- Collection Rate: ≥ 95% of rents collected on time. 
+- Delinquency Rate: ≤ 5% of tenants >30 days late. 
+- Portfolio Occupancy: ≥ 90% of homes rented at all times. 
+- System Uptime: 99.9% availability of rent management platform. 
+Risk Mitigation 
+- Use automated reminders and flexible payment plans to reduce 
+delinquencies. 
+- Maintain insurance on properties to cover damages or tenant defaults. 
+- Conduct regular audits of portfolio data for accuracy. 
+5. Home Delivery and Customer Loyalty 
+Objective:  
+Efficiently finalize rent -to-own contracts, ensure legal and financial compliance, and 
+foster customer loyalty for repeat business or referrals. 
+Procedures 
+--- Page 9 ---
+1. Contract Finalization: 
+- Upon completion of the rent -to-own term, verify tenant eligibility for 
+purchase (e.g., no defaults, full down payment credited). 
+- Conduct a final property inspection to confirm condition. 
+- Execute purchase agreement, transferring title per TDHCA regulations. 
+2. Legal and Regulatory Compliance: 
+- Comply with Texas Property Code for title transfers and disclosures. 
+- File IRS Form 1099-S for real estate transactions. 
+- Ensure compliance with federal Truth in Lending Act (TILA) for financing 
+terms. 
+3. Customer Options: 
+   - Option 1: Repurchase the Home: 
+- Offer to buy back the home at market value minus a loyalty discount (e.g., 
+5%). 
+- Resell or re-rent the home to a new tenant. 
+   - Option 2: Upgrade to a New Home: 
+- Offer a trade -in program where tenants exchange their current home for a 
+new mobile home under a new rent-to-own contract. 
+- Credit a portion of prior payments (e.g., 20%) toward the new contract. 
+4. Loyalty Programs: 
+- Offer referral bonuses ($500–$1,000) for customers who refer new tenants. 
+- Provide discounts on future contracts for repeat customers. 
+- Conduct annual customer satisfaction surveys to gather feedback. 
+Responsible Area 
+- Customer Success Team: Manages finalization and loyalty programs. 
+- Legal Team: Oversees title transfers and compliance. 
+- Finance Team: Handles tax filings and financial reporting. 
+KPIs 
+- Purchase Completion Rate: ≥ 80% of tenants complete the purchase option. 
+- Customer Retention: ≥ 20% of customers enter a second rent-to-own contract. 
+- Referral Rate: ≥ 10% of new customers from referrals. 
+--- Page 10 ---
+- Compliance Rate: 100% adherence to Texas and federal regulations. 
+Risk Mitigation 
+- Use standardized contracts to avoid legal disputes. 
+- Maintain a contingency fund for unexpected legal or tax issues. 
+- Document all transactions in the ERP system for auditability. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+--- Page 11 ---
+ 
+General Considerations for Scalability and Institutionalization , implementing the 
+Running the company Board (SG) and the Building the company Board (JT). 
+Actions or To Do`s in the mid-term with part of the investment.  
+1. Technology Integration: 
+- Implement an ERP system (e.g. , Salesforce) to centralize data across all 
+processes. 
+- Use AI -driven analytics for market trends, customer risk profiling, and 
+portfolio optimization. 
+2. Standardization: 
+- Develop SOPs for each process to ensure consistency across teams. 
+- Train staff regularly on procedures and compliance requirements. 
+3. Scalability Framework: 
+- Expand to additional Texas markets (e.g., Austin, El Paso)  and other states 
+once processes are stable. 
+- Explore partnerships with mobile home park operators to reduce lot rental 
+costs. 
+- Explore strategic partnerships to make the offer stronger. (Full service  
+model).  
+4. Regulatory Compliance: 
+- Monitor updates to TDHCA regulations and federal laws (e.g., Fair Housing 
+Act, TILA). 
+- Conduct quarterly compliance audits. 
+ 
+5. Risk Management: 
+- Maintain a diversified portfolio to mitigate market fluctuations. 
+- Establish a crisis management plan for economic downturns or regulatory 
+changes. 
+ 
+ 
+--- Page 12 ---
+ 
+Executive Team & Partner 
+Sebastian González Zambrano 
+Founder and CEO Managing Partner 
+• Industrial Engineering & MBA 
+• Entrepreneur. Founded, operated and sold a series of companies in Mexico and 
+US.  
+• Leading the “Running the Company” Board. 
+Jorge de la Torre Rosas 
+• Industrial Engineering, Financial & MBA. 
+• Investment Banking and Asset Management.  
+• Leading the “Building the Company” Board. 
+ 
+Appendices 
+1. Sample Rent-to-Own Contract Template: 
+   - Includes terms for down payment, monthly rent, purchase option, and default 
+clauses. 
+2. KYC Checklist: 
+   - ID verification, income proof, background check requirements. 
+3. Acquisition Checklist: 
+   - Detailed criteria for mobile home purchases. 
+4. Texas Regulatory Guide: 
+   - Summary of TDHCA and federal regulations for mobile homes. 
+5. Promissory Note: 
+ 

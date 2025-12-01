@@ -2056,21 +2056,26 @@ def build_graph():
             
             # Create PostgresSaver with the pool
             checkpointer = PostgresSaver(pool)
-            checkpointer.setup()
+            
+            # Try to setup tables, but skip if using Pooler (transaction block error)
+            try:
+                checkpointer.setup()
+                print(f"✅ PostgreSQL tables created/verified")
+            except Exception as setup_err:
+                if "transaction block" in str(setup_err).lower():
+                    print(f"⚠️  Skipped auto-setup (Pooler detected). Assuming tables exist manually.")
+                else:
+                    raise setup_err
             
             print(f"✅ PostgreSQL connected with connection pool!")
             print(f"✅ Persistent memory across sessions and restarts")
             
         except Exception as e:
             print(f"❌ PostgreSQL connection failed: {e}")
-            print(f"⚠️  Falling back to SQLite...")
-            from langgraph.checkpoint.sqlite import SqliteSaver
-            from sqlite3 import connect
-            db_path = os.path.join(os.path.dirname(__file__), "checkpoints.db")
-            conn = connect(db_path, check_same_thread=False)
-            checkpointer = SqliteSaver(conn)
-            checkpointer.setup()
-            print(f"✅ SQLite checkpointer active: {db_path}")
+            print(f"⚠️  Falling back to In-Memory Checkpointer (no persistence)...")
+            from langgraph.checkpoint.memory import MemorySaver
+            checkpointer = MemorySaver()
+            print(f"✅ In-Memory checkpointer active")
     
     app = graph.compile(checkpointer=checkpointer)
 

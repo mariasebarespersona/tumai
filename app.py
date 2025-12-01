@@ -63,57 +63,76 @@ from tools.numbers_agent import (
 
 router = Router()
 
-# Session state management (persistent to survive reloads)
-SESSIONS_FILE = ".sessions.json"
-
+# Session state management (Supabase-backed for cloud persistence)
 def load_sessions():
-    """Load sessions from file."""
-    if os.path.exists(SESSIONS_FILE):
-        try:
-            with open(SESSIONS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-    return {}
-
-def save_sessions():
-    """Save sessions to file."""
+    """Load sessions from Supabase."""
     try:
-        print(f"[DEBUG] Saving sessions to {SESSIONS_FILE}: {len(SESSIONS)} sessions")
-        with open(SESSIONS_FILE, 'w') as f:
-            json.dump(SESSIONS, f, indent=2)
-        print(f"[DEBUG] Sessions saved successfully")
+        response = sb.table("sessions").select("session_id, data").execute()
+        loaded = {}
+        for row in response.data:
+            if row.get("session_id") and row.get("data"):
+                loaded[row["session_id"]] = row["data"]
+        print(f"[DEBUG] Loaded {len(loaded)} sessions from Supabase")
+        return loaded
     except Exception as e:
-        print(f"[ERROR] Could not save sessions: {e}")
+        print(f"[ERROR] Could not load sessions from Supabase: {e}")
+        return {}
+
+def save_session(session_id):
+    """Deprecated - sessions now saved individually via save_session()."""
+    pass
+
+def save_session(session_id: str):
+    """Save individual session to Supabase."""
+    try:
+        if session_id in SESSIONS:
+            data = SESSIONS[session_id]
+            sb.table("sessions").upsert({
+                "session_id": session_id,
+                "data": data,
+                "updated_at": "now()"
+            }).execute()
+            print(f"[DEBUG] Saved session {session_id} to Supabase")
+    except Exception as e:
+        print(f"[ERROR] Could not save session {session_id}: {e}")
 
 SESSIONS = load_sessions()
 
 def get_session(session_id: str):
     if session_id not in SESSIONS:
-        print(f"[DEBUG] Creating NEW session: {session_id}")
-        SESSIONS[session_id] = {
-            "property_id": None,
-            "pending_proposal": None,
-            "pending_file": None,
-            "pending_files": [],
-            "search_hits": [],
-            "last_uploaded_doc": None,
-            "pending_create": False,
-            "last_listed_docs": [],
-            "docs_list_pointer": 0,
-            "rag_backfilled": False,
-            "pending_email": False,
-            "email_content": None,
-            "email_subject": None,
-            "email_document": None,
-            "focus": None,  # can be "documents" | "numbers" | "summary"
-            # "messages": [],  # REMOVED: Messages handled by LangGraph checkpointer
-            "last_email_used": None,
-            "last_assistant_response": None,
-            "last_doc_ref": None,
-        }
+        # Try to load from Supabase first (cache miss)
+        try:
+            resp = sb.table("sessions").select("data").eq("session_id", session_id).single().execute()
+            if resp.data:
+                SESSIONS[session_id] = resp.data["data"]
+                print(f"[DEBUG] Loaded existing session {session_id} from DB (cache miss)")
+            else:
+                raise Exception("Not found")
+        except Exception:
+            print(f"[DEBUG] Creating NEW session: {session_id}")
+            SESSIONS[session_id] = {
+                "property_id": None,
+                "pending_proposal": None,
+                "pending_file": None,
+                "pending_files": [],
+                "search_hits": [],
+                "last_uploaded_doc": None,
+                "pending_create": False,
+                "last_listed_docs": [],
+                "docs_list_pointer": 0,
+                "rag_backfilled": False,
+                "pending_email": False,
+                "email_content": None,
+                "email_subject": None,
+                "email_document": None,
+                "focus": None,
+                "last_email_used": None,
+                "last_assistant_response": None,
+                "last_doc_ref": None,
+            }
+            save_session(session_id)
     else:
-        print(f"[DEBUG] Using EXISTING session: {session_id}, current property_id: {SESSIONS[session_id].get('property_id')}")
+        print(f"[DEBUG] Using EXISTING session: {session_id} (memory cache)")
     return SESSIONS[session_id]
 
 
@@ -992,7 +1011,7 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                 
                 # Save conversation to state
                 add_to_conversation(session_id, text, agent_response)
-                save_sessions()
+                save_session(session_id)
                 
                 # CRITICAL: Build response directly (make_response is defined later in the function)
                 # This ensures 'answer', 'property_id', 'show_documents' are all included
@@ -1546,7 +1565,7 @@ async def ui_chat(
                     print(f"[DEBUG] Sync: Restored property_id from checkpointer: {current_pid}")
                     # Update STATE so we don't have to read from checkpointer every time
                     STATE["property_id"] = current_pid
-                    save_sessions()
+                    save_session(session_id)
                 else:
                     print(f"[DEBUG] Sync: No property_id in checkpointer state")
             except Exception as e:
@@ -1571,14 +1590,14 @@ async def ui_chat(
     # If client passes property_id explicitly, pin it for this session
     if property_id:
         STATE["property_id"] = property_id
-        save_sessions()
+        save_session(session_id)
         print(f"[DEBUG] property_id provided by client: {property_id}")
     
     # Extract UUID if mentioned WITH explicit intent to change property
     mentioned_pid = _extract_uuid(user_text)
     if mentioned_pid and _wants_to_change_property(user_text):
         STATE["property_id"] = mentioned_pid
-        save_sessions()
+        save_session(session_id)
         print(f"[DEBUG] Set property_id to {mentioned_pid}")
     
     # REMOVED: Auto-selection of property by name
@@ -1595,7 +1614,7 @@ async def ui_chat(
             fname = m.group(1) if m else "documento.pdf"
             proposal = propose_slot(fname, user_text)
             STATE["pending_proposal"] = {"filename": fname, "proposal": proposal}
-            save_sessions()
+            save_session(session_id)
             g = proposal["document_group"]; sg = proposal.get("document_subgroup", ""); n = proposal["document_name"]
             return make_response(f"Propongo las siguientes ubicaciones:\n{fname}: {g} / {sg} / {n}\nAdjunta el archivo y responde 'sí' para confirmar.")
         except Exception as e:
@@ -1626,7 +1645,7 @@ async def ui_chat(
                 "proposal": proposal,
                 "file_b64": file_b64,  # Store file bytes as base64
             }
-            save_sessions()
+            save_session(session_id)
             g = proposal["document_group"]
             sg = proposal.get("document_subgroup", "")
             n = proposal["document_name"]
@@ -1652,7 +1671,7 @@ async def ui_chat(
                 if not file_b64:
                     # Fallback: no file was stored, ask user to reattach
                     STATE["pending_proposal"] = None
-                    save_sessions()
+                    save_session(session_id)
                     return make_response("No tengo el archivo guardado. Por favor, adjúntalo de nuevo.")
                 
                 # Decode file bytes from base64
@@ -1685,7 +1704,7 @@ async def ui_chat(
                     metadata={}
                 )
                 STATE["pending_proposal"] = None
-                save_sessions()
+                save_session(session_id)
                 
                 # Verify document was saved by reading it back
                 logger.info(f"✅ Document uploaded: {proposal['document_name']} to property {pid}")
@@ -1724,7 +1743,7 @@ async def ui_chat(
                     "document_subgroup": proposal.get("document_subgroup", ""),
                     "document_name": proposal["document_name"],
                 }
-                save_sessions()
+                save_session(session_id)
                 # Post-upload: try to auto-create factura placeholders via RAG if this doc is facturable
                 try:
                     g = proposal["document_group"]
@@ -1823,11 +1842,11 @@ async def ui_chat(
                     return make_response(f"✅ Subido '{proposal['document_name']}' a la propiedad '{prop_name}'. {verification_status}")
             except Exception as e:
                 STATE["pending_proposal"] = None
-                save_sessions()
+                save_session(session_id)
                 return make_response(f"No he podido subir el documento: {e}")
         elif any(w in t for w in ["no", "cambia", "otra", "diferente"]):
             STATE["pending_proposal"] = None
-            save_sessions()
+            save_session(session_id)
             return make_response("De acuerdo. Dime el grupo/subgrupo/nombre exacto o vuelve a adjuntar el archivo con una pista (por ejemplo 'Contrato arquitecto').")
     
     # Quick intent: "facturas asociadas" → list placeholders for current/mentioned doc
@@ -1968,7 +1987,7 @@ async def ui_chat(
                 # CRITICAL: Save RAG answer to STATE so DocsAgent can access it for email
                 STATE["last_rag_answer"] = answer_text
                 STATE["last_rag_query"] = user_text
-                save_sessions()
+                save_session(session_id)
                 print(f"[RAG] 💾 Saved RAG answer to STATE (len={len(answer_text)})")
                 
                 return make_response(answer_text)
@@ -1993,7 +2012,7 @@ async def ui_chat(
         if out["property_id"] != STATE.get("property_id"):
             print(f"[DEBUG] Property sync: STATE {STATE.get('property_id')} → {out['property_id']}")
         STATE["property_id"] = out["property_id"]
-        save_sessions()
+        save_session(session_id)
     
     # FAST PATH: If orchestrator already completed the task, use its response directly
     if out.get("orchestrator_completed"):
@@ -2164,11 +2183,11 @@ async def ui_chat(
                 STATE["email_document"] = None
                 STATE["pending_numbers_excel"] = False
                 STATE["last_email_used"] = email_addr
-                save_sessions()
+                save_session(session_id)
                 return make_response(msg)
             except Exception as e:
                 STATE["pending_email"] = False
-                save_sessions()
+                save_session(session_id)
                 return make_response(f"❌ Error al enviar email: {e}")
         else:
             return make_response("No he podido extraer un email válido. Por favor, proporciona tu dirección de email (ejemplo: tu@email.com)")
@@ -2201,7 +2220,7 @@ async def ui_chat(
                             html=f"<html><body><pre style='font-family: sans-serif; white-space: pre-wrap;'>{last_response}</pre></body></html>",
                         )
                         STATE["last_email_used"] = email_addr
-                        save_sessions()
+                        save_session(session_id)
                         return make_response(f"✅ Email enviado correctamente a {email_addr}")
                     except Exception as e:
                         return make_response(f"❌ Error al enviar email: {e}")
@@ -2211,7 +2230,7 @@ async def ui_chat(
                     STATE["email_content"] = last_response
                     STATE["email_subject"] = "Información de RAMA AI"
                     STATE["email_document"] = None
-                    save_sessions()
+                    save_session(session_id)
                     return make_response("Por supuesto. ¿A qué dirección de email te lo envío?")
             else:
                 return make_response("No hay ninguna respuesta anterior para enviar. ¿Qué información te gustaría que te enviara?")
@@ -2237,7 +2256,7 @@ async def ui_chat(
                             attachments=[("numbers_framework.xlsx", xlsx_bytes)]
                         )
                         STATE["last_email_used"] = email_addr
-                        save_sessions()
+                        save_session(session_id)
                         return make_response(f"✅ Enviado el framework de números en Excel a {email_addr}")
                     except Exception as e:
                         return make_response(f"❌ Error al enviar el Excel: {e}")
@@ -2248,7 +2267,7 @@ async def ui_chat(
                     STATE["email_subject"] = "Framework de números (Excel)"
                     STATE["email_document"] = None
                     # Stash the file bytes in memory for this session turn would require extra infra; fallback to recompute on submit.
-                    save_sessions()
+                    save_session(session_id)
                     return make_response("¿A qué dirección de email te lo envío? Enviaré un Excel (.xlsx).")
             except Exception as e:
                 return make_response(f"No he podido generar el Excel: {e}")
@@ -2291,7 +2310,7 @@ async def ui_chat(
                         attachments=[(filename, resp.content)]
                     )
                     STATE["last_email_used"] = email_addr
-                    save_sessions()
+                    save_session(session_id)
                     return make_response(f"✅ Email enviado correctamente a {email_addr}\n📎 Documento adjunto: {filename}")
                 except Exception as e:
                     return make_response(f"❌ Error al enviar email: {e}")
@@ -2301,7 +2320,7 @@ async def ui_chat(
                 STATE["email_content"] = f"Documento: {document_ref['document_name']}"
                 STATE["email_subject"] = f"Documento: {document_ref['document_name']}"
                 STATE["email_document"] = document_ref
-                save_sessions()
+                save_session(session_id)
                 return make_response("Por supuesto. ¿A qué dirección de email te lo envío?")
         else:
             return make_response("¿Qué información te gustaría que te enviara por email? Especifica el documento o la información.")
@@ -2386,7 +2405,7 @@ async def ui_chat(
     # If we were in a create flow but the user is clearly switching/listing, cancel create flow
     if STATE.get("pending_create") and (_wants_property_search(user_text) or _wants_list_properties(user_text)):
         STATE["pending_create"] = False
-        save_sessions()
+        save_session(session_id)
 
     # Create new property - check if we're in pending_create mode first
     if STATE.get("pending_create") or _wants_create_property(user_text):
@@ -2400,7 +2419,7 @@ async def ui_chat(
                 row = db_add_property(name_val, addr_val)
                 STATE["property_id"] = row["id"]
                 STATE["pending_create"] = False
-                save_sessions()
+                save_session(session_id)
                 fr = list_frameworks(row["id"])
                 return make_response(
                     f"Trabajaremos con la propiedad: {row['name']} — {row['address']}\n"
@@ -2409,11 +2428,11 @@ async def ui_chat(
                 )
             except Exception as e:
                 STATE["pending_create"] = False
-                save_sessions()
+                save_session(session_id)
                 return make_response(f"No he podido crear la propiedad: {e}")
         else:
             # Ask for missing info
-            save_sessions()
+            save_session(session_id)
             return make_response("Por favor, proporciona el nombre y la dirección de la propiedad. Ejemplo: 'nombre: Casa Demo 6 y dirección: Calle Alameda 22'")
     
     # EARLY EXIT FROM FOCUS MODE: If user wants to change property/context while in focus mode
@@ -2422,7 +2441,7 @@ async def ui_chat(
         if _wants_property_search(user_text) or _wants_list_properties(user_text) or _wants_create_property(user_text):
             # User wants to change property/context, exit focus mode
             STATE["focus"] = None
-            save_sessions()
+            save_session(session_id)
             print(f"[DEBUG] Exiting focus mode because user wants to change context: {user_text[:50]}")
             # Continue processing the property change request below
     
@@ -2450,7 +2469,7 @@ async def ui_chat(
             if len(hits) == 1:
                 chosen = hits[0]
                 STATE["property_id"] = chosen["id"]
-                save_sessions()
+                save_session(session_id)
                 print(f"[DEBUG] Property search - Set property_id to {chosen['id']} for session {session_id}")
                 fr = list_frameworks(chosen["id"])
                 return make_response(
@@ -2497,7 +2516,7 @@ async def ui_chat(
                         "document_subgroup": uploaded[0].get("document_subgroup", ""),
                         "document_name": uploaded[0].get("document_name", ""),
                     }
-                    save_sessions()
+                    save_session(session_id)
             else:
                 response_parts.append("(ninguno aún)")
             
@@ -2518,7 +2537,7 @@ async def ui_chat(
     # Focus documents mode
     if _wants_focus_documents(user_text):
         STATE["focus"] = "documents"
-        save_sessions()
+        save_session(session_id)
         pid = STATE.get("property_id")
         if not pid:
             return make_response("¿En qué propiedad estamos trabajando? Dime el nombre de la propiedad o el UUID.")
@@ -2636,7 +2655,7 @@ async def ui_chat(
             # Fallback rápido: procesar directamente
             if STATE.get("focus") != "numbers":
                 STATE["focus"] = "numbers"
-                save_sessions()
+                save_session(session_id)
             
             pid = STATE.get("property_id") or property_id
             if not pid:
@@ -2724,7 +2743,7 @@ async def ui_chat(
                 if result.get("summary"):
                     answer_text = result["summary"]
                     STATE["last_assistant_response"] = answer_text
-                    save_sessions()
+                    save_session(session_id)
                     return make_response(answer_text)
             except Exception as e:
                 print(f"[DEBUG] Summarize failed: {e}, falling back to agent")
@@ -2801,7 +2820,7 @@ async def ui_chat(
                 
                 # Save this response for potential email sending
                 STATE["last_assistant_response"] = answer_text
-                save_sessions()
+                save_session(session_id)
                 
                 return make_response(answer_text)
         except Exception as e:
@@ -2822,7 +2841,7 @@ async def ui_chat(
         # Garantiza que quedamos en modo números
         if STATE.get("focus") != "numbers":
             STATE["focus"] = "numbers"
-            save_sessions()
+            save_session(session_id)
         # what-if
         if wants_what_if:
             deltas = _parse_percent_changes(user_text)
@@ -2878,7 +2897,7 @@ async def ui_chat(
             if final_prop_id != STATE.get("property_id"):
                 print(f"[DEBUG] Property changed! Updating STATE from {STATE.get('property_id')} to {final_prop_id}")
                 STATE["property_id"] = final_prop_id
-                save_sessions()
+                save_session(session_id)
                 # Also update the out dict so make_response uses it
                 out["property_id"] = final_prop_id
         else:
@@ -2890,7 +2909,7 @@ async def ui_chat(
             if out["property_id"] != STATE.get("property_id"):
                 print(f"[DEBUG] Property sync (old): STATE {STATE.get('property_id')} → {out['property_id']}")
             STATE["property_id"] = out["property_id"]
-            save_sessions()
+            save_session(session_id)
     
     print(f"[DEBUG] Final STATE property_id before make_response: {STATE.get('property_id')}")
     
