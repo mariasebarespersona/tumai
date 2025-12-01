@@ -19,6 +19,9 @@ psycopg[binary,pool]>=3.2.0
 supabase==2.7.3
 websockets>=13.0,<14.0
 
+# Email - Resend API (cloud-friendly, no SMTP port blocking)
+resend>=2.4.0
+
 # the rest of your deps
 python-dotenv
 pypdf

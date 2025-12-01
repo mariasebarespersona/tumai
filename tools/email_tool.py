@@ -1,15 +1,13 @@
 from __future__ import annotations
-import os, smtplib, ssl
-from email.message import EmailMessage
+import os
+import base64
 from typing import List
 from uuid import uuid4
 import logfire  # Logfire for event tracking
 
-SMTP_HOST = os.getenv("SMTP_HOST")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
-EMAIL_FROM = os.getenv("EMAIL_FROM", SMTP_USER)
+# Resend API Configuration
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "RAMA AI <noreply@tumai.app>")
 
 def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[str, bytes]] = None):
     import logging
@@ -19,82 +17,71 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
     logger.info(f"[send_email] to={to}, subject={subject[:50] if subject else '(empty)'}")
     logger.info(f"[send_email] html length={len(html) if html else 0}, attachments={len(attachments) if attachments else 0}")
     
-    # Validate SMTP configuration
-    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
-        error_msg = "SMTP configuration missing. Please set SMTP_HOST, SMTP_USER, and SMTP_PASS in .env"
+    # Validate Resend API key
+    if not RESEND_API_KEY:
+        error_msg = (
+            "Resend API key missing. Please set RESEND_API_KEY in .env\n"
+            "Get your API key at: https://resend.com/api-keys"
+        )
         logger.error(f"[send_email] {error_msg}")
         raise ValueError(error_msg)
     
     logger.info(f"[send_email] Sending email to: {to}, subject: {subject}")
-    logger.info(f"[send_email] SMTP_HOST: {SMTP_HOST}, SMTP_PORT: {SMTP_PORT}, SMTP_USER: {SMTP_USER}")
-    
-    msg = EmailMessage()
-    msg["From"] = EMAIL_FROM
-    msg["To"] = ", ".join(to)
-    msg["Subject"] = subject
-    msg.set_content(html, subtype="html")
-    
-    if attachments:
-        logger.info(f"[send_email] Adding {len(attachments)} attachment(s)")
-        for (filename, data) in attachments:
-            logger.info(f"[send_email] Attachment: {filename}, size: {len(data)} bytes")
-            msg.add_attachment(data, maintype="application", subtype="octet-stream", filename=filename)
-    else:
-        logger.info(f"[send_email] No attachments")
-    
-    # Create SSL context - use unverified context if default fails (common on macOS)
-    try:
-        ctx = ssl.create_default_context()
-    except Exception:
-        ctx = ssl._create_unverified_context()
+    logger.info(f"[send_email] Using Resend API (cloud-friendly, no SMTP ports)")
     
     try:
-        # Try port 465 (SSL) first if configured, otherwise use 587 (STARTTLS)
-        if SMTP_PORT == 465:
-            logger.info(f"[send_email] Connecting to SMTP server with SSL (port 465)...")
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=10) as s:
-                logger.info(f"[send_email] Logging in...")
-                s.login(SMTP_USER, SMTP_PASS)
-                logger.info(f"[send_email] Sending message...")
-                s.send_message(msg)
-                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
+        import resend
+        resend.api_key = RESEND_API_KEY
+        
+        # Prepare email payload
+        email_data = {
+            "from": EMAIL_FROM,
+            "to": to,
+            "subject": subject,
+            "html": html,
+        }
+        
+        # Add attachments if provided
+        if attachments:
+            logger.info(f"[send_email] Adding {len(attachments)} attachment(s)")
+            email_data["attachments"] = []
+            for (filename, data) in attachments:
+                logger.info(f"[send_email] Attachment: {filename}, size: {len(data)} bytes")
+                # Resend expects base64-encoded content
+                email_data["attachments"].append({
+                    "filename": filename,
+                    "content": base64.b64encode(data).decode("utf-8")
+                })
         else:
-            logger.info(f"[send_email] Connecting to SMTP server with STARTTLS (port {SMTP_PORT})...")
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
-                logger.info(f"[send_email] Starting TLS...")
-                s.starttls(context=ctx)
-                logger.info(f"[send_email] Logging in...")
-                s.login(SMTP_USER, SMTP_PASS)
-                logger.info(f"[send_email] Sending message...")
-                s.send_message(msg)
-                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
-    except ssl.SSLError as e:
-        # SSL certificate verification failed - silently retry with unverified context
-        logger.info(f"[send_email] SSL error, retrying with unverified context...")
-        ctx = ssl._create_unverified_context()
-        if SMTP_PORT == 465:
-            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ctx, timeout=10) as s:
-                s.login(SMTP_USER, SMTP_PASS)
-                s.send_message(msg)
-                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
-        else:
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
-                s.starttls(context=ctx)
-                s.login(SMTP_USER, SMTP_PASS)
-                s.send_message(msg)
-                logger.info(f"[send_email] ✅ Email sent successfully to {to}")
+            logger.info(f"[send_email] No attachments")
+        
+        # Send email via Resend API
+        logger.info(f"[send_email] Calling Resend API...")
+        response = resend.Emails.send(email_data)
+        
+        # Resend returns: {"id": "..."} on success
+        message_id = response.get("id", f"<{uuid4()}@rama.local>")
+        logger.info(f"[send_email] ✅ Email sent successfully to {to}, message_id: {message_id}")
+        
+        # Log email sent event to Logfire
+        logfire.info("email_sent", to=to, subject=subject, attachments_count=len(attachments or []), message_id=message_id)
+        
+        return {
+            "sent": True, 
+            "success": True,
+            "status": "Email sent successfully via Resend API",
+            "to": to, 
+            "subject": subject, 
+            "message_id": message_id
+        }
+        
+    except ImportError:
+        error_msg = (
+            "Resend library not installed. Please run:\n"
+            "pip install resend"
+        )
+        logger.error(f"[send_email] {error_msg}")
+        raise ImportError(error_msg)
     except Exception as e:
-        logger.error(f"[send_email] ❌ Error sending email: {e}", exc_info=True)
+        logger.error(f"[send_email] ❌ Error sending email via Resend: {e}", exc_info=True)
         raise
-    # Generate a synthetic message_id for verification/logging
-    message_id = f"<{uuid4()}@rama.local>"
-    # Log email sent event to Logfire
-    logfire.info("email_sent", to=to, subject=subject, attachments_count=len(attachments or []))
-    return {
-        "sent": True, 
-        "success": True,
-        "status": "Email sent successfully",
-        "to": to, 
-        "subject": subject, 
-        "message_id": message_id
-    }
