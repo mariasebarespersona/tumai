@@ -575,11 +575,17 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
     # If no candidates in the exact subgroup, expand search to the entire group
     if not candidates:
         logger.info(f"[signed_url_for] No documents in {document_group}/{sg}, expanding search to entire {document_group} group...")
+        # Debug: log all documents in this property
+        logger.info(f"[signed_url_for] DEBUG: Total documents in property: {len(all_rows)}")
+        for r in all_rows:
+            logger.info(f"[signed_url_for] DEBUG: doc='{r.get('document_name')}', group={r.get('document_group')}, subgroup='{r.get('document_subgroup')}', has_file={bool(r.get('file_storage_key'))}")
+        
         candidates = [
             r for r in all_rows
             if r.get("document_group") == document_group
             and r.get("file_storage_key")  # Only documents with uploaded files (ignore subgroup)
         ]
+        logger.info(f"[signed_url_for] DEBUG: Found {len(candidates)} candidates in {document_group} group")
     
     # Check if any candidate contains the requested name (fuzzy match)
     # e.g., "Contrato arquitecto" matches "Contrato arquitecto + facturas arquitecto"
