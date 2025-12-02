@@ -569,7 +569,7 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
         r for r in all_rows
         if r.get("document_group") == document_group
         and (r.get("document_subgroup") or "") == sg
-        and r.get("file_storage_key")  # Only documents with uploaded files
+        and (r.get("storage_key") or r.get("file_storage_key"))  # Only documents with uploaded files
     ]
     
     # If no candidates in the exact subgroup, expand search to the entire group
@@ -578,12 +578,13 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
         # Debug: log all documents in this property
         logger.info(f"[signed_url_for] DEBUG: Total documents in property: {len(all_rows)}")
         for r in all_rows:
-            logger.info(f"[signed_url_for] DEBUG: doc='{r.get('document_name')}', group={r.get('document_group')}, subgroup='{r.get('document_subgroup')}', has_file={bool(r.get('file_storage_key'))}")
+            has_file = bool(r.get("storage_key") or r.get("file_storage_key"))
+            logger.info(f"[signed_url_for] DEBUG: doc='{r.get('document_name')}', group={r.get('document_group')}, subgroup='{r.get('document_subgroup')}', has_file={has_file}, storage_key={r.get('storage_key')}")
         
         candidates = [
             r for r in all_rows
             if r.get("document_group") == document_group
-            and r.get("file_storage_key")  # Only documents with uploaded files (ignore subgroup)
+            and (r.get("storage_key") or r.get("file_storage_key"))  # Only documents with uploaded files (ignore subgroup)
         ]
         logger.info(f"[signed_url_for] DEBUG: Found {len(candidates)} candidates in {document_group} group")
     
