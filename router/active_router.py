@@ -245,25 +245,45 @@ class ActiveRouter:
                         return ("docs.send_email", 0.95, "DocsAgent")
         
         # ========== PROPERTY OPERATIONS ==========
-        # Create property - expanded synonyms
+        # Create property - context-aware detection
+        # Keywords for property types
+        property_types = [
+            "casa", "casas", "piso", "pisos", "apartamento", "apartamentos",
+            "villa", "villas", "finca", "fincas", "terreno", "terrenos",
+            "local", "locales", "inmueble", "inmuebles", "propiedad", "propiedades"
+        ]
+        
+        # Action verbs for creating
+        create_verbs = [
+            "crear", "crea", "añadir", "añade", "añadir", "agregar", "agrega", "anade",
+            "nueva", "nuevo", "registrar", "registra", "dar de alta", "alta de"
+        ]
+        
+        # Direct property creation phrases (high confidence)
         create_property_phrases = [
-            # Direct commands
             "crear propiedad", "crea propiedad", "nueva propiedad", "añadir propiedad", "agregar propiedad",
             "crea una propiedad", "crear una propiedad", "añade una propiedad", "agrega una propiedad",
-            # Property types
-            "crea casa", "crear casa", "crea villa", "crear villa", "crea piso", "crear piso",
-            "crea apartamento", "crear apartamento", "crea local", "crear local",
-            "crea terreno", "crear terreno", "crea finca", "crear finca",
-            "crea una casa", "crear una casa", "crea un piso", "crear un piso",
-            "crea un apartamento", "crear un apartamento", "crea un local", "crear un local",
-            "crea una finca", "crear una finca", "crea un terreno", "crear un terreno",
+            "anade una propiedad", "anade propiedad",
             # Natural variations
             "quiero crear", "necesito crear", "vamos a crear", "dame de alta",
             "registrar propiedad", "registra propiedad", "registrar una propiedad",
             "tengo una propiedad nueva", "compré", "he comprado", "acabo de comprar"
         ]
+        
+        # Check direct phrases first
         if any(phrase in s for phrase in create_property_phrases):
             return ("property.create", 0.95, "PropertyAgent")
+        
+        # Context-aware: action verb + property type (e.g., "añade esta casa", "crea una villa")
+        has_create_verb = any(verb in s for verb in create_verbs)
+        has_property_type = any(ptype in s for ptype in property_types)
+        
+        if has_create_verb and has_property_type:
+            # Exclude if it's about documents (e.g., "añade el documento de la casa")
+            doc_exclusions = ["documento", "documentos", "archivo", "archivos", "fichero", "pdf", "contrato", "factura"]
+            if not any(excl in s for excl in doc_exclusions):
+                logger.info(f"[active_router] 🏠 Detected property creation from context: verb + property type")
+                return ("property.create", 0.93, "PropertyAgent")
         
         # Switch property - expanded synonyms
         switch_property_phrases = [
@@ -528,17 +548,35 @@ class ActiveRouter:
                 logger.info(f"[active_router] 🎯 Detected email continuation: {s}")
                 return ("docs.send_email", 0.95, "DocsAgent")
         
-        # Upload document - expanded synonyms
+        # Upload document - context-aware (must have document keyword)
         upload_doc_verbs = [
             "sube", "subir", "upload", "cargar", "carga", "adjunta", "adjuntar",
-            "añade", "añadir", "agrega", "agregar", "importa", "importar",
             "guarda", "guardar", "almacena", "almacenar"
         ]
+        
+        # Require explicit document keyword for "añade/agrega" to avoid confusion with property creation
+        ambiguous_verbs = ["añade", "añadir", "agrega", "agregar", "anade", "anadir"]
+        
         if any(verb in s for verb in upload_doc_verbs):
             # Not numbers (handled above)
             numbers_exclusions = ["r2b", "números", "numeros", "plantilla", "excel"]
-            if not any(x in s for x in numbers_exclusions):
+            # Not properties
+            property_exclusions = ["casa", "piso", "villa", "finca", "propiedad", "inmueble"]
+            
+            if not any(x in s for x in numbers_exclusions) and not any(x in s for x in property_exclusions):
                 return ("docs.upload", 0.92, "DocsAgent")
+        
+        # For ambiguous verbs (añade/agrega), require explicit document context
+        if any(verb in s for verb in ambiguous_verbs):
+            # Must have document keyword
+            has_doc_keyword = any(doc in s for doc in doc_keywords)
+            # Not numbers, not properties
+            numbers_exclusions = ["r2b", "números", "numeros", "plantilla", "excel"]
+            property_exclusions = ["casa", "piso", "villa", "finca", "propiedad", "inmueble", "terreno", "local"]
+            
+            if has_doc_keyword and not any(x in s for x in numbers_exclusions) and not any(x in s for x in property_exclusions):
+                logger.info(f"[active_router] 📄 Detected docs.upload with document keyword")
+                return ("docs.upload", 0.90, "DocsAgent")
         
         # DELETE document - NEW: Must be before list operations
         # "borra el documento X", "elimina el documento X", "quita el documento X"
