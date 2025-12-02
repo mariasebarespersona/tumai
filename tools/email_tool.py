@@ -56,8 +56,19 @@ def send_email(to: List[str], subject: str, html: str, attachments: List[tuple[s
             logger.info(f"[send_email] No attachments")
         
         # Send email via Resend API
-        logger.info(f"[send_email] Calling Resend API...")
-        response = resend.Emails.send(email_data)
+        logger.info(f"[send_email] 🔄 DEBUG: About to call resend.Emails.send()...")
+        logger.info(f"[send_email] 🔄 DEBUG: API Key starts with: {RESEND_API_KEY[:10] if RESEND_API_KEY else 'NONE'}...")
+        logger.info(f"[send_email] 🔄 DEBUG: Email data keys: {list(email_data.keys())}")
+        
+        try:
+            response = resend.Emails.send(email_data)
+            logger.info(f"[send_email] 🔄 DEBUG: Resend API call completed!")
+            logger.info(f"[send_email] 🔄 DEBUG: Response type: {type(response)}")
+            logger.info(f"[send_email] 🔄 DEBUG: Response content: {response}")
+        except Exception as resend_error:
+            logger.error(f"[send_email] 🔄 DEBUG: Exception during Resend call: {type(resend_error).__name__}")
+            logger.error(f"[send_email] 🔄 DEBUG: Exception message: {str(resend_error)}")
+            raise
         
         # Resend returns: {"id": "..."} on success
         message_id = response.get("id", f"<{uuid4()}@rama.local>")
