@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS checkpoint_blobs (
     PRIMARY KEY (thread_id, checkpoint_ns, channel, version)
 );
 
--- Checkpoint writes table
+-- Checkpoint writes table (updated schema for langgraph-checkpoint-postgres >= 2.0)
 CREATE TABLE IF NOT EXISTS checkpoint_writes (
     thread_id TEXT NOT NULL,
     checkpoint_ns TEXT NOT NULL DEFAULT '',
@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS checkpoint_writes (
     channel TEXT NOT NULL,
     type TEXT,
     blob BYTEA,
+    task_path TEXT,  -- Added for langgraph-checkpoint-postgres >= 2.0
     created_at TIMESTAMP WITH TIME ZONE DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'utc'),
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
 );
