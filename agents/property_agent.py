@@ -202,13 +202,37 @@ Tú: "Tienes 3 propiedades: 1) Sobradiel 4, 2) 15Panes, 3) Villa Málaga"
                 
                 logger.info(f"[PropertyAgent] Searching for property: '{property_name_search}'")
                 
-                # Find matching property (case-insensitive partial match)
+                # Find matching property with fuzzy matching (tolerant to typos)
+                from difflib import SequenceMatcher
+                
                 matching_prop = None
+                best_similarity = 0.0
+                
                 for prop in all_properties:
                     prop_name_lower = prop.get("name", "").lower()
+                    
+                    # Try exact substring match first (highest priority)
                     if property_name_search in prop_name_lower or prop_name_lower in property_name_search:
                         matching_prop = prop
+                        logger.info(f"[PropertyAgent] ✅ Exact substring match: '{property_name_search}' → '{prop.get('name')}'")
                         break
+                    
+                    # Try fuzzy matching with SequenceMatcher (tolerant to typos)
+                    similarity = SequenceMatcher(None, property_name_search, prop_name_lower).ratio()
+                    
+                    # Also check similarity of individual words
+                    search_words = property_name_search.split()
+                    prop_words = prop_name_lower.split()
+                    for search_word in search_words:
+                        for prop_word in prop_words:
+                            word_similarity = SequenceMatcher(None, search_word, prop_word).ratio()
+                            similarity = max(similarity, word_similarity)
+                    
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        if similarity >= 0.7:  # 70% similarity threshold
+                            matching_prop = prop
+                            logger.info(f"[PropertyAgent] 🎯 Fuzzy match: '{property_name_search}' → '{prop.get('name')}' (similarity: {similarity:.2f})")
                 
                 if matching_prop:
                     # Found property, switch to it
