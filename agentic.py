@@ -2005,6 +2005,11 @@ def build_graph():
     # Compile with PostgreSQL checkpointer for persistent memory
     database_url = os.getenv("DATABASE_URL")
     
+    # CRITICAL: In production, enforce DATABASE_URL presence to avoid memory loss
+    if os.getenv("ENVIRONMENT") == "production" and not database_url:
+        raise ValueError("CRITICAL ERROR: DATABASE_URL is missing in PRODUCTION environment. "
+                        "This would cause memory loss (fallback to RAM). Deployment halted.")
+
     if not database_url:
         print("⚠️  WARNING: DATABASE_URL not found! Using local checkpoint fallback...")
         # Prefer SQLite for local/dev if available, otherwise fall back to in‑memory.
@@ -2071,6 +2076,9 @@ def build_graph():
             print(f"✅ Persistent memory across sessions and restarts")
             
         except Exception as e:
+            if os.getenv("ENVIRONMENT") == "production":
+                 raise ValueError(f"CRITICAL ERROR: Failed to connect to PostgreSQL in PRODUCTION: {e}. "
+                                 "Cannot fall back to memory without losing user data.")
             print(f"❌ PostgreSQL connection failed: {e}")
             print(f"⚠️  Falling back to In-Memory Checkpointer (no persistence)...")
             from langgraph.checkpoint.memory import MemorySaver

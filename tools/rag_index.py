@@ -5,7 +5,6 @@ from typing import List, Dict, Any, Tuple
 from .supabase_client import sb
 from .docs_tools import signed_url_for
 from .rag_tool import _extract_text  # reuse robust extractor (pdf/docx/txt)
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 
 def _normalize_text(s: str) -> str:
@@ -52,6 +51,7 @@ def index_document(property_id: str, document_group: str, document_subgroup: str
     # Try to embed chunks (optional)
     try:
         # 1536 dims to match default vector(1536) schema
+        from langchain_openai import OpenAIEmbeddings
         embed_model = OpenAIEmbeddings(model="text-embedding-3-small")
         vectors = embed_model.embed_documents(chunks)
     except Exception as emb_err:
@@ -143,6 +143,7 @@ def search_chunks(property_id: str, query: str, limit: int = 30, document_name: 
     toks = _tokenize(query)
     # Vector for query (optional)
     try:
+        from langchain_openai import OpenAIEmbeddings
         qvec = OpenAIEmbeddings(model="text-embedding-3-small").embed_query(query)
     except Exception:
         qvec = None
@@ -207,6 +208,7 @@ def qa_with_citations(property_id: str, query: str, top_k: int = 5, model: str |
         f"CONTEXTO:\n{context}\n\n"
         "RESPUESTA:"
     )
+    from langchain_openai import ChatOpenAI
     llm = ChatOpenAI(model=model or "gpt-4o", temperature=0)
     answer = llm.invoke(prompt).content
     citations = [

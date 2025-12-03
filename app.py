@@ -1164,10 +1164,15 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
 # Minimal HTTP app to support the Next.js frontend
 app = FastAPI(title="RAMA AI Backend")
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway/Render."""
+    return {"status": "ok", "service": "rama-ai-backend"}
+
+
 # Instrument FastAPI with Logfire (auto-logs all requests)
-# TEMPORARILY DISABLED due to dependency conflicts with opentelemetry-instrumentation-fastapi
-# TODO: Re-enable after resolving websockets/httpx version conflicts
-# logfire.instrument_fastapi(app)
+logfire.instrument_fastapi(app)
+
 
 cors_env = os.getenv("WEB_BASE", "http://localhost:3000,http://localhost:3001,http://localhost:3004,http://localhost:3005,http://localhost:3006")
 allow_all = os.getenv("ALLOW_ALL_CORS", "0") == "1" or cors_env.strip() == "*"
@@ -1195,17 +1200,8 @@ async def add_request_id(request, call_next):
     response = await call_next(request)
     ms = int((_t.perf_counter() - _t0) * 1000)
     try:
-        _logger.info(f"[metrics] {request.method} {request.url.path} status={response.status_code} ms={ms} rid={rid}")
         # Logfire automatically logs all requests via instrument_fastapi()
-        
-        # Also record in local metrics collector for dashboard
-        from tools.metrics_collector import record_request
-        record_request(
-            endpoint=request.url.path,
-            method=request.method,
-            status_code=response.status_code,
-            latency_ms=ms
-        )
+        pass
     except Exception:
         pass
     response.headers["x-request-id"] = rid
