@@ -29,6 +29,6 @@ RUN chmod +x start.sh
 # Expose port
 EXPOSE 8080
 
-# Command to run the application using the start script
-CMD ["./start.sh"]
+# Command to run the application using python directly
+CMD ["python", "main.py"]
 
