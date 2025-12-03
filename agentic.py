@@ -1163,9 +1163,11 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     # Limitar historial a los últimos 6 mensajes para evitar rate limits y memoria obsoleta
     # CRÍTICO: Mantener siempre pares AIMessage(tool_calls) + ToolMessage intactos
     # NOTA: El SYSTEM_PROMPT es muy largo (~20k tokens), por eso el límite debe ser MUY bajo
-    MAX_MESSAGES = 6  # Reducido drásticamente para evitar 429 Rate Limit (GPT-4o 30k TPM)
+    MAX_MESSAGES = 8  # Increased slightly from 6 to allow a bit more context now that tools are optimized
     
     if len(messages) > MAX_MESSAGES:
+        # Always keep the FIRST message if it's a SystemMessage (instruction) - optional but good practice
+        # But here we rely on filtered logic.
         filtered = messages[-MAX_MESSAGES:]
         
         # Verificar si el primer mensaje es un ToolMessage

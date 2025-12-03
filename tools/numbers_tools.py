@@ -170,11 +170,12 @@ def get_numbers(property_id: str, template_key: Optional[str] = None) -> List[Di
     try:
         sb.postgrest.schema = schema
         items = (sb.table("line_items")
-                 .select("group_name,item_key,item_label,is_percent,amount,updated_at")
+                 .select("item_key,amount")  # Optimization: fetch only key and amount
                  .eq("property_id", property_id)
                  .execute()).data
         if items and len(items) > 0:
-            return items
+            # Optimization: Return simple key:value map instead of heavy list of dicts
+            return {i["item_key"]: i["amount"] for i in items}
     except Exception as e:
         import logging
         logging.warning(f"Error fetching from schema {schema}: {e}")
@@ -184,13 +185,14 @@ def get_numbers(property_id: str, template_key: Optional[str] = None) -> List[Di
         sb.postgrest.schema = "public"
         items = sb.rpc("list_property_numbers", {"p_id": property_id}).execute().data
         if items and len(items) > 0:
-            return items
+            # Optimization: Return simple key:value map
+            return {i["item_key"]: i["amount"] for i in items}
     except Exception as e:
         import logging
         logging.warning(f"Error fetching via RPC: {e}")
     
-    # If no items found in DB, return the default template structure
-    return template_structures.get("R2B", [])
+    # If no items found in DB, return empty dict
+    return {}
 
 def calc_numbers(property_id: str) -> List[Dict]:
     schema = nums_schema(property_id)

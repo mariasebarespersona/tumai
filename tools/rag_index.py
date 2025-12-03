@@ -116,6 +116,9 @@ def search_chunks(property_id: str, query: str, limit: int = 30, document_name: 
     Returns a list of {meta..., text, score} sorted by score.
     Optionally filter by document_name, document_group, document_subgroup.
     """
+    # Limit output chunk size to prevent context bloat
+    MAX_CHUNK_LENGTH = 800 
+    
     try:
         q = sb.table("rag_chunks").select("property_id,document_group,document_subgroup,document_name,chunk_index,text,embedding").eq("property_id", property_id)
         if document_name:
@@ -178,6 +181,9 @@ def search_chunks(property_id: str, query: str, limit: int = 30, document_name: 
         if score > 0:
             rr = dict(r)
             rr["score"] = score
+            # Optimization: Truncate extremely long chunks in output
+            if len(rr.get("text", "")) > MAX_CHUNK_LENGTH:
+                 rr["text"] = rr["text"][:MAX_CHUNK_LENGTH] + "...[truncated]"
             scored.append(rr)
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored[:limit]
@@ -191,8 +197,18 @@ def qa_with_citations(property_id: str, query: str, top_k: int = 5, model: str |
     hits = search_chunks(property_id, query, limit=60, document_name=document_name, document_group=document_group, document_subgroup=document_subgroup)
     if not hits:
         return {"answer": "No he encontrado información relevante en los documentos indexados."}
+    
+    # Optimization: Reduce context overhead
+    # Only include text and minimal citation info in the context sent to LLM
     ctx_hits = hits[:top_k]
-    context = "\n\n".join([f"[#{i}] {h['document_group']} / {h.get('document_subgroup','')} / {h['document_name']} (chunk {h['chunk_index']}):\n{h['text']}" for i, h in enumerate(ctx_hits, 1)])
+    context_parts = []
+    for i, h in enumerate(ctx_hits, 1):
+         # Minimal header: DocName (Chunk X)
+         header = f"[#{i}] {h['document_name']} (p.{h.get('chunk_index',0)})"
+         text = h['text']
+         context_parts.append(f"{header}:\n{text}")
+    
+    context = "\n\n".join(context_parts)
 
     prompt = (
         "Eres un asistente experto en análisis de documentos. Responde en español de forma clara y completa.\n"

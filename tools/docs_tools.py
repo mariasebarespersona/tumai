@@ -536,11 +536,25 @@ def list_docs(property_id: str) -> List[Dict]:
         sb.postgrest.schema = "public"
         result = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data
         
-        # Filter visible documents based on property strategy?
-        # Ideally, we'd filter here, but maybe better in frontend or agent logic
-        # For now return everything, UI will handle hiding
+        # Optimization: Strip heavy fields if they exist to reduce LLM context usage
+        # Only return essential fields for the agent to identify documents
+        optimized_result = []
+        if result:
+            for r in result:
+                # Skip placeholders without files unless specifically needed? 
+                # For now keep all but strip unused fields
+                optimized_result.append({
+                    "document_group": r.get("document_group"),
+                    "document_subgroup": r.get("document_subgroup"),
+                    "document_name": r.get("document_name"),
+                    "has_file": bool(r.get("storage_key") or r.get("file_storage_key")),
+                    # Include ID only if strictly necessary for tools, usually names are enough
+                    "document_kind": r.get("document_kind"), 
+                    "due_date": r.get("due_date"),
+                    # Omit: id, storage_key, metadata, created_at, updated_at to save tokens
+                })
         
-        return result or []
+        return optimized_result
     except Exception as rpc_error:
         logger.error(f"❌ RPC failed: {rpc_error}")
         return []
