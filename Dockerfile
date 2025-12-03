@@ -27,6 +27,5 @@ COPY . .
 EXPOSE 8080
 
 # Command to run the application
-# Use shell form to allow variable expansion, but cleaner syntax for exec form
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD uvicorn app:app --host 0.0.0.0 --port $PORT
 
