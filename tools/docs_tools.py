@@ -544,13 +544,13 @@ def list_docs(property_id: str) -> List[Dict]:
                 # Skip placeholders without files unless specifically needed? 
                 # For now keep all but strip unused fields
                 optimized_result.append({
-                    "document_group": r.get("document_group"),
-                    "document_subgroup": r.get("document_subgroup"),
-                    "document_name": r.get("document_name"),
+                    "group": r.get("document_group"),
+                    "subgroup": r.get("document_subgroup"),
+                    "name": r.get("document_name"),
                     "has_file": bool(r.get("storage_key") or r.get("file_storage_key")),
                     # Include ID only if strictly necessary for tools, usually names are enough
-                    "document_kind": r.get("document_kind"), 
-                    "due_date": r.get("due_date"),
+                    "kind": r.get("document_kind"), 
+                    "due": r.get("due_date"),
                     # Omit: id, storage_key, metadata, created_at, updated_at to save tokens
                 })
         
