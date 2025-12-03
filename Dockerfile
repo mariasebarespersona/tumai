@@ -23,9 +23,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy the rest of the application
 COPY . .
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Expose port
 EXPOSE 8080
 
-# Command to run the application
-CMD uvicorn app:app --host 0.0.0.0 --port $PORT
+# Command to run the application using the start script
+CMD ["./start.sh"]
 
