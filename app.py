@@ -82,8 +82,22 @@ def save_session(session_id):
     """Deprecated - sessions now saved individually via save_session()."""
     pass
 
-def save_session(session_id: str):
-    """Save individual session to Supabase."""
+def save_session(session_id: str, force: bool = False):
+    """Save individual session to Supabase.
+    
+    Args:
+        session_id: The session to save
+        force: If False (default), skip save to reduce latency (session is in memory).
+               If True, actually persist to database.
+    
+    Performance: Each save takes 50-200ms. With 37 calls per request, that's 2-7 seconds!
+    Solution: Only save at END of request (force=True), skip intermediate saves.
+    """
+    if not force:
+        # Skip save - session is already in memory (SESSIONS dict)
+        # Will be saved at end of request with force=True
+        return
+    
     try:
         if session_id in SESSIONS:
             data = SESSIONS[session_id]
@@ -2881,6 +2895,12 @@ async def ui_chat(
     print(f"[DEBUG] Final transcript value: {transcript}")
     extra = {"transcript": transcript} if transcript else None
     print(f"[DEBUG] Final response extra: {extra}")
+    
+    # CRITICAL: Save session at END of request (force=True)
+    # All intermediate save_session() calls are no-ops (force=False by default)
+    # This reduces 37 DB writes to 1, saving 2-7 seconds!
+    save_session(session_id, force=True)
+    
     return make_response(answer or "(sin respuesta)", extra)
 
 # --- REST API endpoints for direct data access (not through chat) ---
