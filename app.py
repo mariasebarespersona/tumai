@@ -32,6 +32,13 @@ except Exception as _logfire_err:
     # Never block app startup because of observability config
     print(f"[LOGFIRE] Disabled due to configuration error: {_logfire_err}")
 
+# Instrument OpenAI for detailed LLM tracing (child spans in Logfire)
+try:
+    logfire.instrument_openai()
+    print("[LOGFIRE] ✅ OpenAI instrumentation enabled")
+except Exception as e:
+    print(f"[LOGFIRE] ⚠️  Could not instrument OpenAI: {e}")
+
 from agentic import agent  # Import the global agent instance
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage, SystemMessage
 from router.scaffold import Router
@@ -989,6 +996,31 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                     # Update the checkpointer state
                     agent.update_state(config, {"messages": new_messages})
                     print(f"[CHECKPOINTER] ✅ Saved specialized agent response to LangGraph (total: {len(new_messages)} messages)")
+                    
+                    # CRITICAL: Truncate immediately after save to prevent bloat (90 → 18 messages)
+                    if len(new_messages) > 18:
+                        from langchain_core.messages import ToolMessage
+                        kept_msgs = new_messages[-18:]
+                        
+                        # Sanitize: Remove orphaned tool_calls
+                        final_msgs = []
+                        tool_ids_present = set()
+                        for m in reversed(kept_msgs):
+                            if isinstance(m, ToolMessage):
+                                tool_ids_present.add(m.tool_call_id)
+                        for m in kept_msgs:
+                            if hasattr(m, "tool_calls") and m.tool_calls:
+                                valid_calls = [tc for tc in m.tool_calls if tc.get("id") in tool_ids_present]
+                                if valid_calls:
+                                    m.tool_calls = valid_calls
+                                    final_msgs.append(m)
+                                elif not m.tool_calls:
+                                    final_msgs.append(m)
+                            else:
+                                final_msgs.append(m)
+                        
+                        agent.update_state(config, {"messages": final_msgs})
+                        print(f"[CHECKPOINTER] 🗜️  Truncated: {len(new_messages)} → {len(final_msgs)} messages")
                 except Exception as e:
                     print(f"[CHECKPOINTER] ⚠️ Could not save to LangGraph checkpointer: {e}")
                 
