@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { mcpExcel } from '@/lib/mcp/client'
 import Spreadsheet from '@/components/Spreadsheet'
-import { FeedbackButtons } from '@/components/FeedbackButtons'
 import { DocumentFramework } from '@/components/DocumentFramework'
 import type { DragEvent } from 'react'
 // Removed EditableExcel import - using iframe instead
@@ -1664,21 +1663,6 @@ export default function ChatPage() {
                       return m.role === 'assistant' ? renderMessageContent(m.content) : m.content
                     })()}
                   </div>
-                  
-                  {/* Add feedback buttons for assistant messages */}
-                  {m.role === 'assistant' && (
-                    <div className="mt-3 pt-3 border-t border-[color:var(--border-subtle)]">
-                      <FeedbackButtons
-                        messageId={m.id}
-                        agentName={m.agentName || 'MainAgent'}
-                        userMessage={m.userMessage || (idx > 0 && messages[idx - 1]?.role === 'user' ? messages[idx - 1].content : '')}
-                        agentResponse={m.content}
-                        toolCalls={m.toolCalls}
-                        toolResults={m.toolResults}
-                        propertyId={propertyId}
-                      />
-                    </div>
-                  )}
                 </div>
               </div>
             ))}
