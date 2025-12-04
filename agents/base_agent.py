@@ -142,26 +142,32 @@ class BaseAgent:
         - Preserve counts for agent reasoning
         
         Args:
-            docs: Raw list_docs result (list of document dicts)
+            docs: Raw list_docs result (dict with uploaded/pending OR list of document dicts)
         
         Returns:
             Compact string representation
         """
-        logger.debug(f"[{self.name}] 📋 _prune_list_docs called with type: {type(docs)}, len: {len(docs) if isinstance(docs, list) else 'N/A'}")
+        logger.debug(f"[{self.name}] 📋 _prune_list_docs called with type: {type(docs)}")
         
-        if not isinstance(docs, list):
-            logger.warning(f"[{self.name}] ⚠️  list_docs returned non-list: {type(docs)}")
+        # Handle dict format from list_docs_tool (registry.py)
+        if isinstance(docs, dict):
+            uploaded = docs.get("uploaded", [])
+            pending = docs.get("pending", [])
+            logger.info(f"[{self.name}] 📋 list_docs dict format: {len(uploaded)} uploaded, {len(pending)} pending")
+        elif isinstance(docs, list):
+            # Handle legacy list format
+            uploaded = [d for d in docs if d.get("storage_key")]
+            pending = [d for d in docs if not d.get("storage_key")]
+            logger.info(f"[{self.name}] 📋 list_docs list format: {len(docs)} total")
+        else:
+            logger.warning(f"[{self.name}] ⚠️  list_docs returned unexpected type: {type(docs)}")
             return str(docs)
-        
-        # Separate uploaded vs pending
-        uploaded = [d for d in docs if d.get("storage_key")]
-        pending = [d for d in docs if not d.get("storage_key")]
         
         # Build pruned output
         pruned = {
-            "total": len(docs),
-            "uploaded": len(uploaded),
-            "pending": len(pending)
+            "total": len(uploaded) + len(pending),
+            "uploaded_count": len(uploaded),
+            "pending_count": len(pending)
         }
         
         # Show ALL uploaded docs (these are critical for operations)
