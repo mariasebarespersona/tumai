@@ -134,7 +134,8 @@ def summarize_document(property_id: str, group: str, subgroup: str, name: str, m
 
     # Limit size for prompt
     text = text[:40000]
-    llm = ChatOpenAI(model=model or "gpt-4o")
+    # Use gpt-4o-mini to avoid rate limiting (separate TPM quota from gpt-4o)
+    llm = ChatOpenAI(model=model or "gpt-4o-mini")
     prompt = (
         f"Resume en español en un máximo de {max_sentences} frases. "
         "Incluye solo el contenido del documento, sin hablar de metadatos ni estructura del archivo.\n\n"
@@ -210,7 +211,8 @@ def qa_document(property_id: str, group: str, subgroup: str, name: str, question
 
     today = dt.date.today().isoformat()
     text = text[:max_chars]
-    llm = ChatOpenAI(model=model or "gpt-4o")
+    # Use gpt-4o-mini to avoid rate limiting (separate TPM quota from gpt-4o)
+    llm = ChatOpenAI(model=model or "gpt-4o-mini")
     prompt = (
         "Eres un asistente legal/administrativo. Responde en español con una frase clara y directa. "
         "Si el documento no contiene la información solicitada, di explícitamente que no aparece. "
