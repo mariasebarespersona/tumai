@@ -56,32 +56,9 @@ def list_frameworks(property_id: str) -> Dict:
 
 # ---- Verification helpers ----
 
-from functools import lru_cache
-import time
-
-# Cache wrapper with TTL for get_property (reduces redundant DB queries)
-_property_cache = {}
-_property_cache_ttl = {}
-CACHE_TTL_SECONDS = 60
-
 def get_property(property_id: str) -> Optional[Dict]:
-    """Get property by ID with in-memory cache (60s TTL) to reduce latency."""
-    # Check cache first
-    now = time.time()
-    if property_id in _property_cache:
-        if now - _property_cache_ttl.get(property_id, 0) < CACHE_TTL_SECONDS:
-            return _property_cache[property_id]
-    
-    # Fetch from DB
     rows = (sb.table("properties").select("*").eq("id", property_id).limit(1).execute()).data
-    result = rows[0] if rows else None
-    
-    # Cache result
-    if result:
-        _property_cache[property_id] = result
-        _property_cache_ttl[property_id] = now
-    
-    return result
+    return rows[0] if rows else None
 
 
 def find_property(name: str, address: str) -> Optional[Dict]:
