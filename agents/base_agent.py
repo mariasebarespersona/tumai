@@ -103,7 +103,10 @@ class BaseAgent:
         
         # Feature flag for easy rollback
         if os.getenv("ENABLE_CONTEXT_PRUNING", "1") != "1":
+            logger.info(f"[{self.name}] ⚠️  Context pruning DISABLED via ENABLE_CONTEXT_PRUNING=0")
             return str(tool_result)
+        
+        logger.debug(f"[{self.name}] 🔍 Pruning tool: {tool_name}, result type: {type(tool_result)}")
         
         # If result is not a dict/list, return as-is
         if not isinstance(tool_result, (dict, list)):
@@ -144,7 +147,10 @@ class BaseAgent:
         Returns:
             Compact string representation
         """
+        logger.debug(f"[{self.name}] 📋 _prune_list_docs called with type: {type(docs)}, len: {len(docs) if isinstance(docs, list) else 'N/A'}")
+        
         if not isinstance(docs, list):
+            logger.warning(f"[{self.name}] ⚠️  list_docs returned non-list: {type(docs)}")
             return str(docs)
         
         # Separate uploaded vs pending
