@@ -587,64 +587,22 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
         ]
         logger.info(f"[signed_url_for] DEBUG: Found {len(candidates)} candidates in {document_group} group")
     
-    # Improved fuzzy matching: try substring match first (fast), then keyword matching (slower)
+    # Check if any candidate contains the requested name (fuzzy match)
+    # e.g., "Contrato arquitecto" matches "Contrato arquitecto + facturas arquitecto"
     normalized_request = document_name.lower().strip()
-    
-    # PHASE 1: Simple substring matching (original behavior - fast)
     for candidate in candidates:
         candidate_name = candidate.get("document_name", "").lower().strip()
         if normalized_request in candidate_name or candidate_name in normalized_request:
             matched_name = candidate.get("document_name")
             matched_subgroup = candidate.get("document_subgroup") or ""
-            logger.info(f"[signed_url_for] ✅ Substring match: '{document_name}' → '{matched_name}'")
+            logger.info(f"[signed_url_for] ✅ Fuzzy match: '{document_name}' → '{matched_name}' (subgroup: '{matched_subgroup}')")
+            # Now get the signed URL for the matched document using the CORRECT subgroup from the candidate
             key = sb.rpc(
                 "get_property_document_storage_key",
                 {"p_id": property_id, "g": document_group, "sg": matched_subgroup, "n": matched_name}
             ).execute().data
             if key:
                 return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
-    
-    # PHASE 2: Keyword-based matching (for cases like "Contrato Santiuste" → "Contrato arquitecto")
-    # Extract significant keywords (filter out common words and file extensions)
-    stopwords = {"de", "del", "la", "el", "los", "las", "un", "una", "en", "con", "para", "por", "y", "+"}
-    
-    def extract_keywords(text):
-        # Remove file extension and normalize
-        text = text.lower().strip()
-        text = text.replace(".pdf", "").replace(".docx", "").replace(".xlsx", "")
-        # Split by spaces, slashes, and common separators
-        words = text.replace("/", " ").replace("-", " ").replace("_", " ").replace("+", " ").split()
-        # Filter stopwords and short words
-        return set(w for w in words if len(w) > 2 and w not in stopwords)
-    
-    request_keywords = extract_keywords(normalized_request)
-    best_match = None
-    best_score = 0
-    
-    for candidate in candidates:
-        candidate_name = candidate.get("document_name", "")
-        candidate_keywords = extract_keywords(candidate_name)
-        
-        # Calculate similarity: number of common keywords / total unique keywords
-        common = request_keywords & candidate_keywords
-        if common:
-            score = len(common) / max(len(request_keywords), len(candidate_keywords))
-            if score > best_score:
-                best_score = score
-                best_match = candidate
-    
-    # Lower threshold to 25% (was 40%) to catch cases like "Contrato Santiuste" → "Contrato arquitecto"
-    # where only 1 significant keyword matches (e.g., "contrato")
-    if best_match and best_score > 0.25:
-        matched_name = best_match.get("document_name")
-        matched_subgroup = best_match.get("document_subgroup") or ""
-        logger.info(f"[signed_url_for] ✅ Keyword match (score={best_score:.2f}): '{document_name}' → '{matched_name}'")
-        key = sb.rpc(
-            "get_property_document_storage_key",
-            {"p_id": property_id, "g": document_group, "sg": matched_subgroup, "n": matched_name}
-        ).execute().data
-        if key:
-            return sb.storage.from_(BUCKET).create_signed_url(key, expires)["signedURL"]
     
     # If no fuzzy match found, raise error
     candidate_names = [c.get("document_name") for c in candidates]
