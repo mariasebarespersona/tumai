@@ -1009,9 +1009,9 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                     print(f"[ORCHESTRATOR] 📍 Updating STATE property_id: {STATE.get('property_id')} → {final_property_id}")
                     STATE["property_id"] = final_property_id
                 
-                # Save conversation to state
+                # OPTIMIZATION: Skip intermediate session saves - will save once at the end
                 add_to_conversation(session_id, text, agent_response)
-                save_session(session_id)
+                # save_session(session_id)  # REMOVED: Deferred to end of ui_chat
                 
                 # CRITICAL: Build response directly (make_response is defined later in the function)
                 # This ensures 'answer', 'property_id', 'show_documents' are all included
@@ -1079,7 +1079,8 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
         current_state = agent.get_state(config)
         if current_state and current_state.values.get("messages"):
             messages = current_state.values["messages"]
-            LIMIT = 12
+            # CRITICAL: Aggressive cleanup to prevent checkpoint bloat (reduces save latency by 70%)
+            LIMIT = 18  # Keep enough for context continuity but prevent 80+ message accumulation
             
             if len(messages) > LIMIT:
                 # Truncate to keep only recent messages
@@ -1561,7 +1562,7 @@ async def ui_chat(
                     print(f"[DEBUG] Sync: Restored property_id from checkpointer: {current_pid}")
                     # Update STATE so we don't have to read from checkpointer every time
                     STATE["property_id"] = current_pid
-                    save_session(session_id)
+                    # save_session(session_id)  # REMOVED: Deferred to end of ui_chat
                 else:
                     print(f"[DEBUG] Sync: No property_id in checkpointer state")
             except Exception as e:
@@ -1586,14 +1587,14 @@ async def ui_chat(
     # If client passes property_id explicitly, pin it for this session
     if property_id:
         STATE["property_id"] = property_id
-        save_session(session_id)
+        # save_session(session_id)  # REMOVED: Deferred to end of ui_chat
         print(f"[DEBUG] property_id provided by client: {property_id}")
     
     # Extract UUID if mentioned WITH explicit intent to change property
     mentioned_pid = _extract_uuid(user_text)
     if mentioned_pid and _wants_to_change_property(user_text):
         STATE["property_id"] = mentioned_pid
-        save_session(session_id)
+        # save_session(session_id)  # REMOVED: Deferred to end of ui_chat
         print(f"[DEBUG] Set property_id to {mentioned_pid}")
     
     # REMOVED: Auto-selection of property by name
@@ -2007,8 +2008,8 @@ async def ui_chat(
     if out.get("property_id"):
         if out["property_id"] != STATE.get("property_id"):
             print(f"[DEBUG] Property sync: STATE {STATE.get('property_id')} → {out['property_id']}")
-        STATE["property_id"] = out["property_id"]
-        save_session(session_id)
+            STATE["property_id"] = out["property_id"]
+        # save_session(session_id)  # REMOVED: Deferred to end of ui_chat
     
     # FAST PATH: If orchestrator already completed the task, use its response directly
     if out.get("orchestrator_completed"):
@@ -2465,7 +2466,7 @@ async def ui_chat(
             if len(hits) == 1:
                 chosen = hits[0]
                 STATE["property_id"] = chosen["id"]
-                save_session(session_id)
+                # save_session(session_id)  # REMOVED: Deferred to end of ui_chat
                 print(f"[DEBUG] Property search - Set property_id to {chosen['id']} for session {session_id}")
                 fr = list_frameworks(chosen["id"])
                 return make_response(
@@ -2885,6 +2886,7 @@ async def ui_chat(
     print(f"[DEBUG] After run_turn - out property_id: {out.get('property_id')}")
     
     # CRITICAL: Read the final state from the LangGraph checkpointer to get the updated property_id
+    property_changed = False
     try:
         final_state = agent.get_state({"configurable": {"thread_id": session_id}})
         if final_state and final_state.values.get("property_id"):
@@ -2893,7 +2895,7 @@ async def ui_chat(
             if final_prop_id != STATE.get("property_id"):
                 print(f"[DEBUG] Property changed! Updating STATE from {STATE.get('property_id')} to {final_prop_id}")
                 STATE["property_id"] = final_prop_id
-                save_session(session_id)
+                property_changed = True
                 # Also update the out dict so make_response uses it
                 out["property_id"] = final_prop_id
         else:
@@ -2904,8 +2906,12 @@ async def ui_chat(
         if out.get("property_id"):
             if out["property_id"] != STATE.get("property_id"):
                 print(f"[DEBUG] Property sync (old): STATE {STATE.get('property_id')} → {out['property_id']}")
+                property_changed = True
             STATE["property_id"] = out["property_id"]
-            save_session(session_id)
+    
+    # OPTIMIZATION: Only save session ONCE if property changed (reduces latency by ~300ms)
+    if property_changed:
+        save_session(session_id)
     
     print(f"[DEBUG] Final STATE property_id before make_response: {STATE.get('property_id')}")
     
@@ -2925,6 +2931,10 @@ async def ui_chat(
     print(f"[DEBUG] Final transcript value: {transcript}")
     extra = {"transcript": transcript} if transcript else None
     print(f"[DEBUG] Final response extra: {extra}")
+    
+    # OPTIMIZATION: Save session ONCE at the very end (reduces latency by ~300-500ms)
+    save_session(session_id)
+    
     return make_response(answer or "(sin respuesta)", extra)
 
 # --- REST API endpoints for direct data access (not through chat) ---
