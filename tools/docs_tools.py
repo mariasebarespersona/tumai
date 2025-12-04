@@ -577,7 +577,8 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
         logger.info(f"[signed_url_for] DEBUG: Total documents in property: {len(all_rows)}")
         for r in all_rows:
             has_file = bool(r.get("storage_key") or r.get("file_storage_key"))
-            logger.info(f"[signed_url_for] DEBUG: doc='{r.get('document_name')}', group={r.get('document_group')}, subgroup='{r.get('document_subgroup')}', has_file={has_file}, storage_key={r.get('storage_key')}")
+            # Verbose debug logging disabled - causes log bloat with 60+ documents
+            # logger.debug(f"[signed_url_for] doc='{r.get('document_name')}', group={r.get('document_group')}, subgroup='{r.get('document_subgroup')}', has_file={has_file}")
         
         candidates = [
             r for r in all_rows
