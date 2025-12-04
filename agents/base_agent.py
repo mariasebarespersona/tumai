@@ -401,36 +401,9 @@ INSTRUCCIONES CRÍTICAS:
             
             # Track LLM call metrics
             try:
-                from tools.metrics_collector import record_llm_call
-                
-                # Extract token usage if available
-                prompt_tokens = 0
-                completion_tokens = 0
-                cost_usd = 0.0
-                
-                if hasattr(response, "response_metadata"):
-                    metadata = response.response_metadata
-                    if "token_usage" in metadata:
-                        usage = metadata["token_usage"]
-                        prompt_tokens = usage.get("prompt_tokens", 0)
-                        completion_tokens = usage.get("completion_tokens", 0)
-                        
-                        # Calculate cost based on model
-                        if "gpt-4o" in self.model:
-                            # GPT-4o pricing: $2.50 per 1M input tokens, $10.00 per 1M output tokens
-                            cost_usd = (prompt_tokens * 0.0000025) + (completion_tokens * 0.00001)
-                        elif "gpt-4o-mini" in self.model:
-                            # GPT-4o-mini pricing: $0.150 per 1M input tokens, $0.600 per 1M output tokens
-                            cost_usd = (prompt_tokens * 0.00000015) + (completion_tokens * 0.0000006)
-                
-                record_llm_call(
-                    model=self.model,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    cost_usd=cost_usd,
-                    latency_ms=llm_latency_ms,
-                    agent=self.name
-                )
+                # Logfire records metrics automatically via instrumentation
+                # Only need to capture explicit cost if needed, but Logfire does it too
+                pass
             except Exception as e:
                 logger.warning(f"[{self.name}] Failed to record LLM metrics: {e}")
             
