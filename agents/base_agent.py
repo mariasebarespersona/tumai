@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class BaseAgent:
     """Base class for all specialized agents."""
     
-    def __init__(self, name: str, model: str = "gpt-4o", temperature: float = 0.7):
+    def __init__(self, name: str, model: str = "gpt-4o-mini", temperature: float = 0.7):
         """Initialize the agent.
         
         Args:
