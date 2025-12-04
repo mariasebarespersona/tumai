@@ -1075,6 +1075,7 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
     # Cleanup: Truncate old checkpoint messages to prevent memory bloat
     # Keep only last 12 messages to avoid Rate Limits (GPT-4o 30k TPM) and ensure clean state
     try:
+        from langchain_core.messages import AIMessage as AI_Msg, ToolMessage as Tool_Msg
         config = {"configurable": {"thread_id": session_id}}
         current_state = agent.get_state(config)
         if current_state and current_state.values.get("messages"):
@@ -1092,21 +1093,21 @@ def run_turn(session_id: str, text: str = "", audio_wav_bytes: bytes | None = No
                 
                 # 1. Collect IDs of all ToolMessages in the kept window
                 for m in kept_msgs:
-                    if isinstance(m, ToolMessage):
+                    if isinstance(m, Tool_Msg):
                         tool_ids_present.add(m.tool_call_id)
                         
                 # 2. Filter AIMessages: only keep tool_calls that have a response
                 for m in kept_msgs:
-                    if isinstance(m, AIMessage) and m.tool_calls:
+                    if isinstance(m, AI_Msg) and m.tool_calls:
                         # Filter valid calls
                         valid_calls = [tc for tc in m.tool_calls if tc['id'] in tool_ids_present]
                         if valid_calls:
                             # Create new AIMessage with filtered tool_calls (compatible with all LangChain versions)
-                            new_m = AIMessage(content=m.content, tool_calls=valid_calls)
+                            new_m = AI_Msg(content=m.content, tool_calls=valid_calls)
                             final_msgs.append(new_m)
                         elif m.content:
                             # Keep message content but remove tool calls
-                            new_m = AIMessage(content=m.content)
+                            new_m = AI_Msg(content=m.content)
                             final_msgs.append(new_m)
                         # Else: Drop empty message
                     else:
