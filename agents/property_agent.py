@@ -24,7 +24,7 @@ class PropertyAgent(BaseAgent):
     """Agent specialized in property management operations."""
     
     def __init__(self):
-        super().__init__(name="PropertyAgent", model="gpt-4o", temperature=0.5)
+        super().__init__(name="PropertyAgent", model="gpt-4o-mini", temperature=0.5)
     
     def get_system_prompt(self, property_name: str = None) -> str:
         current_prop_info = ""

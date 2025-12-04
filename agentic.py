@@ -1245,13 +1245,13 @@ def assistant(state: AgentState) -> Dict[str, Any]:
     try:
         if messages and isinstance(messages[-1], ToolMessage):
             # Respuesta final (texto)
-            llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800)
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800)
             _llm_start = _time.time()
             ai = llm.invoke(msgs)
             _llm_latency = int((_time.time() - _llm_start) * 1000)
         else:
             # Planificación con tools
-            llm = ChatOpenAI(model="gpt-4o", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, max_retries=3, timeout=60, max_tokens=800).bind_tools(TOOLS)
             _llm_start = _time.time()
             ai = llm.invoke(msgs)
             _llm_latency = int((_time.time() - _llm_start) * 1000)
@@ -1271,7 +1271,7 @@ def assistant(state: AgentState) -> Dict[str, Any]:
                 _cost_usd = (_prompt_tokens * 0.0000025) + (_completion_tokens * 0.00001)
             
             record_llm_call(
-                model="gpt-4o",
+                model="gpt-4o-mini",
                 prompt_tokens=_prompt_tokens,
                 completion_tokens=_completion_tokens,
                 cost_usd=_cost_usd,

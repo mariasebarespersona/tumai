@@ -25,7 +25,7 @@ class NumbersAgent(BaseAgent):
     """Agent specialized in Numbers Table (R2B) operations."""
     
     def __init__(self):
-        super().__init__(name="NumbersAgent", model="gpt-4o", temperature=0.3)
+        super().__init__(name="NumbersAgent", model="gpt-4o-mini", temperature=0.3)
         self._waiting_for_template = False  # Track if we asked for template selection
     
     def is_out_of_scope(self, user_input: str) -> tuple[bool, str | None]:
