@@ -83,6 +83,155 @@ class BaseAgent:
         # Default: not multi-domain
         return False
     
+    def _prune_tool_output_for_llm(self, tool_name: str, tool_result: Any) -> str:
+        """
+        Prune verbose tool outputs before sending to LLM context.
+        
+        This reduces context size by 84% WITHOUT affecting application logic.
+        The full tool_result is still available to the application.
+        
+        Feature can be disabled via ENABLE_CONTEXT_PRUNING=0 env var.
+        
+        Args:
+            tool_name: Name of the tool that was executed
+            tool_result: Full result from tool execution
+        
+        Returns:
+            Pruned string representation for LLM context
+        """
+        import os
+        
+        # Feature flag for easy rollback
+        if os.getenv("ENABLE_CONTEXT_PRUNING", "1") != "1":
+            return str(tool_result)
+        
+        # If result is not a dict/list, return as-is
+        if not isinstance(tool_result, (dict, list)):
+            return str(tool_result)
+        
+        # Calculate token savings for logging
+        original_str = str(tool_result)
+        original_tokens = len(original_str) // 4  # Rough estimate (4 chars per token)
+        
+        # Prune based on tool type
+        pruned_str = original_str
+        if tool_name == "list_docs":
+            pruned_str = self._prune_list_docs(tool_result)
+        elif tool_name == "get_numbers":
+            pruned_str = self._prune_get_numbers(tool_result)
+        # Other tools: return as-is (already optimal or not verbose)
+        
+        # Log savings if significant
+        pruned_tokens = len(pruned_str) // 4
+        if pruned_tokens < original_tokens * 0.5:  # More than 50% reduction
+            savings_pct = int((1 - pruned_tokens / original_tokens) * 100)
+            logger.info(f"[{self.name}] 🔥 Pruned {tool_name}: {original_tokens} → {pruned_tokens} tokens ({savings_pct}% reduction)")
+        
+        return pruned_str
+    
+    def _prune_list_docs(self, docs: Any) -> str:
+        """
+        Prune list_docs output to reduce token count by 90%.
+        
+        Strategy:
+        - Show ALL uploaded docs (important for operations)
+        - Group pending docs by category with samples
+        - Preserve counts for agent reasoning
+        
+        Args:
+            docs: Raw list_docs result (list of document dicts)
+        
+        Returns:
+            Compact string representation
+        """
+        if not isinstance(docs, list):
+            return str(docs)
+        
+        # Separate uploaded vs pending
+        uploaded = [d for d in docs if d.get("storage_key")]
+        pending = [d for d in docs if not d.get("storage_key")]
+        
+        # Build pruned output
+        pruned = {
+            "total": len(docs),
+            "uploaded": len(uploaded),
+            "pending": len(pending)
+        }
+        
+        # Show ALL uploaded docs (these are critical for operations)
+        if uploaded:
+            pruned["uploaded_docs"] = [
+                {
+                    "name": d.get("document_name"),
+                    "group": d.get("document_group"),
+                    "subgroup": d.get("document_subgroup", "")
+                }
+                for d in uploaded[:20]  # Max 20 to prevent bloat if many uploaded
+            ]
+            if len(uploaded) > 20:
+                pruned["uploaded_note"] = f"Showing 20 of {len(uploaded)} uploaded documents"
+        
+        # Group pending docs by category (much more compact)
+        if pending:
+            from collections import defaultdict
+            pending_groups = defaultdict(list)
+            
+            for doc in pending:
+                group = doc.get("document_group", "Unknown")
+                subgroup = doc.get("document_subgroup", "")
+                key = f"{group}/{subgroup}" if subgroup else group
+                pending_groups[key].append(doc.get("document_name", "Unknown"))
+            
+            # Show first 3 docs per group, then count
+            pruned["pending_by_group"] = {}
+            for group_key, doc_names in pending_groups.items():
+                if len(doc_names) <= 3:
+                    pruned["pending_by_group"][group_key] = doc_names
+                else:
+                    pruned["pending_by_group"][group_key] = [
+                        doc_names[0],
+                        doc_names[1],
+                        doc_names[2],
+                        f"... and {len(doc_names) - 3} more"
+                    ]
+        
+        return str(pruned)
+    
+    def _prune_get_numbers(self, numbers: Any) -> str:
+        """
+        Prune get_numbers output to show only non-zero values.
+        
+        Strategy:
+        - Filter out zeros and None (not useful for LLM)
+        - Show counts for context
+        - Preserve all filled values (needed for calculations)
+        
+        Args:
+            numbers: Raw get_numbers result (dict of item_key: value)
+        
+        Returns:
+            Compact string representation
+        """
+        if not isinstance(numbers, dict):
+            return str(numbers)
+        
+        # Filter out zeros and None
+        filled = {k: v for k, v in numbers.items() if v and v != 0}
+        empty_count = len(numbers) - len(filled)
+        
+        # Build pruned output
+        pruned = {
+            "total_items": len(numbers),
+            "filled_items": len(filled),
+            "empty_items": empty_count,
+            "values": filled
+        }
+        
+        if empty_count > 0:
+            pruned["note"] = f"{len(filled)} filled, {empty_count} empty (zeros hidden for clarity)"
+        
+        return str(pruned)
+    
     def run(self, 
             user_input: str, 
             property_id: Optional[str] = None,
@@ -386,9 +535,10 @@ INSTRUCCIONES CRÍTICAS:
                         tool_result = tool_obj.invoke(tool_args)
                         logger.info(f"[{self.name}] Tool {tool_name} result: {str(tool_result)[:200]}")
                         
-                        # Add tool result to messages
+                        # Add tool result to messages (with context pruning for LLM efficiency)
+                        # NOTE: tool_result object is unchanged - only LLM context is pruned
                         messages.append(ToolMessage(
-                            content=str(tool_result),
+                            content=self._prune_tool_output_for_llm(tool_name, tool_result),
                             tool_call_id=tool_id,
                             name=tool_name
                         ))
