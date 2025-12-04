@@ -536,25 +536,9 @@ def list_docs(property_id: str) -> List[Dict]:
         sb.postgrest.schema = "public"
         result = sb.rpc("list_property_documents", {"p_id": property_id}).execute().data
         
-        # Optimization: Strip heavy fields if they exist to reduce LLM context usage
-        # Only return essential fields for the agent to identify documents
-        optimized_result = []
-        if result:
-            for r in result:
-                # Skip placeholders without files unless specifically needed? 
-                # For now keep all but strip unused fields
-                optimized_result.append({
-                    "group": r.get("document_group"),
-                    "subgroup": r.get("document_subgroup"),
-                    "name": r.get("document_name"),
-                    "has_file": bool(r.get("storage_key") or r.get("file_storage_key")),
-                    # Include ID only if strictly necessary for tools, usually names are enough
-                    "kind": r.get("document_kind"), 
-                    "due": r.get("due_date"),
-                    # Omit: id, storage_key, metadata, created_at, updated_at to save tokens
-                })
-        
-        return optimized_result
+        # Return full structure - optimization was breaking other parts of the code
+        # that expect document_group, document_subgroup, document_name keys
+        return result or []
     except Exception as rpc_error:
         logger.error(f"❌ RPC failed: {rpc_error}")
         return []
