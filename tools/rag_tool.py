@@ -135,7 +135,8 @@ def summarize_document(property_id: str, group: str, subgroup: str, name: str, m
                             best_score = score
                             best_match = doc
                 
-                if best_match and best_score > 0.4:
+                # Lower threshold to 25% (was 40%) to catch cases like "Contrato Santiuste" → "Contrato arquitecto"
+                if best_match and best_score > 0.25:
                     logger.info(f"✅ Keyword match (score={best_score:.2f}): '{name}' → '{best_match.get('document_name')}'")
                     matched_doc = best_match
             
@@ -244,7 +245,8 @@ def qa_document(property_id: str, group: str, subgroup: str, name: str, question
                             best_score = score
                             best_match = doc
                 
-                if best_match and best_score > 0.4:
+                # Lower threshold to 25% (was 40%) to catch cases like "Contrato Santiuste" → "Contrato arquitecto"
+                if best_match and best_score > 0.25:
                     logger.info(f"✅ Keyword match (score={best_score:.2f}): '{name}' → '{best_match.get('document_name')}'")
                     matched_doc = best_match
             

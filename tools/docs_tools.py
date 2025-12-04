@@ -633,8 +633,9 @@ def signed_url_for(property_id: str, document_group: str, document_subgroup: str
                 best_score = score
                 best_match = candidate
     
-    # Use best match if similarity is > 40% (at least 1-2 keywords in common)
-    if best_match and best_score > 0.4:
+    # Lower threshold to 25% (was 40%) to catch cases like "Contrato Santiuste" → "Contrato arquitecto"
+    # where only 1 significant keyword matches (e.g., "contrato")
+    if best_match and best_score > 0.25:
         matched_name = best_match.get("document_name")
         matched_subgroup = best_match.get("document_subgroup") or ""
         logger.info(f"[signed_url_for] ✅ Keyword match (score={best_score:.2f}): '{document_name}' → '{matched_name}'")
