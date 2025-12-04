@@ -28,7 +28,9 @@ class DocsAgent(BaseAgent):
     """Agent specialized in document management operations."""
     
     def __init__(self):
-        super().__init__(name="DocsAgent", model="gpt-4o", temperature=0.5)
+        # TEMPORARY: Using gpt-4o-mini to avoid rate limiting (30K TPM exceeded)
+        # Can revert to gpt-4o once OpenAI account is upgraded to higher tier
+        super().__init__(name="DocsAgent", model="gpt-4o-mini", temperature=0.5)
     
     # No override needed - BaseAgent.run() with ReAct loop handles everything
     def get_system_prompt(self, intent: str = None) -> str:
