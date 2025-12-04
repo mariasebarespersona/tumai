@@ -90,34 +90,65 @@ def summarize_document(property_id: str, group: str, subgroup: str, name: str, m
             # Find documents with storage_key (uploaded)
             uploaded_docs = [d for d in docs if d.get('storage_key')]
             
-            # Try case-insensitive match first
+            # PHASE 1: Exact and substring matching (fast)
             name_lower = name.lower()
+            matched_doc = None
+            
+            # Try exact match
             for doc in uploaded_docs:
                 doc_name = doc.get('document_name', '')
                 if doc_name.lower() == name_lower:
-                    logger.info(f"Found case-insensitive match: {doc_name}")
-                    group = doc.get('document_group', group)
-                    subgroup = doc.get('document_subgroup', subgroup)
-                    name = doc_name
-                    url = signed_url_for(property_id, group, subgroup, name, expires=600)
-                    resp = requests.get(url)
-                    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                    logger.info(f"✅ Exact match: {doc_name}")
+                    matched_doc = doc
                     break
-            else:
-                # Try partial match (contains)
+            
+            # Try substring match
+            if not matched_doc:
                 for doc in uploaded_docs:
                     doc_name = doc.get('document_name', '')
                     if name_lower in doc_name.lower() or doc_name.lower() in name_lower:
-                        logger.info(f"Found partial match: {doc_name}")
-                        group = doc.get('document_group', group)
-                        subgroup = doc.get('document_subgroup', subgroup)
-                        name = doc_name
-                        url = signed_url_for(property_id, group, subgroup, name, expires=600)
-                        resp = requests.get(url)
-                        text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                        logger.info(f"✅ Substring match: '{name}' → '{doc_name}'")
+                        matched_doc = doc
                         break
-                else:
-                    raise ValueError(f"No document found matching '{name}'")
+            
+            # PHASE 2: Keyword-based matching (smarter)
+            if not matched_doc:
+                stopwords = {"de", "del", "la", "el", "los", "las", "un", "una", "en", "con", "para", "por", "y", "+", "firmado"}
+                
+                def extract_keywords(text):
+                    text = text.lower().strip()
+                    text = text.replace(".pdf", "").replace(".docx", "").replace(".xlsx", "")
+                    words = text.replace("/", " ").replace("-", " ").replace("_", " ").replace("+", " ").split()
+                    return set(w for w in words if len(w) > 2 and w not in stopwords)
+                
+                request_keywords = extract_keywords(name_lower)
+                best_match = None
+                best_score = 0
+                
+                for doc in uploaded_docs:
+                    doc_name = doc.get('document_name', '')
+                    doc_keywords = extract_keywords(doc_name)
+                    common = request_keywords & doc_keywords
+                    if common:
+                        score = len(common) / max(len(request_keywords), len(doc_keywords))
+                        if score > best_score:
+                            best_score = score
+                            best_match = doc
+                
+                if best_match and best_score > 0.4:
+                    logger.info(f"✅ Keyword match (score={best_score:.2f}): '{name}' → '{best_match.get('document_name')}'")
+                    matched_doc = best_match
+            
+            # Use matched document
+            if matched_doc:
+                group = matched_doc.get('document_group', group)
+                subgroup = matched_doc.get('document_subgroup', subgroup)
+                name = matched_doc.get('document_name')
+                url = signed_url_for(property_id, group, subgroup, name, expires=600)
+                resp = requests.get(url)
+                text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+            else:
+                raise ValueError(f"No document found matching '{name}'")
         except Exception as fuzzy_error:
             logger.error(f"Fuzzy match also failed: {fuzzy_error}")
             return {
@@ -168,34 +199,65 @@ def qa_document(property_id: str, group: str, subgroup: str, name: str, question
             docs = list_docs(property_id)
             uploaded_docs = [d for d in docs if d.get('storage_key')]
             
-            # Try case-insensitive match first
+            # PHASE 1: Exact and substring matching (fast)
             name_lower = name.lower()
+            matched_doc = None
+            
+            # Try exact match
             for doc in uploaded_docs:
                 doc_name = doc.get('document_name', '')
                 if doc_name.lower() == name_lower:
-                    logger.info(f"Found case-insensitive match: {doc_name}")
-                    group = doc.get('document_group', group)
-                    subgroup = doc.get('document_subgroup', subgroup)
-                    name = doc_name
-                    url = signed_url_for(property_id, group, subgroup, name, expires=600)
-                    resp = requests.get(url)
-                    text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                    logger.info(f"✅ Exact match: {doc_name}")
+                    matched_doc = doc
                     break
-            else:
-                # Try partial match (contains)
+            
+            # Try substring match
+            if not matched_doc:
                 for doc in uploaded_docs:
                     doc_name = doc.get('document_name', '')
                     if name_lower in doc_name.lower() or doc_name.lower() in name_lower:
-                        logger.info(f"Found partial match: {doc_name}")
-                        group = doc.get('document_group', group)
-                        subgroup = doc.get('document_subgroup', subgroup)
-                        name = doc_name
-                        url = signed_url_for(property_id, group, subgroup, name, expires=600)
-                        resp = requests.get(url)
-                        text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+                        logger.info(f"✅ Substring match: '{name}' → '{doc_name}'")
+                        matched_doc = doc
                         break
-                else:
-                    raise ValueError(f"No document found matching '{name}'")
+            
+            # PHASE 2: Keyword-based matching (smarter)
+            if not matched_doc:
+                stopwords = {"de", "del", "la", "el", "los", "las", "un", "una", "en", "con", "para", "por", "y", "+", "firmado"}
+                
+                def extract_keywords(text):
+                    text = text.lower().strip()
+                    text = text.replace(".pdf", "").replace(".docx", "").replace(".xlsx", "")
+                    words = text.replace("/", " ").replace("-", " ").replace("_", " ").replace("+", " ").split()
+                    return set(w for w in words if len(w) > 2 and w not in stopwords)
+                
+                request_keywords = extract_keywords(name_lower)
+                best_match = None
+                best_score = 0
+                
+                for doc in uploaded_docs:
+                    doc_name = doc.get('document_name', '')
+                    doc_keywords = extract_keywords(doc_name)
+                    common = request_keywords & doc_keywords
+                    if common:
+                        score = len(common) / max(len(request_keywords), len(doc_keywords))
+                        if score > best_score:
+                            best_score = score
+                            best_match = doc
+                
+                if best_match and best_score > 0.4:
+                    logger.info(f"✅ Keyword match (score={best_score:.2f}): '{name}' → '{best_match.get('document_name')}'")
+                    matched_doc = best_match
+            
+            # Use matched document
+            if matched_doc:
+                group = matched_doc.get('document_group', group)
+                subgroup = matched_doc.get('document_subgroup', subgroup)
+                name = matched_doc.get('document_name')
+                url = signed_url_for(property_id, group, subgroup, name, expires=600)
+                resp = requests.get(url)
+                text = _extract_text(resp.content, resp.headers.get("content-type", ""), url)
+            else:
+                raise ValueError(f"No document found matching '{name}'")
         except Exception as fuzzy_error:
             logger.error(f"Fuzzy match also failed: {fuzzy_error}")
             return {
