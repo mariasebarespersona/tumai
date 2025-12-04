@@ -1,16 +1,11 @@
 from __future__ import annotations
-import io, requests, zipfile, datetime as dt, re, time
+import io, requests, zipfile, datetime as dt, re
 from typing import Dict, Optional, Any
 from urllib.parse import urlparse
 from os.path import splitext
 from xml.etree import ElementTree as ET
 from .docs_tools import signed_url_for
 from langchain_openai import ChatOpenAI
-
-# Cache for PDF summaries (reduces latency by 3-5s per repeated request)
-_summary_cache = {}
-_summary_cache_ttl = {}
-SUMMARY_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 try:
     from pypdf import PdfReader
@@ -81,14 +76,6 @@ def summarize_document(property_id: str, group: str, subgroup: str, name: str, m
     import logging
     logger = logging.getLogger(__name__)
     
-    # OPTIMIZATION: Check cache first (avoids 3-5s OpenAI call for repeated requests)
-    cache_key = f"{property_id}:{group}:{subgroup}:{name}:{max_sentences}"
-    now = time.time()
-    if cache_key in _summary_cache:
-        if now - _summary_cache_ttl.get(cache_key, 0) < SUMMARY_CACHE_TTL_SECONDS:
-            logger.info(f"[CACHE HIT] Returning cached summary for '{name}'")
-            return _summary_cache[cache_key]
-    
     # Try the exact name first
     try:
         url = signed_url_for(property_id, group, subgroup, name, expires=600)
@@ -154,14 +141,7 @@ def summarize_document(property_id: str, group: str, subgroup: str, name: str, m
         f"Contenido:\n{text}"
     )
     summary = llm.invoke(prompt).content
-    result = {"summary": summary, "signed_url": url}
-    
-    # Cache the result
-    _summary_cache[cache_key] = result
-    _summary_cache_ttl[cache_key] = now
-    logger.info(f"[CACHE SAVE] Cached summary for '{name}' (TTL: {SUMMARY_CACHE_TTL_SECONDS}s)")
-    
-    return result
+    return {"summary": summary, "signed_url": url}
 
 
 def qa_document(property_id: str, group: str, subgroup: str, name: str, question: str, model: Optional[str] = None, max_chars: int = 60000) -> Dict:
