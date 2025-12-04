@@ -35,17 +35,13 @@ class BaseAgent:
         self.temperature = temperature
         
         # Enable OpenAI Prompt Caching (reduces latency by 20-30% for repeated system prompts)
-        # Caches the first 1024+ tokens automatically when using consistent system prompts
-        model_kwargs = {
-            "seed": 42,  # Consistent seed helps with caching
-        }
-        
+        # Using consistent seed helps maximize cache hits
         self.llm = ChatOpenAI(
             model=model, 
             temperature=temperature,
-            model_kwargs=model_kwargs
+            seed=42  # Consistent seed for prompt caching
         )
-        logger.info(f"[{self.name}] Initialized with model={model}, temp={temperature}, prompt_caching=enabled")
+        logger.info(f"[{self.name}] Initialized with model={model}, temp={temperature}, seed=42")
     
     def get_system_prompt(self) -> str:
         """Get the system prompt for this agent.
