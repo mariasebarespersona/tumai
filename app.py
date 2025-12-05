@@ -1873,9 +1873,6 @@ async def ui_chat(
     pid = STATE.get("property_id")
     qnorm = _soft_normalize(user_text)
     
-    # Check if user explicitly mentions a document in the query
-    doc_ref = _match_document_from_text(pid, user_text, STATE) if pid else None
-    
     # Document-specific keywords that indicate content questions
     doc_content_keywords = [
         "contrato", "factura", "escritura", "certificado", "documento",
@@ -1886,7 +1883,22 @@ async def ui_chat(
     doc_content_keywords += [
         "arquitecto", "ingeniero", "contratista", "pago", "pagar", "fecha", "venc", "vencer", "vencimiento"
     ]
+    # Add references to "this/that document"
+    doc_ref_keywords = ["este", "ese", "aquel", "ultimo", "último", "subi", "subí"]
+    
     has_doc_keyword = any(word in qnorm for word in doc_content_keywords)
+    has_doc_ref_keyword = any(word in qnorm for word in doc_ref_keywords)
+    
+    # OPTIMIZATION: Only attempt expensive document matching if there are document keywords
+    # or "this/that" references. This saves ~1-2s latency on non-document queries.
+    doc_ref = None
+    if pid and (has_doc_keyword or has_doc_ref_keyword):
+        print(f"[DEBUG] Attempting document match (keywords found)")
+        doc_ref = _match_document_from_text(pid, user_text, STATE)
+    else:
+        # Skip document matching for irrelevant queries (e.g., numbers, property switch)
+        # print(f"[DEBUG] Skipping document match (no doc keywords)")
+        pass
     
     # Content question verbs (asking ABOUT document content)
     content_verbs = [
