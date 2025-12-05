@@ -257,8 +257,140 @@ Tú: "✅ He borrado el valor de la celda B7."
                 "waiting_for_template": True
             }
         
-        # Default: use parent's run method
-        return super().run(user_input, property_id, context)
+        # OPTIMIZATION: Custom ReAct loop with "Tool as Response" (Early Exit)
+        # This avoids the 2nd LLM call (~4s latency savings) for deterministic actions
+        try:
+            # 1. Build System Prompt & Messages
+            property_name = ctx.get("property_name") if ctx else None
+            numbers_template = ctx.get("numbers_template") if ctx else None
+            
+            system_prompt = self.get_system_prompt(property_name=property_name, numbers_template=numbers_template)
+            
+            from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
+            messages = [SystemMessage(content=system_prompt)]
+            
+            if property_id:
+                messages.append(SystemMessage(content=f"IMPORTANTE: El property_id actual es: {property_id}"))
+            
+            # Add context summary if needed (simplified version of BaseAgent logic)
+            if ctx and ctx.get("history"):
+                MAX_HISTORY = 12
+                history = ctx["history"]
+                if len(history) > MAX_HISTORY:
+                    messages.extend(history[-MAX_HISTORY:])
+                else:
+                    messages.extend(history)
+            
+            messages.append(HumanMessage(content=user_input))
+            
+            # 2. Bind tools
+            tools = self.get_tools()
+            llm_with_tools = self.llm.bind_tools(tools)
+            
+            # 3. First LLM Call (Intent & Tool Selection)
+            import time
+            start_time = time.time()
+            response = llm_with_tools.invoke(messages)
+            
+            tool_calls = getattr(response, "tool_calls", [])
+            
+            # 4. Tool Execution with Early Exit
+            if tool_calls:
+                # We only handle the first tool call for early exit optimization
+                # (NumbersAgent usually does one thing at a time)
+                tool_call = tool_calls[0]
+                tool_name = tool_call.get("name")
+                tool_args = tool_call.get("args", {})
+                
+                # Execute tool
+                tool_obj = next((t for t in tools if t.name == tool_name), None)
+                if not tool_obj:
+                    raise ValueError(f"Tool '{tool_name}' not found")
+                
+                logger.info(f"[NumbersAgent] 🚀 Executing {tool_name} with optimization")
+                tool_result = tool_obj.invoke(tool_args)
+                
+                # --- OPTIMIZATION: EARLY EXIT FOR CELL UPDATES ---
+                if tool_name == "set_numbers_table_cell":
+                    # Result contains: {ok, cell_address, value, auto_calculated: {...}}
+                    res_dict = tool_result if isinstance(tool_result, dict) else {}
+                    
+                    addr = res_dict.get("cell_address", "?")
+                    val = res_dict.get("value", "?")
+                    calc = res_dict.get("auto_calculated", {})
+                    
+                    # Build deterministic response
+                    response_text = f"✅ He actualizado {addr} a **{val}**."
+                    if calc:
+                        response_text += " Calculando automáticamente:\n"
+                        for k, v in calc.items():
+                            # Format value nicely (remove .0 if integer)
+                            v_fmt = f"{int(v)}" if isinstance(v, float) and v.is_integer() else f"{v}"
+                            response_text += f"- {k} = **{v_fmt}**\n"
+                    
+                    response_text += "\nSi necesitas más cambios, dímelo."
+                    
+                    logger.info(f"[NumbersAgent] ⚡ Early exit triggered! Saved ~4s latency.")
+                    
+                    return {
+                        "action": "complete",
+                        "agent": self.name,
+                        "response": response_text,
+                        "tool_calls": [tool_call], # Include for logging
+                        "latency_ms": int((time.time() - start_time) * 1000),
+                        "success": True
+                    }
+                
+                # --- OPTIMIZATION: EARLY EXIT FOR EMAIL SENDING ---
+                elif tool_name == "send_numbers_table_email":
+                    email = tool_args.get("email_to", "el correo indicado")
+                    response_text = f"✅ He enviado la tabla de números por email a {email}."
+                    
+                    return {
+                        "action": "complete",
+                        "agent": self.name,
+                        "response": response_text,
+                        "tool_calls": [tool_call],
+                        "latency_ms": int((time.time() - start_time) * 1000),
+                        "success": True
+                    }
+                
+                # For other tools (or fallbacks), continue with standard behavior
+                # But since we're in a custom loop, we just return the tool result as response
+                # or let the BaseAgent handle it (but we already consumed the tool call)
+                
+                # If we get here, it's a tool we didn't optimize.
+                # Let's fall back to standard behavior by calling super().run()
+                # This is slightly inefficient (double LLM call if we restart), but safe.
+                # OR we can just finish the loop here.
+                
+                messages.append(AIMessage(content=response.content or "", tool_calls=tool_calls))
+                messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_call["id"], name=tool_name))
+                
+                # Second LLM call (Generate final response)
+                final_response = llm_with_tools.invoke(messages)
+                
+                return {
+                    "action": "complete",
+                    "agent": self.name,
+                    "response": final_response.content,
+                    "tool_calls": tool_calls,
+                    "latency_ms": int((time.time() - start_time) * 1000),
+                    "success": True
+                }
+
+            # No tool calls? Just return LLM response
+            return {
+                "action": "complete",
+                "agent": self.name,
+                "response": response.content,
+                "latency_ms": int((time.time() - start_time) * 1000),
+                "success": True
+            }
+            
+        except Exception as e:
+            logger.error(f"[NumbersAgent] ❌ Optimization loop failed: {e}. Falling back to standard run.")
+            return super().run(user_input, property_id, context)
     
     def get_tools(self) -> List:
         """Return numbers-specific tools."""
